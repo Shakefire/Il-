@@ -55,10 +55,10 @@ if (fs.existsSync(targetRequire)) {
     modified = true;
   }
 
-  if (!content.includes('const cleanPage = page.replace(/^\\/+/, "");')) {
+  if (!content.includes('_path.default.join(serverBuildPath, "pages"')) {
     content = content.replace(
-      'if (!pagePath) {\n        pagePathCache == null ? void 0 : pagePathCache.set(cacheKey, null);\n        return null;\n    }',
-      'if (!pagePath) {\n        const cleanPage = page.replace(/^\\/+/, "");\n        const candidates = [\n            _path.default.join(serverBuildPath, "app", `${cleanPage}.js`),\n            _path.default.join(serverBuildPath, "app", `${cleanPage}`, "page.js"),\n            _path.default.join(serverBuildPath, "app", cleanPage === "" ? "page.js" : `${cleanPage}/page.js`)\n        ];\n        for (const candidate of candidates) {\n            if (_fs.existsSync(candidate)) {\n                pagePath = _path.default.relative(serverBuildPath, candidate).replace(/\\\\/g, "/");\n                break;\n            }\n        }\n    }\n    if (!pagePath) {\n        pagePathCache == null ? void 0 : pagePathCache.set(cacheKey, null);\n        return null;\n    }'
+      '_path.default.join(serverBuildPath, "app", cleanPage === "" ? "page.js" : `${cleanPage}/page.js`)\n        ];',
+      '_path.default.join(serverBuildPath, "app", cleanPage === "" ? "page.js" : `${cleanPage}/page.js`),\n            _path.default.join(serverBuildPath, "pages", `${cleanPage}.js`),\n            _path.default.join(serverBuildPath, `${cleanPage}.js`)\n        ];'
     );
     modified = true;
   }

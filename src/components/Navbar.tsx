@@ -51,7 +51,7 @@ export default function Navbar() {
           >
             <span>Home</span>
             {isHomeActive && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45]" />
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
             )}
           </Link>
 
@@ -63,7 +63,7 @@ export default function Navbar() {
           >
             <span>Search</span>
             {isSearchActive && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45]" />
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
             )}
           </Link>
 
@@ -75,7 +75,7 @@ export default function Navbar() {
           >
             <span>About Us</span>
             {isAboutActive && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45]" />
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
             )}
           </Link>
 
@@ -88,7 +88,7 @@ export default function Navbar() {
             <span>Messages</span>
             <span className="w-2 h-2 rounded-full bg-[#0B5D45]" />
             {isMessagesActive && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45]" />
+              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
             )}
           </Link>
         </nav>

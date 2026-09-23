@@ -12,10 +12,12 @@ function SearchContent() {
   const searchParams = useSearchParams();
   const initialDestination = searchParams.get("destination") || "";
   const initialGuests = Number(searchParams.get("guests")) || 1;
+  const initialType = searchParams.get("type") || "All Types";
 
   const [selectedCity, setSelectedCity] = useState<string>(
     initialDestination === "Lagos" ? "Lagos" : initialDestination === "Abuja" ? "Abuja" : "All Nigeria"
   );
+  const [selectedType, setSelectedType] = useState<string>(initialType);
   const [selectedBedrooms, setSelectedBedrooms] = useState<number | "any">("any");
   const [solarOnly, setSolarOnly] = useState<boolean>(false);
   const [maxPrice, setMaxPrice] = useState<number>(200000);
@@ -28,6 +30,15 @@ function SearchContent() {
       // City filter
       if (selectedCity && selectedCity !== "All Nigeria") {
         if (property.city.toLowerCase() !== selectedCity.toLowerCase()) {
+          return false;
+        }
+      }
+
+      // Property type filter
+      if (selectedType && selectedType !== "All Types" && selectedType !== "all") {
+        const normSelected = selectedType.toLowerCase();
+        const propType = property.propertyType.toLowerCase();
+        if (!propType.includes(normSelected) && !normSelected.includes(propType)) {
           return false;
         }
       }
@@ -58,10 +69,11 @@ function SearchContent() {
 
       return true;
     });
-  }, [selectedCity, initialGuests, selectedBedrooms, solarOnly, maxPrice]);
+  }, [selectedCity, selectedType, initialGuests, selectedBedrooms, solarOnly, maxPrice]);
 
   const clearFilters = () => {
     setSelectedCity("All Nigeria");
+    setSelectedType("All Types");
     setSelectedBedrooms("any");
     setSolarOnly(false);
     setMaxPrice(200000);
@@ -74,6 +86,8 @@ function SearchContent() {
         <div className="max-w-7xl mx-auto">
           <SearchBar
             initialDestination={selectedCity !== "All Nigeria" ? selectedCity : "Abuja"}
+            initialPropertyType={selectedType}
+            initialGuests={initialGuests}
             compact
           />
         </div>
@@ -102,6 +116,25 @@ function SearchContent() {
 
           {/* Quick Filters */}
           <div className="flex flex-wrap items-center gap-3">
+            {/* Apartment Type */}
+            <div className="flex items-center gap-1.5 bg-white border border-[#E7E5E0] px-3 py-1.5 rounded-full text-[13px] text-[#6B6B67]">
+              <span>Type:</span>
+              {(["All Types", "Serviced Apartment", "Private Residence", "Penthouse", "Garden Villa"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setSelectedType(t)}
+                  className={`px-2.5 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                    selectedType === t
+                      ? "bg-[#171717] text-white"
+                      : "text-[#6B6B67] hover:text-[#171717]"
+                  }`}
+                >
+                  {t === "All Types" ? "All" : t.replace("Serviced ", "").replace("Private ", "").replace("Garden ", "")}
+                </button>
+              ))}
+            </div>
+
             {/* Bedrooms */}
             <div className="flex items-center gap-1.5 bg-white border border-[#E7E5E0] px-3 py-1.5 rounded-full text-[13px] text-[#6B6B67]">
               <span>Bedrooms:</span>
@@ -137,6 +170,7 @@ function SearchContent() {
 
             {/* Clear filters button */}
             {(selectedCity !== "All Nigeria" ||
+              selectedType !== "All Types" ||
               selectedBedrooms !== "any" ||
               solarOnly ||
               maxPrice < 200000) && (
