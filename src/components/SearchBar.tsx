@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search, MapPin, Calendar, CalendarCheck, Users, ChevronDown,
-  Check, ChevronLeft, ChevronRight,
+  Check, ChevronLeft, ChevronRight, Loader2,
 } from "lucide-react";
 
 /* ─── House Type Iconography System (20x20, 1.5px stroke, rounded) ──────── */
@@ -172,6 +172,48 @@ export default function SearchBar({
   const [checkOut, setCheckOut] = useState(initialCheckOut);
   const [guests, setGuests] = useState(initialGuests);
 
+  const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationSuggestions, setLocationSuggestions] = useState<any[]>([]);
+  const [isSearchingLocation, setIsSearchingLocation] = useState(false);
+  const locationDebounceTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const handleDestinationInput = (val: string) => {
+    setDestination(val);
+    setSelectedCoords(null);
+
+    if (locationDebounceTimer.current) clearTimeout(locationDebounceTimer.current);
+
+    if (val.trim().length >= 2) {
+      setIsSearchingLocation(true);
+      locationDebounceTimer.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/locations/search?q=${encodeURIComponent(val.trim())}`);
+          const data = await res.json();
+          if (data.success && Array.isArray(data.data)) {
+            setLocationSuggestions(data.data);
+          } else {
+            setLocationSuggestions([]);
+          }
+        } catch {
+          setLocationSuggestions([]);
+        } finally {
+          setIsSearchingLocation(false);
+        }
+      }, 350);
+    } else {
+      setLocationSuggestions([]);
+      setIsSearchingLocation(false);
+    }
+  };
+
+  const selectRealLocation = (loc: any) => {
+    const name = loc.name || loc.neighborhood || loc.city || loc.displayName;
+    setDestination(name);
+    setSelectedCoords({ lat: loc.latitude, lng: loc.longitude });
+    setLocationSuggestions([]);
+    setActiveDropdown("propertyType");
+  };
+
   const [activeDropdown, setActiveDropdown] = useState<
     "destination" | "propertyType" | "dates" | "guests" | null
   >(null);
@@ -297,7 +339,14 @@ export default function SearchBar({
   const handleSearch = () => {
     setActiveDropdown(null);
     const params = new URLSearchParams();
-    if (destination && destination !== "All Nigeria") params.set("destination", destination);
+    if (destination && destination !== "All Nigeria") {
+      params.set("destination", destination);
+      params.set("location", destination);
+      if (selectedCoords) {
+        params.set("lat", selectedCoords.lat.toString());
+        params.set("lng", selectedCoords.lng.toString());
+      }
+    }
     if (propertyType && propertyType !== "All Types") params.set("type", propertyType);
     if (checkIn) params.set("checkIn", checkIn);
     if (checkOut) params.set("checkOut", checkOut);
@@ -393,9 +442,89 @@ export default function SearchBar({
 
             {/* Destination Popover — aligned width to parent field */}
             {activeDropdown === "destination" && (
-              <div className={`${popoverBase} w-full min-w-[280px] sm:w-[320px] p-3`}>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[#8B8B86] px-3 pt-1 pb-2.5">
-                  Suggested Destinations
+              <div className={`${popoverBase} w-full min-w-[300px] sm:w-[350px] p-3 text-[#171717]`}>
+                {/* Freeform Search Input with Real Geocoding */}
+                <div className="mb-3 px-1">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={destination === "All Nigeria" ? "" : destination}
+                      onChange={(e) => handleDestinationInput(e.target.value)}
+                      placeholder="Type district, hotel or landmark..."
+                      className="w-full pl-8 pr-8 py-2 text-[14px] bg-[#F7F6F3] border border-[#E7E5E0] rounded-xl focus:outline-none focus:border-[#0B5D45] text-[#171717] placeholder:text-[#9B9B97]"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          setActiveDropdown("propertyType");
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <Search size={14} className="absolute left-2.5 top-3 text-[#8B8B86]" />
+                    {isSearchingLocation && (
+                      <Loader2 size={14} className="absolute right-2.5 top-3 text-[#0B5D45] animate-spin" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Real Geocoded Suggestions Dropdown */}
+                {locationSuggestions.length > 0 && (
+                  <div className="mb-3 px-1">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#0B5D45] mb-1.5 flex items-center gap-1">
+                      <span>Matching Locations</span>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto divide-y divide-[#F2F0EB] bg-[#FAF9F6] rounded-xl border border-[#E7E5E0] p-1">
+                      {locationSuggestions.map((loc, idx) => (
+                        <button
+                          key={`${loc.latitude}-${loc.longitude}-${idx}`}
+                          type="button"
+                          onClick={() => selectRealLocation(loc)}
+                          className="w-full text-left p-2 hover:bg-white rounded-lg transition-colors flex items-start gap-2.5 group"
+                        >
+                          <div className="mt-0.5 w-5 h-5 rounded bg-[#EDF3F0] text-[#0B5D45] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                            <MapPin size={12} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-semibold text-[#171717] truncate group-hover:text-[#0B5D45] transition-colors">
+                              {loc.name || loc.neighborhood || loc.city}
+                            </p>
+                            <p className="text-[11px] text-[#6B6B67] truncate">
+                              {loc.displayName}
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Popular Nigerian Areas Quick Chips */}
+                <div className="px-1 mb-2.5">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-[#8B8B86] mb-1.5">
+                    Popular Areas &amp; Landmarks
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {["Maitama", "Wuse 2", "Jabi Lake", "Nicon Luxury", "Ikoyi", "Victoria Island"].map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => {
+                          setDestination(chip);
+                          setActiveDropdown("propertyType");
+                        }}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                          destination === chip
+                            ? "bg-[#0B5D45] text-white border-[#0B5D45]"
+                            : "bg-[#F7F6F3] text-[#4A4A45] border-[#E7E5E0] hover:border-[#171717]"
+                        }`}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="text-[11px] font-bold uppercase tracking-wider text-[#8B8B86] px-2 pt-1 pb-1.5 border-t border-[#E7E5E0]">
+                  Suggested Regions
                 </div>
                 <div className="space-y-1">
                   {destinationsList.map((item) => {
@@ -408,31 +537,31 @@ export default function SearchBar({
                           setDestination(item.label);
                           setActiveDropdown("propertyType");
                         }}
-                        className={`w-full text-left px-3.5 py-2.5 rounded-xl flex items-center gap-3 transition-colors ${
+                        className={`w-full text-left px-3 py-2 rounded-xl flex items-center gap-3 transition-colors ${
                           isSelected
                             ? "bg-[#0B5D45]/10 text-[#0B5D45]"
                             : "hover:bg-[#F7F6F3] text-[#171717]"
                         }`}
                       >
                         <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                          className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-colors ${
                             isSelected
                               ? "bg-[#0B5D45]/15 text-[#0B5D45]"
                               : "bg-[#F0EFEB] text-[#6B6B67]"
                           }`}
                         >
-                          <MapPin size={15} />
+                          <MapPin size={14} />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div
-                            className={`font-semibold text-[14.5px] ${
+                            className={`font-semibold text-[13.5px] ${
                               isSelected ? "text-[#0B5D45]" : "text-[#171717]"
                             }`}
                           >
                             {item.label}
                           </div>
                           <div
-                            className={`text-[12px] truncate mt-0.5 ${
+                            className={`text-[11px] truncate ${
                               isSelected ? "text-[#0B5D45]/80" : "text-[#6B6B67]"
                             }`}
                           >
@@ -440,7 +569,7 @@ export default function SearchBar({
                           </div>
                         </div>
                         {isSelected && (
-                          <Check size={16} className="text-[#0B5D45] shrink-0 ml-auto" />
+                          <Check size={15} className="text-[#0B5D45] shrink-0 ml-auto" />
                         )}
                       </button>
                     );

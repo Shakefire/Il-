@@ -29,7 +29,7 @@ export default function HostCTA() {
               </p>
               <div className="pt-2">
                 <Link
-                  href="/host"
+                  href="/become-a-host"
                   className="inline-flex items-center gap-2 bg-white text-[#171717] px-6 py-3.5 rounded-xl font-medium text-[15px] hover:bg-[#FAFAF8] transition-colors"
                 >
                   <span>Become a host</span>

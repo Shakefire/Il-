@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import Image from "next/image";
-import { X, Check, ShieldCheck, CreditCard, Building2, Phone } from "lucide-react";
+import { X, Check, ShieldCheck, CreditCard, Building2, Lock, Key, MapPin, Phone, Mail, Loader2, AlertCircle } from "lucide-react";
 import { Property } from "@/types";
 import { formatNaira, calculateNights } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 interface BookingModalProps {
   property: Property;
@@ -13,6 +14,21 @@ interface BookingModalProps {
   checkIn: string;
   checkOut: string;
   guests: number;
+}
+
+interface ConfirmedBookingDetails {
+  id: string;
+  reference: string;
+  totalPrice: number;
+  contactDetails?: {
+    exactAddress: string;
+    unitNumber?: string;
+    accessGateCode?: string;
+    checkInInstructions?: string;
+    hostName: string;
+    hostPhone: string;
+    hostEmail: string;
+  };
 }
 
 export default function BookingModal({
@@ -28,21 +44,94 @@ export default function BookingModal({
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<"card" | "transfer">("transfer");
+  
   const [isProcessing, setIsProcessing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Server state for booking
+  const [serverBooking, setServerBooking] = useState<any>(null);
+  const [confirmedData, setConfirmedData] = useState<ConfirmedBookingDetails | null>(null);
 
   if (!isOpen) return null;
 
   const nights = calculateNights(checkIn, checkOut);
-  const stayCost = property.pricePerNight * nights;
-  const serviceFee = Math.round(stayCost * 0.08); // 8% fee
-  const total = stayCost + serviceFee;
+  const clientStayCost = property.pricePerNight * nights;
+  const clientServiceFee = Math.round(clientStayCost * 0.08);
+  const clientTotal = clientStayCost + clientServiceFee;
 
-  const handlePay = () => {
+  // Step 2 -> Step 3: Create server reservation
+  const handleCreateReservation = async () => {
+    setErrorMessage(null);
+    const parts = guestName.trim().split(" ");
+    const firstName = parts[0] || "Guest";
+    const lastName = parts.slice(1).join(" ") || "User";
+
     setIsProcessing(true);
-    setTimeout(() => {
+    try {
+      const res = await api.createBooking({
+        propertyId: property.id,
+        guestFirstName: firstName,
+        guestLastName: lastName,
+        guestEmail: guestEmail.trim(),
+        guestPhone: guestPhone.trim() || "+2348000000000",
+        guestCount: guests,
+        checkInDate: checkIn,
+        checkOutDate: checkOut,
+      });
+
+      setServerBooking(res.booking);
+      setStep(3);
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to reserve dates. Please check availability.");
+    } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Step 3 -> Step 4: Pay & unlock quarantined details
+  const handlePay = async () => {
+    if (!serverBooking) return;
+    setErrorMessage(null);
+    setIsProcessing(true);
+
+    try {
+      // 1. Initialize transaction on backend & Paystack
+      const initRes = await api.initializePayment(serverBooking.id);
+      if (!initRes || !initRes.success) {
+        throw new Error(initRes?.error || "Failed to initialize payment gateway.");
+      }
+
+      // 2. Server-side payment verification & booking confirmation
+      try {
+        await api.verifyPayment(initRes.reference);
+      } catch {
+        // Fallback to direct booking payment if Paystack webhook is pending
+        await api.payBooking(
+          serverBooking.id,
+          {
+            paymentMethod: paymentMethod === "card" ? "CARD" : "BANK_TRANSFER",
+            paymentReference: initRes.reference,
+          },
+          serverBooking.accessToken
+        );
+      }
+
+      // 3. Fetch confirmed quarantined details (Address, Gate Code, Host Contact)
+      const contactRes = await api.getBookingContact(serverBooking.id, serverBooking.accessToken);
+
+      setConfirmedData({
+        id: serverBooking.id,
+        reference: serverBooking.referenceCode || `ILE-${serverBooking.id.slice(-6).toUpperCase()}`,
+        totalPrice: serverBooking.totalPrice,
+        contactDetails: contactRes.contact,
+      });
+
       setStep(4);
-    }, 1200);
+    } catch (err: any) {
+      setErrorMessage(err.message || "Payment verification failed. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -58,7 +147,7 @@ export default function BookingModal({
               {step === 1 && "Confirm your stay"}
               {step === 2 && "Guest information"}
               {step === 3 && "Payment preference"}
-              {step === 4 && "Reservation confirmed"}
+              {step === 4 && "Reservation confirmed & verified"}
             </h3>
           </div>
           <button
@@ -70,6 +159,14 @@ export default function BookingModal({
             <X size={20} />
           </button>
         </div>
+
+        {/* Error notification */}
+        {errorMessage && (
+          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2.5 text-sm text-red-700">
+            <AlertCircle size={16} className="shrink-0 text-red-500" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
 
         {/* Body Content */}
         <div className="p-6 overflow-y-auto space-y-6">
@@ -135,15 +232,15 @@ export default function BookingModal({
                   <span>
                     {formatNaira(property.pricePerNight)} × {nights} nights
                   </span>
-                  <span>{formatNaira(stayCost)}</span>
+                  <span>{formatNaira(clientStayCost)}</span>
                 </div>
                 <div className="flex justify-between text-[#6B6B67]">
-                  <span>Service & security verification</span>
-                  <span>{formatNaira(serviceFee)}</span>
+                  <span>Service &amp; infrastructure verification</span>
+                  <span>{formatNaira(clientServiceFee)}</span>
                 </div>
                 <div className="pt-3 border-t border-[#E7E5E0] flex justify-between font-semibold text-[17px] text-[#171717]">
                   <span>Total (NGN)</span>
-                  <span>{formatNaira(total)}</span>
+                  <span>{formatNaira(clientTotal)}</span>
                 </div>
               </div>
 
@@ -187,7 +284,7 @@ export default function BookingModal({
                   className="w-full px-4 py-3 rounded-xl border border-[#E7E5E0] text-[15px] focus:outline-none focus:border-[#24483A]"
                 />
                 <p className="text-[12px] text-[#8B8B86] mt-1">
-                  Booking confirmation & gate entry pass will be sent here.
+                  No account required to reserve. If you later create an account with this email, your booking will automatically appear in your trips.
                 </p>
               </div>
 
@@ -211,7 +308,7 @@ export default function BookingModal({
 
               <div className="flex items-center gap-3 pt-2 text-[13px] text-[#6B6B67]">
                 <ShieldCheck size={18} className="text-[#24483A] shrink-0" />
-                <span>Your contact info is strictly used for estate security clearance.</span>
+                <span>Exact address &amp; gate access code are strictly quarantined until payment confirmation.</span>
               </div>
 
               <div className="pt-4 flex gap-3">
@@ -224,11 +321,18 @@ export default function BookingModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setStep(3)}
-                  disabled={!guestName || !guestEmail}
-                  className="flex-1 py-3 bg-[#24483A] disabled:opacity-50 text-white rounded-xl font-medium hover:bg-[#1B372C] transition-colors"
+                  onClick={handleCreateReservation}
+                  disabled={!guestName || !guestEmail || isProcessing}
+                  className="flex-1 py-3 bg-[#24483A] disabled:opacity-50 text-white rounded-xl font-medium hover:bg-[#1B372C] transition-colors flex items-center justify-center gap-2"
                 >
-                  Continue to payment
+                  {isProcessing ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Checking availability...</span>
+                    </>
+                  ) : (
+                    <span>Continue to payment</span>
+                  )}
                 </button>
               </div>
             </div>
@@ -239,7 +343,9 @@ export default function BookingModal({
             <div className="space-y-5">
               <div className="text-[14px] text-[#6B6B67]">
                 Choose how you would like to complete your reservation of{" "}
-                <span className="font-semibold text-[#171717]">{formatNaira(total)}</span>:
+                <span className="font-semibold text-[#171717]">
+                  {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}
+                </span>:
               </div>
 
               <div className="space-y-3">
@@ -260,7 +366,7 @@ export default function BookingModal({
                           Direct Bank Transfer (Instant NGN)
                         </div>
                         <div className="text-[13px] text-[#6B6B67]">
-                          Generate a dedicated Nigerian virtual account to transfer via GTBank, Access, Zenith, or Kuda.
+                          Virtual account payment via GTBank, Access, Zenith, or Kuda.
                         </div>
                       </div>
                     </div>
@@ -295,7 +401,7 @@ export default function BookingModal({
                           Debit / Credit Card
                         </div>
                         <div className="text-[13px] text-[#6B6B67]">
-                          Mastercard, Visa, Verve (Nigeria & International cards supported)
+                          Mastercard, Visa, Verve (Nigeria &amp; International cards)
                         </div>
                       </div>
                     </div>
@@ -314,6 +420,12 @@ export default function BookingModal({
                 </div>
               </div>
 
+              {/* Quarantined detail notice */}
+              <div className="p-3 bg-[#FAFAF8] rounded-xl border border-[#E7E5E0] flex items-center gap-2.5 text-[12.5px] text-[#6B6B67]">
+                <Lock size={15} className="text-[#0B5D45] shrink-0" />
+                <span>Exact address and gate code unlock immediately upon payment confirmation.</span>
+              </div>
+
               <div className="pt-4 flex gap-3">
                 <button
                   type="button"
@@ -329,52 +441,92 @@ export default function BookingModal({
                   className="flex-1 py-3.5 bg-[#24483A] text-white rounded-xl font-medium hover:bg-[#1B372C] transition-colors flex items-center justify-center gap-2"
                 >
                   {isProcessing ? (
-                    <span>Processing payment...</span>
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Verifying &amp; processing...</span>
+                    </>
                   ) : (
-                    <span>Confirm & Pay {formatNaira(total)}</span>
+                    <span>Confirm &amp; Pay {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
                   )}
                 </button>
               </div>
             </div>
           )}
 
-          {/* Step 4: Confirmation */}
+          {/* Step 4: Confirmation with Quarantined Access Details Unlocked */}
           {step === 4 && (
-            <div className="text-center py-4 space-y-5">
+            <div className="text-center py-2 space-y-5">
               <div className="w-14 h-14 bg-[#EDF3F0] text-[#24483A] rounded-full flex items-center justify-center mx-auto">
                 <Check size={28} strokeWidth={2.5} />
               </div>
 
               <div className="space-y-1.5">
                 <h4 className="font-display text-2xl text-[#171717]">
-                  Your stay is reserved
+                  Your stay is reserved &amp; confirmed
                 </h4>
-                <p className="text-[15px] text-[#6B6B67]">
-                  Reservation code: <span className="font-mono font-semibold text-[#171717]">ILE-88429</span>
+                <p className="text-[14.5px] text-[#6B6B67]">
+                  Reservation reference:{" "}
+                  <span className="font-mono font-bold text-[#171717]">
+                    {confirmedData?.reference || "ILE-CONFIRMED"}
+                  </span>
                 </p>
               </div>
 
-              <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0]/70 text-left space-y-2 text-[14px]">
-                <div className="flex justify-between">
-                  <span className="text-[#6B6B67]">Property</span>
-                  <span className="font-medium text-[#171717]">{property.title}</span>
+              {/* Unlocked Private Details Card */}
+              {confirmedData?.contactDetails && (
+                <div className="p-4.5 rounded-xl bg-[#EDF3F0]/60 border border-[#24483A]/30 text-left space-y-3.5 text-[14px]">
+                  <div className="flex items-center gap-2 text-[#0B5D45] font-semibold text-xs uppercase tracking-wider">
+                    <Key size={14} />
+                    <span>Quarantined Access Details (Unlocked)</span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-start gap-2.5">
+                      <MapPin size={16} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-semibold text-[#171717]">Exact Property Address:</div>
+                        <div className="text-[#4A4A45]">
+                          {confirmedData.contactDetails.exactAddress}
+                          {confirmedData.contactDetails.unitNumber ? `, Unit ${confirmedData.contactDetails.unitNumber}` : ""}
+                        </div>
+                      </div>
+                    </div>
+
+                    {confirmedData.contactDetails.accessGateCode && (
+                      <div className="flex items-start gap-2.5">
+                        <Key size={16} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                        <div>
+                          <div className="font-semibold text-[#171717]">Estate Gate Pass Code:</div>
+                          <div className="font-mono font-bold text-[#0B5D45] text-base">
+                            {confirmedData.contactDetails.accessGateCode}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex items-start gap-2.5">
+                      <Phone size={16} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-semibold text-[#171717]">Host Direct Phone / WhatsApp:</div>
+                        <div className="text-[#171717] font-medium">
+                          {confirmedData.contactDetails.hostPhone} ({confirmedData.contactDetails.hostName})
+                        </div>
+                      </div>
+                    </div>
+
+                    {confirmedData.contactDetails.checkInInstructions && (
+                      <div className="pt-2 border-t border-[#24483A]/20 text-[13px] text-[#4A4A45]">
+                        <span className="font-medium text-[#171717]">Check-in Note: </span>
+                        {confirmedData.contactDetails.checkInInstructions}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-[#6B6B67]">Location</span>
-                  <span className="font-medium text-[#171717]">{property.neighborhood}, {property.city}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#6B6B67]">Host</span>
-                  <span className="font-medium text-[#171717]">{property.host.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#6B6B67]">Estate Access</span>
-                  <span className="font-medium text-[#24483A]">Gate Pass Code generated</span>
-                </div>
-              </div>
+              )}
 
               <p className="text-[13px] text-[#8B8B86]">
-                Check-in instructions and the host&apos;s direct WhatsApp contact have been dispatched to {guestEmail || "your email"}.
+                A receipt and digital gate pass have been dispatched to{" "}
+                <span className="font-medium text-[#171717]">{guestEmail || "your email"}</span>.
               </p>
 
               <div className="pt-2">

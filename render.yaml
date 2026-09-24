@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: ile-backend-api
+    runtime: node
+    plan: starter
+    region: ohio
+    buildCommand: npm install --include=dev
+    startCommand: npm run server
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: SESSION_MAX_AGE_DAYS
+        value: "7"
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_FROM
+        value: noreply@notifications.9jaroommate.com
+      - key: RESEND_DOMAIN
+        value: notifications.9jaroommate.com
+      - key: R2_ACCOUNT_ID
+        value: c1c242c15972c98b84e9d48c43d1127f
+      - key: R2_BUCKET_NAME
+        value: storageapp
+      - key: R2_FOLDER_PREFIX
+        value: storageapp/9jaroommate.com/
+      - key: GEOCODING_API_URL
+        value: https://nominatim.openstreetmap.org
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: FRONTEND_URL
+        sync: false

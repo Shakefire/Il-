@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthLayout from "@/components/auth/AuthLayout";
 import AuthInput from "@/components/auth/AuthInput";
 import PasswordInput from "@/components/auth/PasswordInput";
@@ -12,16 +12,20 @@ import PrimaryButton from "@/components/auth/PrimaryButton";
 import SocialButton from "@/components/auth/SocialButton";
 import AuthDivider from "@/components/auth/AuthDivider";
 import FormAlert from "@/components/auth/FormAlert";
-import { authApi } from "@/lib/auth";
+import { useAuth } from "@/context/AuthContext";
 
-export default function RegisterPage() {
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextUrl = searchParams.get("next") || "/";
+  const { register } = useAuth();
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const [isLoading, setIsLoading] = useState(false);
   const [socialLoading, setSocialLoading] = useState(false);
@@ -53,6 +57,12 @@ export default function RegisterPage() {
       errors.password = "Password must be at least 8 characters long.";
     }
 
+    if (!confirmPassword) {
+      errors.confirmPassword = "Please confirm your password.";
+    } else if (password !== confirmPassword) {
+      errors.confirmPassword = "Passwords do not match.";
+    }
+
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -66,7 +76,7 @@ export default function RegisterPage() {
     setIsLoading(true);
 
     try {
-      await authApi.register({
+      await register({
         firstName,
         lastName,
         email,
@@ -76,8 +86,8 @@ export default function RegisterPage() {
 
       setIsSuccess(true);
       setTimeout(() => {
-        router.push("/");
-      }, 1500);
+        router.push(nextUrl);
+      }, 1200);
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Unable to create account. Please try again.";
@@ -93,7 +103,7 @@ export default function RegisterPage() {
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 600));
-      router.push("/");
+      router.push(nextUrl);
     } catch {
       setErrorMessage("Unable to connect with Google. Please try again.");
     } finally {
@@ -113,12 +123,12 @@ export default function RegisterPage() {
           <div className="space-y-4">
             <FormAlert
               type="success"
-              message="Account created. You're ready to start exploring."
+              message="Account created successfully. You're ready to start exploring."
             />
             <div className="pt-2">
               <Link
-                href="/"
-                className="inline-flex items-center justify-center w-full h-[52px] bg-[#24483A] text-white rounded-[11px] font-medium text-[15px]"
+                href={nextUrl}
+                className="inline-flex items-center justify-center w-full h-[52px] bg-[#0B5D45] text-white rounded-[11px] font-medium text-[15px] hover:bg-[#084936] transition-colors"
               >
                 Continue to stays →
               </Link>
@@ -136,7 +146,7 @@ export default function RegisterPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <AuthInput
                   label="First Name"
-                  placeholder="Kabir"
+                  placeholder="Amina"
                   value={firstName}
                   onChange={(e) => {
                     setFirstName(e.target.value);
@@ -149,7 +159,7 @@ export default function RegisterPage() {
                 />
                 <AuthInput
                   label="Last Name"
-                  placeholder="Hassan"
+                  placeholder="Bello"
                   value={lastName}
                   onChange={(e) => {
                     setLastName(e.target.value);
@@ -166,7 +176,7 @@ export default function RegisterPage() {
               <AuthInput
                 label="Email"
                 type="email"
-                placeholder="your@email.com"
+                placeholder="amina@example.com"
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value);
@@ -195,7 +205,7 @@ export default function RegisterPage() {
               <div>
                 <PasswordInput
                   label="Password"
-                  placeholder="Create a password"
+                  placeholder="Create a secure password"
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value);
@@ -208,6 +218,21 @@ export default function RegisterPage() {
                 />
                 <PasswordStrength password={password} />
               </div>
+
+              {/* Confirm Password */}
+              <PasswordInput
+                label="Confirm Password"
+                placeholder="Re-enter your password"
+                value={confirmPassword}
+                onChange={(e) => {
+                  setConfirmPassword(e.target.value);
+                  if (fieldErrors.confirmPassword) setFieldErrors({ ...fieldErrors, confirmPassword: "" });
+                }}
+                autoComplete="new-password"
+                error={fieldErrors.confirmPassword}
+                disabled={isLoading}
+                required
+              />
 
               {/* Terms */}
               <p className="text-[12.5px] text-[#6B6B67] leading-relaxed pt-1">
@@ -244,8 +269,8 @@ export default function RegisterPage() {
             <div className="pt-2 text-center text-[14px] text-[#6B6B67]">
               Already have an account?{" "}
               <Link
-                href="/login"
-                className="font-semibold text-[#171717] hover:text-[#24483A] hover:underline transition-colors"
+                href={`/login${nextUrl !== "/" ? `?next=${encodeURIComponent(nextUrl)}` : ""}`}
+                className="font-semibold text-[#171717] hover:text-[#0B5D45] hover:underline transition-colors"
               >
                 Log in
               </Link>
@@ -254,5 +279,13 @@ export default function RegisterPage() {
         )}
       </div>
     </AuthLayout>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#FAFAF8]" />}>
+      <RegisterForm />
+    </Suspense>
   );
 }

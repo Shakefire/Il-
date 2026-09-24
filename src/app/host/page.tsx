@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { formatNaira } from "@/lib/utils";
 import { ShieldCheck, Zap, Wifi, CheckCircle2, ArrowRight } from "lucide-react";
 
@@ -30,6 +31,15 @@ export default function HostPage() {
               <p className="text-[17px] sm:text-[19px] text-[#6B6B67] leading-relaxed max-w-xl font-light">
                 We partner with owners of thoughtfully designed apartments and homes in Abuja and Lagos who can guarantee true 24/7 power, fast internet, and quiet living.
               </p>
+              <div className="pt-2">
+                <Link
+                  href="/become-a-host"
+                  className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-[15px] font-semibold transition-all shadow-sm"
+                >
+                  <span>Start listing your space</span>
+                  <ArrowRight size={18} />
+                </Link>
+              </div>
             </div>
 
             <div className="lg:col-span-5 relative aspect-[4/3] rounded-2xl overflow-hidden bg-[#E7E5E0] shadow-sm">

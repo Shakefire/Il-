@@ -1,10 +1,12 @@
 export interface User {
   id: string;
-  firstName: string;
-  lastName: string;
   email: string;
-  phone?: string;
+  role?: string;
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
   avatar?: string;
+  phone?: string;
 }
 
 export interface LoginCredentials {
@@ -16,50 +18,53 @@ export interface RegisterCredentials {
   firstName: string;
   lastName: string;
   email: string;
-  phone: string;
+  phone?: string;
   password: string;
 }
 
 export interface AuthResponse {
   success: boolean;
   user?: User;
+  token?: string;
   message?: string;
 }
 
-// Temporary Mock Authentication Service (ready to be replaced with real Node.js/Nest API)
 export const authApi = {
   async login({ email, password }: LoginCredentials): Promise<AuthResponse> {
-    // Realistic network latency simulation
-    await new Promise((resolve) => setTimeout(resolve, 650));
-
-    // Basic client validation
     if (!email || !password) {
       throw new Error("Please enter both your email and password.");
     }
 
-    // Mock validation
-    if (password.length < 6) {
-      throw new Error("We couldn't sign you in with those details. Please check your credentials.");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "We couldn't sign you in with those details.");
+      }
+
+      if (typeof window !== "undefined" && data.token) {
+        localStorage.setItem("ile_token", data.token);
+        localStorage.setItem("ile_user", JSON.stringify(data.user));
+      }
+
+      return {
+        success: true,
+        user: data.user,
+        token: data.token,
+        message: "Signed in successfully.",
+      };
+    } catch (err: any) {
+      throw new Error(err.message || "Failed to sign in. Please try again.");
     }
-
-    const mockUser: User = {
-      id: "usr_01",
-      firstName: email.split("@")[0].charAt(0).toUpperCase() + email.split("@")[0].slice(1),
-      lastName: "Guest",
-      email,
-      phone: "+2348012345678",
-    };
-
-    return {
-      success: true,
-      user: mockUser,
-      message: "Signed in successfully.",
-    };
   },
 
   async register(credentials: RegisterCredentials): Promise<AuthResponse> {
-    await new Promise((resolve) => setTimeout(resolve, 750));
-
     if (!credentials.email || !credentials.password || !credentials.firstName || !credentials.lastName) {
       throw new Error("Please fill in all required fields.");
     }
@@ -68,37 +73,89 @@ export const authApi = {
       throw new Error("Password must be at least 8 characters long.");
     }
 
-    const mockUser: User = {
-      id: `usr_${Date.now()}`,
-      firstName: credentials.firstName,
-      lastName: credentials.lastName,
-      email: credentials.email,
-      phone: credentials.phone,
-    };
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(credentials),
+      });
 
-    return {
-      success: true,
-      user: mockUser,
-      message: "Account created successfully.",
-    };
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Registration failed.");
+      }
+
+      if (typeof window !== "undefined" && data.token) {
+        localStorage.setItem("ile_token", data.token);
+        localStorage.setItem("ile_user", JSON.stringify(data.user));
+      }
+
+      return {
+        success: true,
+        user: data.user,
+        token: data.token,
+        message: data.message || "Account created successfully.",
+      };
+    } catch (err: any) {
+      throw new Error(err.message || "Registration failed. Please try again.");
+    }
+  },
+
+  async me(): Promise<User | null> {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/auth/me", {
+        credentials: "include",
+        headers,
+      });
+
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.user;
+    } catch {
+      return null;
+    }
+  },
+
+  async logout(): Promise<void> {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("ile_token");
+        localStorage.removeItem("ile_user");
+      }
+    }
   },
 
   async forgotPassword(email: string): Promise<AuthResponse> {
-    await new Promise((resolve) => setTimeout(resolve, 550));
-
     if (!email || !email.includes("@")) {
       throw new Error("Please enter a valid email address.");
     }
 
+    const res = await fetch("/api/auth/forgot-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to process request.");
+
     return {
       success: true,
-      message: `If an account exists for ${email}, a reset link has been dispatched.`,
+      message: data.message || `If an account exists for ${email}, a reset link has been dispatched.`,
     };
   },
 
   async resetPassword({ password }: { password: string }): Promise<AuthResponse> {
-    await new Promise((resolve) => setTimeout(resolve, 600));
-
     if (!password || password.length < 8) {
       throw new Error("Password must be at least 8 characters long.");
     }

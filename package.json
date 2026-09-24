@@ -5,24 +5,49 @@
   "scripts": {
     "predev": "node -e \"const fs=require('fs');if(fs.existsSync('.next')){fs.rmSync('.next',{recursive:true,force:true});console.log('[predev] Cleared stale .next cache');}\"",
     "dev": "next dev --turbo",
+    "server": "tsx backend/src/server.ts",
+    "seed": "tsx backend/src/db/seed.ts",
+    "server:old": "tsx server/index.ts",
+    "seed:old": "tsx server/db/seed.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "postinstall": "node scripts/patch-next.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1139.0",
+    "@electric-sql/pglite": "^0.5.8",
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/cors": "^11.3.0",
+    "@neon/config": "^1.7.3",
+    "@neon/env": "^1.4.4",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.1",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.3",
+    "drizzle-orm": "^0.45.3",
+    "fastify": "^5.12.5",
     "lucide-react": "^0.453.0",
     "next": "^14.2.15",
+    "pg": "^8.23.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20.17.0",
+    "@types/pg": "^8.23.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.31.11",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.3"
   }
 }

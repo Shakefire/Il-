@@ -1,18 +1,24 @@
 "use client";
 
-import { useState, useMemo, Suspense } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import PropertyCard from "@/components/PropertyCard";
 import MapPanel from "@/components/MapPanel";
 import SearchBar from "@/components/SearchBar";
 import { PROPERTIES } from "@/data/properties";
-import { SlidersHorizontal, Sun, RotateCcw, Map, List } from "lucide-react";
+import { api } from "@/lib/api";
+import { Property } from "@/types";
+import { SlidersHorizontal, Sun, RotateCcw, Map, List, Loader2 } from "lucide-react";
 
 function SearchContent() {
   const searchParams = useSearchParams();
-  const initialDestination = searchParams.get("destination") || "";
+  const initialDestination = searchParams.get("destination") || searchParams.get("location") || "";
+  const initialLat = searchParams.get("lat") || "";
+  const initialLng = searchParams.get("lng") || "";
   const initialGuests = Number(searchParams.get("guests")) || 1;
   const initialType = searchParams.get("type") || "All Types";
+  const initialCheckIn = searchParams.get("checkIn") || "";
+  const initialCheckOut = searchParams.get("checkOut") || "";
 
   const [selectedCity, setSelectedCity] = useState<string>(
     initialDestination === "Lagos" ? "Lagos" : initialDestination === "Abuja" ? "Abuja" : "All Nigeria"
@@ -24,9 +30,62 @@ function SearchContent() {
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
   const [showMobileMap, setShowMobileMap] = useState<boolean>(false);
 
-  // Filter properties
+  const [properties, setProperties] = useState<Property[]>(PROPERTIES);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [resolvedGeo, setResolvedGeo] = useState<any>(null);
+
+  // Fetch from Fastify Search API
+  useEffect(() => {
+    let active = true;
+
+    async function doSearch() {
+      setLoading(true);
+      try {
+        const dest = selectedCity !== "All Nigeria" ? selectedCity : initialDestination;
+        const res = await api.search({
+          location: dest || undefined,
+          lat: initialLat || undefined,
+          lng: initialLng || undefined,
+          checkIn: initialCheckIn || undefined,
+          checkOut: initialCheckOut || undefined,
+          guests: initialGuests,
+          type: selectedType !== "All Types" ? selectedType : undefined,
+          bedrooms: selectedBedrooms !== "any" ? selectedBedrooms : undefined,
+          maxPrice: maxPrice < 200000 ? maxPrice : undefined,
+          powerType: solarOnly ? "Solar + Inverter" : undefined,
+        });
+
+        if (active && res && Array.isArray(res.properties)) {
+          setProperties(res.properties);
+          setResolvedGeo(res.query?.resolvedLocation || res.query?.resolvedGeo || null);
+        }
+      } catch (err) {
+        console.warn("Backend search fetch failed, using fallback:", err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    doSearch();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    selectedCity,
+    initialDestination,
+    initialCheckIn,
+    initialCheckOut,
+    initialGuests,
+    selectedType,
+    selectedBedrooms,
+    solarOnly,
+    maxPrice,
+  ]);
+
+  // Client-side quick filter refinement
   const filteredProperties = useMemo(() => {
-    return PROPERTIES.filter((property) => {
+    return properties.filter((property) => {
       // City filter
       if (selectedCity && selectedCity !== "All Nigeria") {
         if (property.city.toLowerCase() !== selectedCity.toLowerCase()) {
@@ -37,7 +96,7 @@ function SearchContent() {
       // Property type filter
       if (selectedType && selectedType !== "All Types" && selectedType !== "all") {
         const normSelected = selectedType.toLowerCase();
-        const propType = property.propertyType.toLowerCase();
+        const propType = (property.propertyType || "").toLowerCase();
         if (!propType.includes(normSelected) && !normSelected.includes(propType)) {
           return false;
         }
@@ -57,7 +116,7 @@ function SearchContent() {
 
       // Solar / Continuous Power filter
       if (solarOnly) {
-        if (!property.infrastructure.powerType.includes("Solar")) {
+        if (!property.infrastructure?.powerType?.includes("Solar")) {
           return false;
         }
       }
@@ -69,7 +128,7 @@ function SearchContent() {
 
       return true;
     });
-  }, [selectedCity, selectedType, initialGuests, selectedBedrooms, solarOnly, maxPrice]);
+  }, [properties, selectedCity, selectedType, initialGuests, selectedBedrooms, solarOnly, maxPrice]);
 
   const clearFilters = () => {
     setSelectedCity("All Nigeria");
@@ -85,9 +144,11 @@ function SearchContent() {
       <div className="bg-white border-b border-[#E7E5E0] py-4 px-6 sm:px-8 lg:px-12 sticky top-20 z-30">
         <div className="max-w-7xl mx-auto">
           <SearchBar
-            initialDestination={selectedCity !== "All Nigeria" ? selectedCity : "Abuja"}
+            initialDestination={selectedCity !== "All Nigeria" ? selectedCity : initialDestination || "Abuja"}
             initialPropertyType={selectedType}
             initialGuests={initialGuests}
+            initialCheckIn={initialCheckIn}
+            initialCheckOut={initialCheckOut}
             compact
           />
         </div>
@@ -219,13 +280,20 @@ function SearchContent() {
           >
             {/* Results metadata */}
             <div className="flex items-baseline justify-between border-b border-[#E7E5E0] pb-4">
-              <h2 className="text-[17px] font-medium text-[#171717]">
-                {filteredProperties.length}{" "}
-                {filteredProperties.length === 1 ? "stay" : "stays"} available{" "}
-                {selectedCity !== "All Nigeria" ? `in ${selectedCity}` : "across Nigeria"}
-              </h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-[17px] font-medium text-[#171717]">
+                  {filteredProperties.length}{" "}
+                  {filteredProperties.length === 1 ? "stay" : "stays"} available{" "}
+                  {selectedCity !== "All Nigeria"
+                    ? `in ${selectedCity}`
+                    : initialDestination
+                    ? `near ${initialDestination}`
+                    : "across Nigeria"}
+                </h2>
+                {loading && <Loader2 size={16} className="animate-spin text-[#0B5D45]" />}
+              </div>
               <span className="text-[13px] text-[#8B8B86]">
-                Verified infrastructure & 24/7 power
+                Verified infrastructure &amp; 24/7 power
               </span>
             </div>
 
