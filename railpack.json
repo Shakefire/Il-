@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "steps": {
+    "build": {
+      "commands": [
+        "echo 'Skipping Next.js build for Fastify API service'"
+      ]
+    }
+  },
+  "deploy": {
+    "startCommand": "npm run server"
+  }
+}
