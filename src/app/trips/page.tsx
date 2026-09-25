@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -11,10 +11,10 @@ import {
   ShieldCheck,
   KeyRound,
   CheckCircle2,
-  Clock,
   AlertCircle,
   X,
-  ExternalLink,
+  CreditCard,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
@@ -54,8 +54,9 @@ interface PrivateAccessDetails {
   accessGateCode?: string;
 }
 
-export default function TripsPage() {
+function TripsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isAuthenticated, isLoading } = useAuth();
 
   const [bookings, setBookings] = useState<BookingItem[]>([]);
@@ -64,6 +65,7 @@ export default function TripsPage() {
   const [accessDetails, setAccessDetails] = useState<PrivateAccessDetails | null>(null);
   const [loadingAccess, setLoadingAccess] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -76,13 +78,45 @@ export default function TripsPage() {
       const res = await api.getUserBookings();
       if (res && Array.isArray(res.bookings)) {
         setBookings(res.bookings);
+        return res.bookings;
       }
     } catch (err) {
       console.warn("Failed to load user bookings:", err);
     } finally {
       setLoadingBookings(false);
     }
+    return [];
   }, []);
+
+  // Check for Paystack redirect parameters and auto-verify
+  useEffect(() => {
+    const paymentStatus = searchParams.get("payment");
+    const ref = searchParams.get("ref") || searchParams.get("reference") || searchParams.get("trxref");
+
+    if (ref && (paymentStatus === "success" || paymentStatus === "mock" || searchParams.has("trxref"))) {
+      const verifyAndRefresh = async () => {
+        try {
+          const verifyRes = await api.verifyPayment(ref);
+          if (verifyRes && verifyRes.verified) {
+            setPaymentNotice({
+              type: "success",
+              message: `Payment verified successfully (Ref: ${ref})! Your stay is confirmed and access details are unlocked.`,
+            });
+            const updated = await loadBookings();
+            // Try to match the booking
+            const matched = updated.find((b: any) => ref.includes(b.referenceCode) || b.id === ref);
+            if (matched) {
+              handleOpenAccessModal(matched);
+            }
+          }
+        } catch (err: any) {
+          console.warn("Payment auto-verification error:", err);
+        }
+      };
+
+      verifyAndRefresh();
+    }
+  }, [searchParams, loadBookings]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -125,6 +159,34 @@ export default function TripsPage() {
   return (
     <div className="min-h-screen bg-[#FAFAF8] py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto space-y-8">
+        {/* Payment Verification Banner */}
+        {paymentNotice && (
+          <div
+            className={`p-4 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in ${
+              paymentNotice.type === "success"
+                ? "bg-emerald-50 border border-emerald-200 text-emerald-900"
+                : "bg-red-50 border border-red-200 text-red-900"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                <CheckCircle2 size={20} />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm">Paystack Payment Successful</h4>
+                <p className="text-xs text-emerald-800">{paymentNotice.message}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPaymentNotice(null)}
+              className="text-emerald-700 hover:text-emerald-900 font-bold p-1 text-sm"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E7E5E0] pb-6">
           <div>
@@ -395,5 +457,19 @@ export default function TripsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function TripsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-[70vh] flex items-center justify-center bg-[#FAFAF8]">
+          <div className="w-8 h-8 rounded-full border-2 border-[#0B5D45] border-t-transparent animate-spin" />
+        </div>
+      }
+    >
+      <TripsPageContent />
+    </Suspense>
   );
 }

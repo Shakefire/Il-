@@ -351,8 +351,8 @@ export default function AdminPortalPage() {
                       <div className="flex items-center gap-4">
                         <div className="relative w-28 h-20 rounded-xl overflow-hidden bg-stone-200 shrink-0">
                           <Image
-                            src={prop.coverImage}
-                            alt={prop.title}
+                            src={prop.coverImage || "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1200&q=80"}
+                            alt={prop.title || "Property"}
                             fill
                             className="object-cover"
                           />

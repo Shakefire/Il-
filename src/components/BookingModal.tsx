@@ -89,7 +89,7 @@ export default function BookingModal({
   };
 
   // Step 3 -> Step 4: Pay & unlock quarantined details
-  const handlePay = async () => {
+  const handlePay = async (mode: "paystack" | "direct" = "paystack") => {
     if (!serverBooking) return;
     setErrorMessage(null);
     setIsProcessing(true);
@@ -101,7 +101,13 @@ export default function BookingModal({
         throw new Error(initRes?.error || "Failed to initialize payment gateway.");
       }
 
-      // 2. Server-side payment verification & booking confirmation
+      // If user selected Paystack and an authorization URL was returned:
+      if (mode === "paystack" && initRes.authorizationUrl && initRes.authorizationUrl.startsWith("http")) {
+        window.location.href = initRes.authorizationUrl;
+        return;
+      }
+
+      // 2. Direct / in-modal settlement for test sandbox verification
       try {
         await api.verifyPayment(initRes.reference);
       } catch {
@@ -341,50 +347,21 @@ export default function BookingModal({
           {/* Step 3: Payment */}
           {step === 3 && (
             <div className="space-y-5">
-              <div className="text-[14px] text-[#6B6B67]">
-                Choose how you would like to complete your reservation of{" "}
-                <span className="font-semibold text-[#171717]">
-                  {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}
-                </span>:
+              <div className="flex items-center justify-between pb-2 border-b border-[#E7E5E0]">
+                <div className="text-[14px] text-[#6B6B67]">
+                  Total Reservation Amount:{" "}
+                  <span className="font-bold text-base text-[#171717]">
+                    {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}
+                  </span>
+                </div>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#EDF3F0] text-[#0B5D45]">
+                  <ShieldCheck size={13} />
+                  <span>Secured by Paystack</span>
+                </span>
               </div>
 
               <div className="space-y-3">
-                {/* Bank Transfer Option */}
-                <div
-                  onClick={() => setPaymentMethod("transfer")}
-                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                    paymentMethod === "transfer"
-                      ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]"
-                      : "border-[#E7E5E0] hover:border-[#171717]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex gap-3">
-                      <Building2 size={20} className="text-[#24483A] mt-0.5" />
-                      <div>
-                        <div className="text-[15px] font-medium text-[#171717]">
-                          Direct Bank Transfer (Instant NGN)
-                        </div>
-                        <div className="text-[13px] text-[#6B6B67]">
-                          Virtual account payment via GTBank, Access, Zenith, or Kuda.
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        paymentMethod === "transfer"
-                          ? "border-[#24483A] bg-[#24483A]"
-                          : "border-[#8B8B86]"
-                      }`}
-                    >
-                      {paymentMethod === "transfer" && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Card Option */}
+                {/* Paystack Card / Transfer Option */}
                 <div
                   onClick={() => setPaymentMethod("card")}
                   className={`p-4 rounded-xl border cursor-pointer transition-all ${
@@ -398,10 +375,10 @@ export default function BookingModal({
                       <CreditCard size={20} className="text-[#24483A] mt-0.5" />
                       <div>
                         <div className="text-[15px] font-medium text-[#171717]">
-                          Debit / Credit Card
+                          Paystack Checkout (Card, Transfer, USSD, Apple Pay)
                         </div>
                         <div className="text-[13px] text-[#6B6B67]">
-                          Mastercard, Visa, Verve (Nigeria &amp; International cards)
+                          Mastercard, Visa, Verve &amp; dynamic Nigerian virtual bank accounts.
                         </div>
                       </div>
                     </div>
@@ -418,6 +395,41 @@ export default function BookingModal({
                     </div>
                   </div>
                 </div>
+
+                {/* Direct Bank Transfer Option */}
+                <div
+                  onClick={() => setPaymentMethod("transfer")}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    paymentMethod === "transfer"
+                      ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]"
+                      : "border-[#E7E5E0] hover:border-[#171717]"
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex gap-3">
+                      <Building2 size={20} className="text-[#24483A] mt-0.5" />
+                      <div>
+                        <div className="text-[15px] font-medium text-[#171717]">
+                          Instant Bank Transfer (Nigerian Bank Accounts)
+                        </div>
+                        <div className="text-[13px] text-[#6B6B67]">
+                          Direct transfer via GTBank, Access, Zenith, or Kuda virtual accounts.
+                        </div>
+                      </div>
+                    </div>
+                    <div
+                      className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                        paymentMethod === "transfer"
+                          ? "border-[#24483A] bg-[#24483A]"
+                          : "border-[#8B8B86]"
+                      }`}
+                    >
+                      {paymentMethod === "transfer" && (
+                        <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Quarantined detail notice */}
@@ -426,7 +438,7 @@ export default function BookingModal({
                 <span>Exact address and gate code unlock immediately upon payment confirmation.</span>
               </div>
 
-              <div className="pt-4 flex gap-3">
+              <div className="pt-4 flex flex-col sm:flex-row gap-3">
                 <button
                   type="button"
                   onClick={() => setStep(2)}
@@ -436,18 +448,26 @@ export default function BookingModal({
                 </button>
                 <button
                   type="button"
-                  onClick={handlePay}
+                  onClick={() => handlePay("paystack")}
                   disabled={isProcessing}
-                  className="flex-1 py-3.5 bg-[#24483A] text-white rounded-xl font-medium hover:bg-[#1B372C] transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-3.5 bg-[#0B5D45] text-white rounded-xl font-medium hover:bg-[#084936] transition-colors flex items-center justify-center gap-2"
                 >
                   {isProcessing ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
-                      <span>Verifying &amp; processing...</span>
+                      <span>Connecting to Paystack...</span>
                     </>
                   ) : (
-                    <span>Confirm &amp; Pay {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
+                    <span>Pay with Paystack {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
                   )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePay("direct")}
+                  disabled={isProcessing}
+                  className="px-4 py-3.5 border border-[#E7E5E0] text-[#6B6B67] hover:text-[#171717] rounded-xl text-xs font-medium hover:bg-[#FAFAF8] transition-colors"
+                >
+                  Instant Test Pay
                 </button>
               </div>
             </div>
