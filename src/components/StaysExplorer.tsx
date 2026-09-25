@@ -33,13 +33,24 @@ export default function StaysExplorer({ initialProperties }: StaysExplorerProps)
 
     result = result.filter((p) => p.pricePerNight <= maxPrice);
 
-    if (sortBy === "price_asc") {
-      result.sort((a, b) => a.pricePerNight - b.pricePerNight);
-    } else if (sortBy === "price_desc") {
-      result.sort((a, b) => b.pricePerNight - a.pricePerNight);
-    } else if (sortBy === "rating") {
-      result.sort((a, b) => b.rating - a.rating);
-    }
+    result.sort((a, b) => {
+      // 1. Availability ranking: Available stays first, reserved stays lower down
+      const aReserved = Boolean(a.isReserved);
+      const bReserved = Boolean(b.isReserved);
+      if (aReserved !== bReserved) {
+        return aReserved ? 1 : -1;
+      }
+
+      // 2. User selected sort within each tier
+      if (sortBy === "price_asc") {
+        return a.pricePerNight - b.pricePerNight;
+      } else if (sortBy === "price_desc") {
+        return b.pricePerNight - a.pricePerNight;
+      } else if (sortBy === "rating") {
+        return b.rating - a.rating;
+      }
+      return 0;
+    });
 
     return result;
   }, [initialProperties, selectedCity, maxPrice, sortBy]);

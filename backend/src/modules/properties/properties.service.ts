@@ -1,4 +1,4 @@
-import { eq, inArray, count, and, asc, or } from "drizzle-orm";
+import { eq, inArray, count, and, asc, or, gte } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
 import { PROPERTY_STATUS } from "../../config/constants";
@@ -109,13 +109,52 @@ export async function getPublishedProperties(pagination: { limit: number; offset
     .from(schema.users)
     .where(inArray(schema.users.id, hostIds));
 
-  // Map enriched properties
+  // Determine active reservation status for each property
+  const today = new Date().toISOString().split("T")[0];
+  const reservedIds = new Set<string>();
+
+  try {
+    const activeBlocks = await db
+      .select({ propertyId: schema.availabilityBlocks.propertyId })
+      .from(schema.availabilityBlocks)
+      .where(
+        and(
+          inArray(schema.availabilityBlocks.propertyId, propertyIds),
+          gte(schema.availabilityBlocks.endDate, today)
+        )
+      );
+    activeBlocks.forEach((b: any) => reservedIds.add(b.propertyId));
+
+    const activeBookings = await db
+      .select({ propertyId: schema.bookings.propertyId })
+      .from(schema.bookings)
+      .where(
+        and(
+          inArray(schema.bookings.propertyId, propertyIds),
+          eq(schema.bookings.status, "CONFIRMED"),
+          gte(schema.bookings.checkOutDate, today)
+        )
+      );
+    activeBookings.forEach((b: any) => reservedIds.add(b.propertyId));
+  } catch {}
+
+  // Map enriched properties with isReserved flag
   const enriched = properties.map((prop: any) => {
     const propImages = images.filter((img: any) => img.propertyId === prop.id);
     const propAmenities = amenities.filter((a: any) => a.propertyId === prop.id);
     const host = hosts.find((h: any) => h.id === prop.hostId);
+    const isReserved = reservedIds.has(prop.id);
 
-    return enrichProperty(prop, propImages, propAmenities, host);
+    return {
+      ...enrichProperty(prop, propImages, propAmenities, host),
+      isReserved,
+    };
+  });
+
+  // Rank available properties first, reserved properties lower down
+  enriched.sort((a: any, b: any) => {
+    if (a.isReserved !== b.isReserved) return a.isReserved ? 1 : -1;
+    return 0;
   });
 
   return { properties: enriched, total };
@@ -172,11 +211,45 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
     .where(eq(schema.profiles.userId, prop.hostId))
     .limit(1);
 
+  // Check if this property is actively reserved
+  let isReserved = false;
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const [activeBooking] = await db
+      .select()
+      .from(schema.bookings)
+      .where(
+        and(
+          eq(schema.bookings.propertyId, prop.id),
+          eq(schema.bookings.status, "CONFIRMED"),
+          gte(schema.bookings.checkOutDate, today)
+        )
+      )
+      .limit(1);
+
+    if (activeBooking) {
+      isReserved = true;
+    } else {
+      const [activeBlock] = await db
+        .select()
+        .from(schema.availabilityBlocks)
+        .where(
+          and(
+            eq(schema.availabilityBlocks.propertyId, prop.id),
+            gte(schema.availabilityBlocks.endDate, today)
+          )
+        )
+        .limit(1);
+      if (activeBlock) isReserved = true;
+    }
+  } catch {}
+
   const enriched = enrichProperty(prop, images, amenities, hostUser);
 
-  // Add extended host info for single property view
+  // Add extended host info and isReserved flag for single property view
   return {
     ...enriched,
+    isReserved,
     host: {
       ...enriched.host,
       bio: profile?.bio || "Verified property host on Ilé.",

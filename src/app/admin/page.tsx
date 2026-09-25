@@ -485,9 +485,13 @@ export default function AdminPortalPage() {
                   </thead>
                   <tbody className="divide-y divide-[#E7E5E0]">
                     {properties.map((prop) => (
-                      <tr key={prop.id} className="hover:bg-[#FAFAF8]/60 transition-colors">
+                      <tr
+                        key={prop.id}
+                        onClick={() => setSelectedProperty(prop)}
+                        className="hover:bg-[#FAFAF8] transition-colors cursor-pointer group"
+                      >
                         <td className="p-4">
-                          <div className="font-medium text-[#171717]">{prop.title}</div>
+                          <div className="font-medium text-[#171717] group-hover:text-[#0B5D45] transition-colors">{prop.title}</div>
                           <div className="text-xs text-[#8B8B86]">{prop.propertyType}</div>
                         </td>
                         <td className="p-4 text-[#6B6B67]">
@@ -513,7 +517,7 @@ export default function AdminPortalPage() {
                             {prop.status}
                           </span>
                         </td>
-                        <td className="p-4 text-right space-x-2">
+                        <td className="p-4 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             onClick={() => setSelectedProperty(prop)}
@@ -600,14 +604,18 @@ export default function AdminPortalPage() {
                         const refCode = b.referenceCode || b.reference || b.id;
 
                         return (
-                          <tr key={b.id} className="hover:bg-[#FAFAF8]/60 transition-colors">
+                          <tr
+                            key={b.id}
+                            onClick={() => setSelectedBooking(b)}
+                            className="hover:bg-[#FAFAF8] transition-colors cursor-pointer group"
+                          >
                             <td className="p-4">
-                              <span className="font-mono font-bold text-xs text-[#171717] bg-[#FAFAF8] px-2.5 py-1 rounded-md border border-[#E7E5E0]">
+                              <span className="font-mono font-bold text-xs text-[#171717] bg-[#FAFAF8] group-hover:bg-white px-2.5 py-1 rounded-md border border-[#E7E5E0]">
                                 {refCode.slice(0, 16)}
                               </span>
                             </td>
                             <td className="p-4">
-                              <div className="font-medium text-[#171717] line-clamp-1">{propTitle}</div>
+                              <div className="font-medium text-[#171717] group-hover:text-[#0B5D45] transition-colors line-clamp-1">{propTitle}</div>
                               <div className="text-xs text-[#8B8B86]">{propCity}</div>
                             </td>
                             <td className="p-4">
@@ -632,7 +640,7 @@ export default function AdminPortalPage() {
                                 {b.status}
                               </span>
                             </td>
-                            <td className="p-4 text-right">
+                            <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => setSelectedBooking(b)}

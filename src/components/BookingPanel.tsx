@@ -179,17 +179,33 @@ export default function BookingPanel({ property }: BookingPanelProps) {
           </div>
         </div>
 
+        {/* Reserved Property Notice */}
+        {property.isReserved && (
+          <div className="p-3.5 mb-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900 font-medium">
+            <Shield size={16} className="text-amber-700 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold block text-sm">Currently Reserved</span>
+              This residence has an active reservation and is unavailable for booking.
+            </div>
+          </div>
+        )}
+
         {/* Primary CTA Button */}
         <div className="mt-5">
           <button
             type="button"
-            onClick={() => setIsModalOpen(true)}
-            className="w-full py-4 bg-[#0B5D45] text-white rounded-xl font-semibold text-[15px] sm:text-[16px] hover:bg-[#084936] active:scale-[0.99] transition-all shadow-md"
+            disabled={property.isReserved}
+            onClick={() => !property.isReserved && setIsModalOpen(true)}
+            className={`w-full py-4 rounded-xl font-semibold text-[15px] sm:text-[16px] transition-all shadow-md ${
+              property.isReserved
+                ? "bg-stone-200 text-stone-500 cursor-not-allowed shadow-none"
+                : "bg-[#0B5D45] text-white hover:bg-[#084936] active:scale-[0.99]"
+            }`}
           >
-            Reserve stay · {formatNaira(total)}
+            {property.isReserved ? "Already Reserved · Unavailable" : `Reserve stay · ${formatNaira(total)}`}
           </button>
           <p className="text-center text-[12px] text-[#8B8B86] mt-2">
-            Instant booking confirmation with Paystack secure checkout
+            {property.isReserved ? "Check back later or browse other verified stays" : "Instant booking confirmation with Paystack secure checkout"}
           </p>
         </div>
 
@@ -235,10 +251,15 @@ export default function BookingPanel({ property }: BookingPanelProps) {
         </div>
         <button
           type="button"
-          onClick={() => setIsModalOpen(true)}
-          className="bg-[#0B5D45] text-white px-6 py-3 rounded-xl font-semibold text-[14px] hover:bg-[#084936] transition-all shadow-md"
+          disabled={property.isReserved}
+          onClick={() => !property.isReserved && setIsModalOpen(true)}
+          className={`px-6 py-3 rounded-xl font-semibold text-[14px] transition-all shadow-md ${
+            property.isReserved
+              ? "bg-stone-200 text-stone-500 cursor-not-allowed shadow-none"
+              : "bg-[#0B5D45] text-white hover:bg-[#084936]"
+          }`}
         >
-          Reserve stay
+          {property.isReserved ? "Already Reserved" : "Reserve stay"}
         </button>
       </div>
 

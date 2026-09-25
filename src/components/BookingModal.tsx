@@ -385,22 +385,34 @@ export default function BookingModal({
                     onClick={() => setPaymentMethod("card")}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${
                       paymentMethod === "card"
-                        ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]/40"
-                        : "border-[#E7E5E0] hover:border-[#BFBFBA]"
+                        ? "border-[#24483A] bg-[#EDF3F0]/50 ring-1 ring-[#24483A]/40 shadow-xs"
+                        : "border-[#E7E5E0] hover:border-[#BFBFBA] bg-white"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-[#EDF3F0] flex items-center justify-center">
-                          <CreditCard size={18} className="text-[#0B5D45]" />
+                      <div className="flex items-center gap-3.5">
+                        {/* Authentic Card Icon with EMV Chip & Brand Accents */}
+                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#0B5D45]/15 flex items-center justify-center shrink-0">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="2" y="5" width="20" height="14" rx="3" stroke="#0B5D45" strokeWidth="1.8" />
+                            <path d="M2 9.5H22" stroke="#0B5D45" strokeWidth="1.8" />
+                            <rect x="4.5" y="12.5" width="3.5" height="2.5" rx="0.5" fill="#D97706" />
+                            <circle cx="15" cy="14" r="2.2" fill="#EB001B" />
+                            <circle cx="17.2" cy="14" r="2.2" fill="#F79E1B" fillOpacity="0.9" />
+                          </svg>
                         </div>
                         <div>
-                          <div className="text-[14px] font-semibold text-[#171717]">Card &amp; Digital Wallets</div>
-                          <div className="text-[12px] text-[#6B6B67]">Mastercard · Visa · Verve · Apple Pay · Google Pay</div>
+                          <div className="text-[14.5px] font-semibold text-[#171717]">Card &amp; Digital Wallets</div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#EB001B]/10 text-[#EB001B] border border-[#EB001B]/20">Mastercard</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#1A1F71]/10 text-[#1A1F71] border border-[#1A1F71]/20">Visa</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#008248]/10 text-[#008248] border border-[#008248]/20">Verve</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-stone-100 text-stone-600">Apple Pay</span>
+                          </div>
                         </div>
                       </div>
-                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "card" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
-                        {paymentMethod === "card" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "card" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                        {paymentMethod === "card" && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
                     </div>
                   </div>
@@ -410,22 +422,33 @@ export default function BookingModal({
                     onClick={() => setPaymentMethod("transfer")}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${
                       paymentMethod === "transfer"
-                        ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]/40"
-                        : "border-[#E7E5E0] hover:border-[#BFBFBA]"
+                        ? "border-[#24483A] bg-[#EDF3F0]/50 ring-1 ring-[#24483A]/40 shadow-xs"
+                        : "border-[#E7E5E0] hover:border-[#BFBFBA] bg-white"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center">
-                          <Building2 size={18} className="text-amber-700" />
+                      <div className="flex items-center gap-3.5">
+                        {/* Authentic Nigerian Banking Vault Icon */}
+                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#0B5D45]/15 flex items-center justify-center shrink-0">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 9.5L12 4L21 9.5H3Z" stroke="#0B5D45" strokeWidth="1.8" strokeLinejoin="round" fill="#0B5D45" fillOpacity="0.12" />
+                            <path d="M5.5 10.5V17M9.8 10.5V17M14.2 10.5V17M18.5 10.5V17" stroke="#0B5D45" strokeWidth="1.8" strokeLinecap="round" />
+                            <path d="M2.5 17.5H21.5" stroke="#0B5D45" strokeWidth="1.8" strokeLinecap="round" />
+                            <path d="M4 20H20" stroke="#0B5D45" strokeWidth="1.8" strokeLinecap="round" />
+                          </svg>
                         </div>
                         <div>
-                          <div className="text-[14px] font-semibold text-[#171717]">Nigerian Bank Transfer</div>
-                          <div className="text-[12px] text-[#6B6B67]">GTBank · Access · Zenith · Kuda · Virtual account</div>
+                          <div className="text-[14.5px] font-semibold text-[#171717]">Nigerian Bank Transfer</div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#E45300]/10 text-[#E45300] border border-[#E45300]/20">GTBank</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#D30000]/10 text-[#D30000] border border-[#D30000]/20">Zenith</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#002D62]/10 text-[#002D62] border border-[#002D62]/20">Access</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#5B21B6]/10 text-[#6D28D9] border border-[#5B21B6]/20">Kuda</span>
+                          </div>
                         </div>
                       </div>
-                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "transfer" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
-                        {paymentMethod === "transfer" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "transfer" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                        {paymentMethod === "transfer" && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
                     </div>
                   </div>
@@ -435,22 +458,40 @@ export default function BookingModal({
                     onClick={() => setPaymentMethod("ussd")}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${
                       paymentMethod === "ussd"
-                        ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]/40"
-                        : "border-[#E7E5E0] hover:border-[#BFBFBA]"
+                        ? "border-[#24483A] bg-[#EDF3F0]/50 ring-1 ring-[#24483A]/40 shadow-xs"
+                        : "border-[#E7E5E0] hover:border-[#BFBFBA] bg-white"
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
-                          <Smartphone size={18} className="text-blue-600" />
+                      <div className="flex items-center gap-3.5">
+                        {/* Authentic Mobile Dialer & Keypad Icon */}
+                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#0B5D45]/15 flex items-center justify-center shrink-0">
+                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="5.5" y="2.5" width="13" height="19" rx="2.5" stroke="#0B5D45" strokeWidth="1.8" />
+                            <circle cx="12" cy="18" r="0.9" fill="#0B5D45" />
+                            <path d="M9 5.5H15" stroke="#0B5D45" strokeWidth="1.5" strokeLinecap="round" />
+                            <circle cx="9" cy="9" r="0.8" fill="#0B5D45" />
+                            <circle cx="12" cy="9" r="0.8" fill="#0B5D45" />
+                            <circle cx="15" cy="9" r="0.8" fill="#0B5D45" />
+                            <circle cx="9" cy="12" r="0.8" fill="#0B5D45" />
+                            <circle cx="12" cy="12" r="0.8" fill="#0B5D45" />
+                            <circle cx="15" cy="12" r="0.8" fill="#0B5D45" />
+                            <circle cx="9" cy="15" r="0.8" fill="#0B5D45" />
+                            <circle cx="12" cy="15" r="0.8" fill="#0B5D45" />
+                            <circle cx="15" cy="15" r="0.8" fill="#0B5D45" />
+                          </svg>
                         </div>
                         <div>
-                          <div className="text-[14px] font-semibold text-[#171717]">USSD &amp; Mobile Money</div>
-                          <div className="text-[12px] text-[#6B6B67]">*737# · *919# · *901# and all Nigerian networks</div>
+                          <div className="text-[14.5px] font-semibold text-[#171717]">USSD &amp; Mobile Banking</div>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/20">*737# GTB</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/20">*919# UBA</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/20">*901# Access</span>
+                          </div>
                         </div>
                       </div>
-                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "ussd" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
-                        {paymentMethod === "ussd" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "ussd" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                        {paymentMethod === "ussd" && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
                     </div>
                   </div>

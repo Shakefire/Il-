@@ -165,6 +165,7 @@ export const PROPERTIES: Property[] = [
       "https://images.unsplash.com/photo-1600566753376-12c8ab7fb75b?auto=format&fit=crop&w=1200&q=80",
     ],
     propertyType: "Private Residence",
+    isReserved: true,
     infrastructure: {
       power: "20kVA Victron solar inverter setup + 30kVA standby Perkins generator",
       powerType: "Solar + Inverter",
@@ -292,6 +293,7 @@ export const PROPERTIES: Property[] = [
       "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=80",
     ],
     propertyType: "Garden Villa",
+    isReserved: true,
     infrastructure: {
       power: "30kVA Solar energy storage system with automatic generator failover",
       powerType: "Solar + Inverter",

@@ -283,51 +283,65 @@ export async function processSuccessfulPayment(data: {
       .limit(1);
 
     const propTitle = property?.title || "Shortlet Stay";
-    const guestName = `${booking.guestFirstName} ${booking.guestLastName}`;
+    const guestName = `${booking.guestFirstName || ""} ${booking.guestLastName || ""}`.trim() || "Valued Guest";
     const hostFullName = host
       ? `${host.firstName} ${host.lastName}`.trim()
-      : privateDetails?.contactName || "Designated Ilé Host";
-    const hostPhone = privateDetails?.contactPhone || host?.phone || undefined;
+      : privateDetails?.contactName || "Designated Ilé Stay Guide";
+    const hostPhone = privateDetails?.contactPhone || host?.phone || "+234 912 202 9904";
+    const exactAddress = privateDetails?.exactAddress || `${property?.neighborhood || "Maitama"}, ${property?.city || "Abuja"}`;
+    const unitNumber = privateDetails?.unitNumber || undefined;
+    const gateCode = privateDetails?.accessGateCode || "GATE-CLEARED";
+    const city = property?.city || "Abuja";
+    const state = property?.state || "FCT";
+    const latitude = property?.latitude || undefined;
+    const longitude = property?.longitude || undefined;
 
-    // A. Send Booking Confirmation (Now with apartment category, guest count, guest name)
+    // A. Send Booking Confirmation (Now with apartment category, guest count, guest name, map pin & address)
     await sendEmail(
       bookingConfirmationEmail({
         guestName,
         guestEmail: booking.guestEmail,
         propertyTitle: propTitle,
-        propertyType: property?.propertyType || undefined,
-        guestCount: booking.guestCount || undefined,
+        propertyType: property?.propertyType || "Serviced Residence",
+        guestCount: booking.guestCount || 1,
         referenceCode: booking.referenceCode,
         checkIn: booking.checkInDate,
         checkOut: booking.checkOutDate,
         totalAmount: booking.totalAmount,
         accessToken: booking.accessToken,
+        address: exactAddress,
+        unitNumber,
+        city,
+        state,
+        latitude,
+        longitude,
+        accessGateCode: gateCode,
+        hostName: hostFullName,
+        hostPhone,
       })
     );
 
-    // B. Send Private Gate Clearance / Access Pass (Now with structured address, map pin, host guide)
-    if (privateDetails) {
-      await sendEmail(
-        bookingAccessPassEmail({
-          guestName,
-          guestEmail: booking.guestEmail,
-          propertyTitle: propTitle,
-          referenceCode: booking.referenceCode,
-          checkIn: booking.checkInDate,
-          checkOut: booking.checkOutDate,
-          address: privateDetails.exactAddress,
-          unitNumber: privateDetails.unitNumber || undefined,
-          city: property?.city || undefined,
-          state: property?.state || undefined,
-          latitude: property?.latitude || undefined,
-          longitude: property?.longitude || undefined,
-          accessInstructions: privateDetails.checkInInstructions || "Present your reservation reference to estate security guards for swift clearance.",
-          accessGateCode: privateDetails.accessGateCode || undefined,
-          hostName: hostFullName,
-          hostPhone,
-        })
-      );
-    }
+    // B. Send Private Gate Clearance / Access Pass (ALWAYS dispatched with full map pin, address, gate pass)
+    await sendEmail(
+      bookingAccessPassEmail({
+        guestName,
+        guestEmail: booking.guestEmail,
+        propertyTitle: propTitle,
+        referenceCode: booking.referenceCode,
+        checkIn: booking.checkInDate,
+        checkOut: booking.checkOutDate,
+        address: exactAddress,
+        unitNumber,
+        city,
+        state,
+        latitude,
+        longitude,
+        accessInstructions: privateDetails?.checkInInstructions || "Present your reservation reference to estate security guards for swift clearance.",
+        accessGateCode: gateCode,
+        hostName: hostFullName,
+        hostPhone,
+      })
+    );
   } catch (emailErr) {
     console.warn("[Payments] Failed to dispatch booking confirmation emails:", emailErr);
   }
