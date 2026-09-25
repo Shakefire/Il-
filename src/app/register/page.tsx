@@ -17,7 +17,7 @@ import { useAuth } from "@/context/AuthContext";
 function RegisterForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextUrl = searchParams.get("next") || "/";
+  const nextUrl = searchParams.get("next");
   const { register } = useAuth();
 
   const [firstName, setFirstName] = useState("");
@@ -31,6 +31,7 @@ function RegisterForm() {
   const [socialLoading, setSocialLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [redirectTarget, setRedirectTarget] = useState("/profile");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const validateForm = () => {
@@ -76,7 +77,7 @@ function RegisterForm() {
     setIsLoading(true);
 
     try {
-      await register({
+      const user = await register({
         firstName,
         lastName,
         email,
@@ -84,9 +85,19 @@ function RegisterForm() {
         password,
       });
 
+      const destination =
+        nextUrl ||
+        (user.role === "admin"
+          ? "/admin"
+          : user.role === "host"
+          ? "/host/dashboard"
+          : "/profile");
+
+      setRedirectTarget(destination);
       setIsSuccess(true);
+
       setTimeout(() => {
-        router.push(nextUrl);
+        router.push(destination);
       }, 1200);
     } catch (err: unknown) {
       const message =
@@ -103,7 +114,7 @@ function RegisterForm() {
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 600));
-      router.push(nextUrl);
+      router.push(nextUrl || "/profile");
     } catch {
       setErrorMessage("Unable to connect with Google. Please try again.");
     } finally {
@@ -127,10 +138,10 @@ function RegisterForm() {
             />
             <div className="pt-2">
               <Link
-                href={nextUrl}
+                href={redirectTarget}
                 className="inline-flex items-center justify-center w-full h-[52px] bg-[#0B5D45] text-white rounded-[11px] font-medium text-[15px] hover:bg-[#084936] transition-colors"
               >
-                Continue to stays →
+                Go to Profile Dashboard →
               </Link>
             </div>
           </div>
@@ -269,7 +280,7 @@ function RegisterForm() {
             <div className="pt-2 text-center text-[14px] text-[#6B6B67]">
               Already have an account?{" "}
               <Link
-                href={`/login${nextUrl !== "/" ? `?next=${encodeURIComponent(nextUrl)}` : ""}`}
+                href={nextUrl && nextUrl !== "/" ? `/login?next=${encodeURIComponent(nextUrl)}` : "/login"}
                 className="font-semibold text-[#171717] hover:text-[#0B5D45] hover:underline transition-colors"
               >
                 Log in
