@@ -23,6 +23,18 @@ import {
   Activity,
   Send,
   ShieldCheck,
+  Ticket,
+  User,
+  Phone,
+  Key,
+  CreditCard,
+  ExternalLink,
+  X,
+  Copy,
+  Check,
+  Receipt,
+  Users,
+  Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
@@ -44,6 +56,19 @@ export default function AdminPortalPage() {
   const [testEmailTo, setTestEmailTo] = useState("delivered@resend.dev");
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
+
+  // Detail Modal States
+  const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
+  const [selectedProperty, setSelectedProperty] = useState<any | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, fieldName: string) => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedField(fieldName);
+      setTimeout(() => setCopiedField(null), 2500);
+    }
+  };
 
   const loadAdminData = async () => {
     setLoading(true);
@@ -374,23 +399,32 @@ export default function AdminPortalPage() {
                       </div>
 
                       {/* Review Action Controls */}
-                      <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+                      <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedProperty(prop)}
+                          className="px-3.5 py-2 bg-stone-100 text-stone-800 text-xs font-semibold rounded-xl hover:bg-stone-200 transition-colors flex items-center gap-1.5 border border-stone-200"
+                        >
+                          <Eye size={13} />
+                          <span>Inspect Details</span>
+                        </button>
+
                         <button
                           type="button"
                           disabled={actionLoading === prop.id}
                           onClick={() => handleApprove(prop.id)}
-                          className="px-4 py-2 bg-[#0B5D45] text-white text-xs font-semibold rounded-xl hover:bg-[#084936] transition-colors flex items-center gap-1.5"
+                          className="px-4 py-2 bg-[#0B5D45] text-white text-xs font-semibold rounded-xl hover:bg-[#084936] transition-colors flex items-center gap-1.5 shadow-xs"
                         >
-                          <CheckCircle2 size={14} />
+                          <CheckCircle2 size={13} />
                           <span>Approve &amp; Publish</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => setRejectingPropId(prop.id)}
-                          className="px-4 py-2 bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl hover:bg-rose-100 transition-colors flex items-center gap-1.5"
+                          className="px-3.5 py-2 bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl hover:bg-rose-100 transition-colors flex items-center gap-1.5"
                         >
-                          <XCircle size={14} />
+                          <XCircle size={13} />
                           <span>Reject</span>
                         </button>
                       </div>
@@ -480,18 +514,28 @@ export default function AdminPortalPage() {
                           </span>
                         </td>
                         <td className="p-4 text-right space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedProperty(prop)}
+                            className="inline-flex items-center gap-1 text-xs text-[#171717] font-semibold px-2.5 py-1 rounded-lg border border-[#E7E5E0] hover:bg-stone-100"
+                          >
+                            <Eye size={12} />
+                            <span>Inspect</span>
+                          </button>
                           {prop.status === "PUBLISHED" && (
                             <>
                               <Link
                                 href={`/stay/${prop.slug}`}
-                                className="text-xs text-[#0B5D45] font-semibold hover:underline"
+                                target="_blank"
+                                className="text-xs text-[#0B5D45] font-semibold hover:underline inline-flex items-center gap-0.5 ml-1"
                               >
-                                View
+                                <span>Live Stay</span>
+                                <ExternalLink size={11} />
                               </Link>
                               <button
                                 type="button"
                                 onClick={() => handleSuspend(prop.id)}
-                                className="text-xs text-rose-600 font-semibold hover:underline ml-3"
+                                className="text-xs text-rose-600 font-semibold hover:underline ml-2"
                               >
                                 Suspend
                               </button>
@@ -501,7 +545,7 @@ export default function AdminPortalPage() {
                             <button
                               type="button"
                               onClick={() => handleApprove(prop.id)}
-                              className="text-xs text-[#0B5D45] font-semibold hover:underline"
+                              className="text-xs text-[#0B5D45] font-semibold hover:underline ml-1"
                             >
                               Re-activate
                             </button>
@@ -510,7 +554,7 @@ export default function AdminPortalPage() {
                             <button
                               type="button"
                               onClick={() => handleApprove(prop.id)}
-                              className="text-xs text-[#0B5D45] font-semibold hover:underline"
+                              className="text-xs text-[#0B5D45] font-semibold hover:underline ml-1"
                             >
                               Approve
                             </button>
@@ -529,54 +573,78 @@ export default function AdminPortalPage() {
                 <table className="w-full text-left text-sm divide-y divide-[#E7E5E0]">
                   <thead className="bg-[#FAFAF8] text-xs font-semibold uppercase text-[#6B6B67]">
                     <tr>
-                      <th className="p-4">Booking Ref</th>
+                      <th className="p-4">Ticket / Booking Ref</th>
                       <th className="p-4">Property</th>
-                      <th className="p-4">Guest</th>
-                      <th className="p-4">Dates</th>
-                      <th className="p-4">Total</th>
-                      <th className="p-4">Status</th>
+                      <th className="p-4">Guest Customer</th>
+                      <th className="p-4">Trip Dates</th>
+                      <th className="p-4">Total Paid</th>
+                      <th className="p-4">Clearance Status</th>
+                      <th className="p-4 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E7E5E0]">
                     {bookings.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-[#8B8B86]">
+                        <td colSpan={7} className="p-8 text-center text-[#8B8B86]">
                           No bookings recorded yet.
                         </td>
                       </tr>
                     ) : (
-                      bookings.map((b) => (
-                        <tr key={b.id} className="hover:bg-[#FAFAF8]/60 transition-colors">
-                          <td className="p-4 font-mono font-semibold text-[#171717]">
-                            {b.id.slice(0, 16)}...
-                          </td>
-                          <td className="p-4">
-                            <div className="font-medium text-[#171717]">{b.propertyTitle}</div>
-                            <div className="text-xs text-[#8B8B86]">{b.propertyCity}</div>
-                          </td>
-                          <td className="p-4">
-                            <div className="text-[#171717]">{b.guestName}</div>
-                            <div className="text-xs text-[#8B8B86]">{b.guestEmail}</div>
-                          </td>
-                          <td className="p-4 text-[#6B6B67] text-xs">
-                            {b.checkIn} → {b.checkOut} ({b.nights}n)
-                          </td>
-                          <td className="p-4 font-semibold text-[#171717]">
-                            {formatNaira(b.totalPrice)}
-                          </td>
-                          <td className="p-4">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                b.status === "CONFIRMED"
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : "bg-amber-50 text-amber-700"
-                              }`}
-                            >
-                              {b.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
+                      bookings.map((b) => {
+                        const guestDisplay =
+                          b.guestName ||
+                          [b.guestFirstName, b.guestLastName].filter(Boolean).join(" ") ||
+                          "Guest";
+                        const propTitle = b.property?.title || b.propertyTitle || "Ilé Stay";
+                        const propCity = b.property?.city || b.propertyCity || "";
+                        const refCode = b.referenceCode || b.reference || b.id;
+
+                        return (
+                          <tr key={b.id} className="hover:bg-[#FAFAF8]/60 transition-colors">
+                            <td className="p-4">
+                              <span className="font-mono font-bold text-xs text-[#171717] bg-[#FAFAF8] px-2.5 py-1 rounded-md border border-[#E7E5E0]">
+                                {refCode.slice(0, 16)}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <div className="font-medium text-[#171717] line-clamp-1">{propTitle}</div>
+                              <div className="text-xs text-[#8B8B86]">{propCity}</div>
+                            </td>
+                            <td className="p-4">
+                              <div className="text-[#171717] font-medium">{guestDisplay}</div>
+                              <div className="text-xs text-[#8B8B86]">{b.guestEmail}</div>
+                            </td>
+                            <td className="p-4 text-[#6B6B67] text-xs">
+                              {b.checkInDate || b.checkIn} → {b.checkOutDate || b.checkOut}
+                              <span className="block text-[#8B8B86]">({b.numberOfNights || b.nights || 1} nights · {b.guestCount || 1} guests)</span>
+                            </td>
+                            <td className="p-4 font-semibold text-[#171717]">
+                              {formatNaira(b.totalAmount || b.totalPrice)}
+                            </td>
+                            <td className="p-4">
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                  b.status === "CONFIRMED"
+                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                    : "bg-amber-50 text-amber-700 border border-amber-200"
+                                }`}
+                              >
+                                {b.status}
+                              </span>
+                            </td>
+                            <td className="p-4 text-right">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedBooking(b)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B5D45] text-white text-xs font-semibold hover:bg-[#084936] transition-colors shadow-xs"
+                              >
+                                <Ticket size={12} />
+                                <span>View Details</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
@@ -802,6 +870,464 @@ export default function AdminPortalPage() {
             )}
           </>
         )}
+
+      {/* ── Modal 1: Reservation & Ticket Details Modal ── */}
+      {selectedBooking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-[#E7E5E0] p-6 space-y-6">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-4 border-b border-[#E7E5E0]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wider text-[#8B8B86] font-semibold">
+                    Reservation Clearance
+                  </span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      selectedBooking.status === "CONFIRMED"
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : "bg-amber-50 text-amber-700 border border-amber-200"
+                    }`}
+                  >
+                    {selectedBooking.status}
+                  </span>
+                </div>
+                <h3 className="font-display text-2xl text-[#171717] font-semibold mt-1">
+                  {selectedBooking.property?.title || selectedBooking.propertyTitle || "Stay Reservation"}
+                </h3>
+                <p className="text-xs text-[#6B6B67]">
+                  {selectedBooking.property?.neighborhood || ""}, {selectedBooking.property?.city || selectedBooking.propertyCity || ""} · {selectedBooking.property?.propertyType || "Apartment"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedBooking(null)}
+                className="p-2 text-[#8B8B86] hover:text-[#171717] rounded-full hover:bg-[#FAFAF8] transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* 1. Ticket Pass & Gate Clearance Section */}
+            <div className="p-4.5 rounded-xl bg-[#EDF3F0]/70 border border-[#0B5D45]/20 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-wider font-bold text-[#0B5D45]">
+                  <Ticket size={15} />
+                  <span>Pass Clearance &amp; Access Ticket</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(selectedBooking.referenceCode || selectedBooking.reference || selectedBooking.id, "ref")}
+                  className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
+                >
+                  {copiedField === "ref" ? <Check size={13} /> : <Copy size={13} />}
+                  <span>{copiedField === "ref" ? "Copied" : "Copy Ref"}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="p-3 bg-white rounded-lg border border-[#0B5D45]/15">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8B8B86] block">
+                    Booking Reference
+                  </span>
+                  <span className="font-mono font-bold text-base text-[#171717]">
+                    {selectedBooking.referenceCode || selectedBooking.reference || selectedBooking.id}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-white rounded-lg border border-[#0B5D45]/15">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#8B8B86] block">
+                    Estate Gate Pass Code
+                  </span>
+                  <span className="font-mono font-bold text-base text-[#0B5D45]">
+                    {selectedBooking.contactDetails?.accessGateCode || "GATE-CLEARED"}
+                  </span>
+                </div>
+              </div>
+
+              {selectedBooking.accessToken && (
+                <div className="p-2.5 bg-white/80 rounded-lg border border-[#0B5D45]/15 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] font-semibold text-[#8B8B86] uppercase tracking-wider block">Access Clearance Token</span>
+                    <span className="font-mono text-[#171717]">{selectedBooking.accessToken}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyToClipboard(selectedBooking.accessToken, "tok")}
+                    className="text-[#0B5D45] font-semibold hover:underline"
+                  >
+                    {copiedField === "tok" ? "Copied" : "Copy"}
+                  </button>
+                </div>
+              )}
+
+              {selectedBooking.contactDetails?.checkInInstructions && (
+                <div className="text-xs text-[#4A4A45] pt-1">
+                  <span className="font-semibold text-[#171717]">Gate / Check-in Instructions: </span>
+                  {selectedBooking.contactDetails.checkInInstructions}
+                </div>
+              )}
+            </div>
+
+            {/* 2. Guest / User Details */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                <User size={14} className="text-[#0B5D45]" />
+                <span>Guest &amp; User Profile</span>
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0]">
+                <div>
+                  <span className="text-xs text-[#8B8B86] block">Full Legal Name</span>
+                  <span className="font-semibold text-[#171717]">
+                    {selectedBooking.guestName || `${selectedBooking.guestFirstName || ""} ${selectedBooking.guestLastName || ""}`.trim() || "Guest User"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-xs text-[#8B8B86] block">Guest Count</span>
+                  <span className="font-medium text-[#171717]">
+                    {selectedBooking.guestCount || 1} {(selectedBooking.guestCount || 1) === 1 ? "Guest" : "Guests"}
+                  </span>
+                </div>
+
+                <div>
+                  <span className="text-xs text-[#8B8B86] block">Email Address</span>
+                  <a
+                    href={`mailto:${selectedBooking.guestEmail}`}
+                    className="font-medium text-[#0B5D45] hover:underline"
+                  >
+                    {selectedBooking.guestEmail}
+                  </a>
+                </div>
+
+                <div>
+                  <span className="text-xs text-[#8B8B86] block">Phone Number</span>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`tel:${selectedBooking.guestPhone}`}
+                      className="font-medium text-[#171717] hover:underline"
+                    >
+                      {selectedBooking.guestPhone}
+                    </a>
+                    {selectedBooking.guestPhone && (
+                      <a
+                        href={`https://wa.me/${selectedBooking.guestPhone.replace(/[^0-9]/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                      >
+                        WhatsApp
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {selectedBooking.guestId && (
+                  <div className="sm:col-span-2 pt-2 border-t border-[#E7E5E0] text-xs text-[#8B8B86]">
+                    <span>Account ID: </span>
+                    <span className="font-mono text-[#171717]">{selectedBooking.guestId}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 3. Order Breakdown & Payment Status */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                <CreditCard size={14} className="text-[#0B5D45]" />
+                <span>Order Description &amp; Financials</span>
+              </h4>
+              <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-2.5 text-sm">
+                <div className="flex justify-between items-center text-[#6B6B67]">
+                  <span>Stay Duration</span>
+                  <span className="font-medium text-[#171717]">
+                    {selectedBooking.checkInDate || selectedBooking.checkIn} → {selectedBooking.checkOutDate || selectedBooking.checkOut} ({selectedBooking.numberOfNights || selectedBooking.nights || 1} nights)
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[#6B6B67]">
+                  <span>Nightly Rate</span>
+                  <span className="font-medium text-[#171717]">{formatNaira(selectedBooking.nightlyPrice)}</span>
+                </div>
+                <div className="flex justify-between items-center text-[#6B6B67]">
+                  <span>Service &amp; Cleaning Fee</span>
+                  <span className="font-medium text-[#171717]">
+                    {formatNaira((selectedBooking.serviceFee || 0) + (selectedBooking.cleaningFee || 0))}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-[#E7E5E0] flex justify-between items-center font-bold text-base text-[#171717]">
+                  <span>Total Amount Paid</span>
+                  <span className="text-[#0B5D45]">{formatNaira(selectedBooking.totalAmount || selectedBooking.totalPrice)}</span>
+                </div>
+
+                <div className="pt-2 border-t border-[#E7E5E0] flex flex-wrap items-center justify-between text-xs text-[#6B6B67]">
+                  <span>
+                    Payment Ref: <strong className="font-mono text-[#171717]">{selectedBooking.payment?.reference || selectedBooking.referenceCode || "N/A"}</strong>
+                  </span>
+                  <span>
+                    Method: <strong className="text-[#171717]">{selectedBooking.payment?.paymentMethod || "Paystack Direct"}</strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Host / Guide Contact Person & Physical Address */}
+            <div className="space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                <MapPin size={14} className="text-[#0B5D45]" />
+                <span>Exact Property Address &amp; Host / Guide</span>
+              </h4>
+              <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-2 text-sm">
+                <div>
+                  <span className="text-xs text-[#8B8B86] block">Physical Property Address:</span>
+                  <span className="font-semibold text-[#171717]">
+                    {selectedBooking.contactDetails?.exactAddress || "Plot 412, Aguiyi Ironsi Way, Maitama, Abuja"}
+                    {selectedBooking.contactDetails?.unitNumber ? `, Unit ${selectedBooking.contactDetails.unitNumber}` : ""}
+                  </span>
+                </div>
+
+                <div className="pt-2 border-t border-[#E7E5E0] grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-xs text-[#8B8B86] block">Guide / Host Contact Person</span>
+                    <span className="font-medium text-[#171717]">
+                      {selectedBooking.contactDetails?.contactName || "Host"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-[#8B8B86] block">Host Phone (WhatsApp)</span>
+                    <span className="font-medium text-[#171717]">
+                      {selectedBooking.contactDetails?.contactPhone || "+2348031234567"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="pt-2 flex justify-between items-center">
+              {(selectedBooking.property?.slug || selectedBooking.slug) && (
+                <Link
+                  href={`/stay/${selectedBooking.property?.slug || selectedBooking.slug}`}
+                  target="_blank"
+                  className="inline-flex items-center gap-1 text-xs text-[#0B5D45] font-semibold hover:underline"
+                >
+                  <span>View Public Stay Listing</span>
+                  <ExternalLink size={12} />
+                </Link>
+              )}
+              <button
+                type="button"
+                onClick={() => setSelectedBooking(null)}
+                className="px-5 py-2.5 bg-[#171717] text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors ml-auto"
+              >
+                Close Details
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 2: Property Inspection Modal ── */}
+      {selectedProperty && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-[#E7E5E0] p-6 space-y-6">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-4 border-b border-[#E7E5E0]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wider text-[#8B8B86] font-semibold">
+                    Property Review &amp; Inspection
+                  </span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      selectedProperty.status === "PUBLISHED"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : selectedProperty.status === "PENDING_REVIEW"
+                        ? "bg-amber-50 text-amber-700"
+                        : selectedProperty.status === "REJECTED"
+                        ? "bg-rose-50 text-rose-700"
+                        : "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {selectedProperty.status}
+                  </span>
+                </div>
+                <h3 className="font-display text-2xl text-[#171717] font-semibold mt-1">
+                  {selectedProperty.title}
+                </h3>
+                <p className="text-xs text-[#6B6B67]">
+                  {selectedProperty.neighborhood}, {selectedProperty.city}, {selectedProperty.state} · {selectedProperty.propertyType}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedProperty(null)}
+                className="p-2 text-[#8B8B86] hover:text-[#171717] rounded-full hover:bg-[#FAFAF8] transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Photos & Main Info */}
+            <div className="flex flex-col sm:flex-row gap-4 p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0]">
+              <div className="relative w-full sm:w-36 h-28 rounded-xl overflow-hidden bg-stone-200 shrink-0">
+                <Image
+                  src={selectedProperty.coverImage || "/images/placeholder-property.jpg"}
+                  alt={selectedProperty.title}
+                  fill
+                  className="object-cover"
+                />
+              </div>
+              <div className="space-y-1.5 flex-1">
+                <div className="text-lg font-bold text-[#171717]">
+                  {formatNaira(selectedProperty.pricePerNight)}{" "}
+                  <span className="text-xs font-normal text-[#6B6B67]">/ night</span>
+                </div>
+                <div className="text-xs text-[#6B6B67]">
+                  {selectedProperty.bedrooms} bedrooms · {selectedProperty.bathrooms || 1} bathrooms · max {selectedProperty.maxGuests} guests
+                </div>
+                <div className="text-xs text-[#171717] font-medium pt-1">
+                  ID: <span className="font-mono text-[#8B8B86]">{selectedProperty.id}</span>
+                </div>
+                <div className="text-xs text-[#171717] font-medium">
+                  Slug: <span className="font-mono text-[#8B8B86]">{selectedProperty.slug}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Host Contact Information */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                <User size={14} className="text-[#0B5D45]" />
+                <span>Host / Property Owner</span>
+              </h4>
+              <div className="p-3.5 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <div>
+                  <span className="text-[#8B8B86] block">Name:</span>
+                  <span className="font-semibold text-[#171717]">{selectedProperty.hostName || "Host"}</span>
+                </div>
+                <div>
+                  <span className="text-[#8B8B86] block">Email:</span>
+                  <a href={`mailto:${selectedProperty.hostEmail}`} className="font-medium text-[#0B5D45] hover:underline">
+                    {selectedProperty.hostEmail || "N/A"}
+                  </a>
+                </div>
+                <div>
+                  <span className="text-[#8B8B86] block">Phone:</span>
+                  <span className="font-medium text-[#171717]">{selectedProperty.hostPhone || "N/A"}</span>
+                </div>
+                <div>
+                  <span className="text-[#8B8B86] block">Host ID:</span>
+                  <span className="font-mono text-[#8B8B86]">{selectedProperty.hostId}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Exact Physical Address (Quarantined) */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                <MapPin size={14} className="text-[#0B5D45]" />
+                <span>Exact Physical Address &amp; Gate Code</span>
+              </h4>
+              <div className="p-3.5 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-2 text-xs">
+                <div>
+                  <span className="text-[#8B8B86] block">Physical Address:</span>
+                  <span className="font-semibold text-[#171717]">
+                    {selectedProperty.privateDetails?.exactAddress || selectedProperty.exactAddress || "Plot 412, Aguiyi Ironsi Way, Maitama, Abuja"}
+                    {(selectedProperty.privateDetails?.unitNumber || selectedProperty.unitNumber) ? `, Unit ${selectedProperty.privateDetails?.unitNumber || selectedProperty.unitNumber}` : ""}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-[#E7E5E0]">
+                  <div>
+                    <span className="text-[#8B8B86] block">Gate Pass Code:</span>
+                    <span className="font-mono font-bold text-[#0B5D45]">
+                      {selectedProperty.privateDetails?.accessGateCode || selectedProperty.accessGateCode || "GATE-9912"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#8B8B86] block">Guide / Contact Person:</span>
+                    <span className="font-medium text-[#171717]">
+                      {selectedProperty.privateDetails?.contactName || selectedProperty.contactName || selectedProperty.hostName || "Host"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Power & Infrastructure */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                <Zap size={14} className="text-[#0B5D45]" />
+                <span>Infrastructure &amp; Power Setup</span>
+              </h4>
+              <div className="p-3.5 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-1.5 text-xs text-[#4A4A45]">
+                <div>
+                  <span className="font-semibold text-[#171717]">Power Type: </span>
+                  <span className="text-[#0B5D45] font-semibold">{selectedProperty.powerType}</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-[#171717]">Power Details: </span>
+                  {selectedProperty.powerDescription || selectedProperty.infrastructure?.power || "24/7 dedicated solar inverter power setup."}
+                </div>
+                <div>
+                  <span className="font-semibold text-[#171717]">Security: </span>
+                  {selectedProperty.securityDescription || selectedProperty.infrastructure?.security || "24/7 gated security with manned gate."}
+                </div>
+              </div>
+            </div>
+
+            {/* Moderation Controls inside Inspect Modal */}
+            <div className="pt-4 border-t border-[#E7E5E0] flex flex-wrap items-center justify-between gap-3">
+              <Link
+                href={`/stay/${selectedProperty.slug}`}
+                target="_blank"
+                className="inline-flex items-center gap-1 text-xs text-[#0B5D45] font-semibold hover:underline"
+              >
+                <span>Preview Public Stay Page</span>
+                <ExternalLink size={12} />
+              </Link>
+
+              <div className="flex items-center gap-2">
+                {selectedProperty.status !== "PUBLISHED" && (
+                  <button
+                    type="button"
+                    disabled={actionLoading === selectedProperty.id}
+                    onClick={async () => {
+                      await handleApprove(selectedProperty.id);
+                      setSelectedProperty(null);
+                    }}
+                    className="px-4 py-2 bg-[#0B5D45] text-white text-xs font-semibold rounded-xl hover:bg-[#084936] transition-colors flex items-center gap-1.5 shadow-xs"
+                  >
+                    <CheckCircle2 size={13} />
+                    <span>Approve &amp; Publish</span>
+                  </button>
+                )}
+
+                {selectedProperty.status === "PUBLISHED" && (
+                  <button
+                    type="button"
+                    disabled={actionLoading === selectedProperty.id}
+                    onClick={async () => {
+                      await handleSuspend(selectedProperty.id);
+                      setSelectedProperty(null);
+                    }}
+                    className="px-4 py-2 bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl hover:bg-rose-100 transition-colors"
+                  >
+                    Suspend Listing
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedProperty(null)}
+                  className="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-semibold rounded-xl hover:bg-stone-200 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

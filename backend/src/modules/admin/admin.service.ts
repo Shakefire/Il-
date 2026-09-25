@@ -40,18 +40,32 @@ export const adminService = {
       .limit(pagination.limit)
       .offset(pagination.offset);
 
-    // Fetch host names
+    // Fetch host names and private details
     const enriched = await Promise.all(
       items.map(async (prop: any) => {
         const [host] = await db
-          .select({ firstName: schema.users.firstName, lastName: schema.users.lastName })
+          .select({
+            firstName: schema.users.firstName,
+            lastName: schema.users.lastName,
+            email: schema.users.email,
+            phone: schema.users.phone,
+          })
           .from(schema.users)
           .where(eq(schema.users.id, prop.hostId))
           .limit(1);
 
+        const [privateDetails] = await db
+          .select()
+          .from(schema.propertyPrivateDetails)
+          .where(eq(schema.propertyPrivateDetails.propertyId, prop.id))
+          .limit(1);
+
         return {
           ...prop,
-          hostName: host ? `${host.firstName} ${host.lastName}` : "Unknown",
+          hostName: host ? `${host.firstName} ${host.lastName}` : "Host",
+          hostEmail: host?.email || "",
+          hostPhone: host?.phone || "",
+          privateDetails: privateDetails || null,
         };
       })
     );
@@ -139,16 +153,74 @@ export const adminService = {
       .limit(pagination.limit)
       .offset(pagination.offset);
 
-    // Enrich with property title
+    // Enrich with property, private details, host, and payment
     const enriched = await Promise.all(
       items.map(async (b: any) => {
         const [property] = await db
-          .select({ title: schema.properties.title, city: schema.properties.city })
+          .select({
+            id: schema.properties.id,
+            title: schema.properties.title,
+            slug: schema.properties.slug,
+            city: schema.properties.city,
+            neighborhood: schema.properties.neighborhood,
+            state: schema.properties.state,
+            propertyType: schema.properties.propertyType,
+            coverImage: schema.properties.coverImage,
+            hostId: schema.properties.hostId,
+          })
           .from(schema.properties)
           .where(eq(schema.properties.id, b.propertyId))
           .limit(1);
 
-        return { ...b, property: property || null };
+        const [privateDetails] = await db
+          .select()
+          .from(schema.propertyPrivateDetails)
+          .where(eq(schema.propertyPrivateDetails.propertyId, b.propertyId))
+          .limit(1);
+
+        const [payment] = await db
+          .select()
+          .from(schema.payments)
+          .where(eq(schema.payments.bookingId, b.id))
+          .limit(1);
+
+        const guestFullName = `${b.guestFirstName || ""} ${b.guestLastName || ""}`.trim() || "Guest";
+
+        return {
+          ...b,
+          // Normalised helpers for UI components
+          reference: b.referenceCode,
+          ticketCode: b.referenceCode,
+          guestName: guestFullName,
+          checkIn: b.checkInDate,
+          checkOut: b.checkOutDate,
+          nights: b.numberOfNights,
+          totalPrice: b.totalAmount,
+          propertyTitle: property?.title || "Property",
+          propertyCity: property?.city || "",
+          property: property || null,
+          contactDetails: privateDetails
+            ? {
+                exactAddress: privateDetails.exactAddress,
+                unitNumber: privateDetails.unitNumber,
+                contactName: privateDetails.contactName,
+                contactPhone: privateDetails.contactPhone,
+                contactEmail: privateDetails.contactEmail,
+                accessGateCode: privateDetails.accessGateCode,
+                checkInInstructions: privateDetails.checkInInstructions,
+              }
+            : null,
+          payment: payment
+            ? {
+                id: payment.id,
+                reference: payment.reference,
+                amount: payment.amount,
+                status: payment.status,
+                paymentMethod: payment.method || payment.gatewayProvider || "Paystack Direct",
+                paidAt: payment.paidAt || payment.createdAt,
+              }
+            : null,
+        };
       })
     );
 

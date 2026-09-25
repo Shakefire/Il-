@@ -16,10 +16,24 @@ export async function propertiesRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // GET /api/properties/:slug — Get property by slug
+  // GET /api/properties/:slug — Get property by slug or ID
   fastify.get("/:slug", async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const property = await getPropertyBySlug(slug);
+
+    let allowUnpublished = false;
+    const authHeader = request.headers.authorization;
+    if (authHeader) {
+      try {
+        const { verifySessionToken } = await import("../../lib/security");
+        const token = authHeader.replace(/^Bearer\s+/i, "");
+        const payload = verifySessionToken(token);
+        if (payload && (payload.role === "admin" || payload.role === "host")) {
+          allowUnpublished = true;
+        }
+      } catch {}
+    }
+
+    const property = await getPropertyBySlug(slug, allowUnpublished);
 
     if (!property) {
       return reply.status(404).send({ error: "Property not found or not published" });

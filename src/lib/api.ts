@@ -15,7 +15,10 @@ export const api = {
   },
 
   async getProperty(slug: string) {
-    const res = await fetch(`/api/properties/${encodeURIComponent(slug)}`, { credentials: "include" });
+    const res = await fetch(`/api/properties/${encodeURIComponent(slug)}`, {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
     if (!res.ok) {
       if (res.status === 404) return null;
       throw new Error("Failed to load property");

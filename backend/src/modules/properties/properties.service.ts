@@ -1,4 +1,4 @@
-import { eq, inArray, count, and, asc } from "drizzle-orm";
+import { eq, inArray, count, and, asc, or } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
 import { PROPERTY_STATUS } from "../../config/constants";
@@ -122,19 +122,23 @@ export async function getPublishedProperties(pagination: { limit: number; offset
 }
 
 /**
- * Get a single published property by slug with full details.
+ * Get a single property by slug (or ID) with full details.
  */
-export async function getPropertyBySlug(slug: string) {
+export async function getPropertyBySlug(slugOrId: string, allowUnpublished = false) {
   const db = getDb();
+
+  const matchCondition = or(
+    eq(schema.properties.slug, slugOrId),
+    eq(schema.properties.id, slugOrId)
+  );
 
   const [prop] = await db
     .select()
     .from(schema.properties)
     .where(
-      and(
-        eq(schema.properties.slug, slug),
-        eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED)
-      )
+      allowUnpublished
+        ? matchCondition
+        : and(matchCondition, eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED))
     )
     .limit(1);
 
