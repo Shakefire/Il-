@@ -1,5 +1,9 @@
 "use client";
 
+// Force dynamic rendering to prevent stale /_next/data route mismatches
+// after new Vercel deployments (avoids 500 on client navigation)
+export const dynamic = "force-dynamic";
+
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";

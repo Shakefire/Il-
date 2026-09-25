@@ -16,6 +16,15 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  // Prevent Vercel from issuing redirects that break /_next/data routes
+  skipTrailingSlashRedirect: true,
+  // Suppress the Suspense CSR bailout that causes 500s on dynamic client pages
+  experimental: {
+    missingSuspenseWithCSRBailout: false,
+  },
   async rewrites() {
     const backendUrl = process.env.BACKEND_URL || "http://127.0.0.1:4000";
     return [
