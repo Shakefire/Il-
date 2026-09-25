@@ -221,7 +221,13 @@ export const api = {
       credentials: "include",
     });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error || "Failed to submit property for review");
+    if (!res.ok) {
+      const msg =
+        body.missingFields && body.missingFields.length > 0
+          ? `${body.error}\n\nMissing required details:\n• ${body.missingFields.join("\n• ")}`
+          : body.error || "Failed to submit property for review";
+      throw new Error(msg);
+    }
     return body;
   },
 
