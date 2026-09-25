@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
+import { formatNaira } from "@/lib/utils";
 
 interface BookingItem {
   id: string;
@@ -243,7 +244,7 @@ export default function TripsPage() {
                       {/* Action CTA */}
                       <div className="w-full md:w-auto flex flex-col sm:flex-row md:flex-col items-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-[#F2F0EB]">
                         <p className="text-base font-bold text-[#171717] self-start md:self-end">
-                          ₦{b.totalAmount.toLocaleString()}
+                          {formatNaira(b.totalAmount)}
                         </p>
                         <button
                           type="button"
@@ -275,7 +276,7 @@ export default function TripsPage() {
                           {b.property?.title || `Stay #${b.referenceCode}`}
                         </p>
                         <p className="text-xs text-[#6B6B67]">
-                          {b.checkInDate} — {b.checkOutDate} · ₦{b.totalAmount.toLocaleString()}
+                          {b.checkInDate} — {b.checkOutDate} · {formatNaira(b.totalAmount)}
                         </p>
                       </div>
                       <span className="text-xs font-medium px-2 py-0.5 rounded bg-neutral-100 text-[#6B6B67]">

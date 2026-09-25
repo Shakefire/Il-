@@ -590,7 +590,7 @@ export default function AdminPortalPage() {
                         <div className="text-[#6B6B67] mt-0.5">{log.details}</div>
                       </div>
                       <div className="text-right text-[#8B8B86] shrink-0">
-                        {new Date(log.createdAt).toLocaleString()}
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString() : ""}
                       </div>
                     </div>
                   ))

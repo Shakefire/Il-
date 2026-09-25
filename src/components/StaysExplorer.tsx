@@ -7,6 +7,7 @@ import PropertyCard from "@/components/PropertyCard";
 import SecondaryActionBar, { ViewMode, SortOption } from "@/components/SecondaryActionBar";
 import MapPanel from "@/components/MapPanel";
 import { ArrowRight, X } from "lucide-react";
+import { formatNaira } from "@/lib/utils";
 
 interface StaysExplorerProps {
   initialProperties: Property[];
@@ -131,7 +132,7 @@ export default function StaysExplorer({ initialProperties }: StaysExplorerProps)
                   Max Price per Night
                 </label>
                 <span className="text-sm font-semibold text-[#171717]">
-                  ₦{maxPrice.toLocaleString()}
+                  {formatNaira(maxPrice)}
                 </span>
               </div>
               <input

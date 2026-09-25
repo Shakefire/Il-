@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import LocationAutocomplete, { SelectedLocation } from "@/components/LocationAutocomplete";
+import { formatNaira } from "@/lib/utils";
 
 const PROPERTY_TYPES = [
   "Apartment",
@@ -959,7 +960,7 @@ export default function BecomeAHostPage() {
                 <div className="pt-3 space-y-1">
                   <span className="text-xs uppercase font-semibold text-[#8B8B86]">Pricing</span>
                   <p className="text-base font-bold text-[#0B5D45]">
-                    ₦{pricePerNight.toLocaleString()} / night
+                    {formatNaira(pricePerNight)} / night
                   </p>
                 </div>
 
