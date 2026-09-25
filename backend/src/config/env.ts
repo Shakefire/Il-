@@ -39,12 +39,6 @@ const envSchema = z.object({
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),
 
-  // ─── Supabase ───
-  SUPABASE_URL: z.string().url().optional(),
-  SUPABASE_PUBLISHABLE_KEY: z.string().optional(),
-  SUPABASE_SECRET_KEY: z.string().optional(),
-  SUPABASE_JWKS_URL: z.string().url().optional(),
-
   // ─── Frontend ───
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
 
