@@ -2,7 +2,7 @@ import { Property } from "@/types";
 
 export const PROPERTIES: Property[] = [
   {
-    id: "prop-1",
+    id: "prop_1_the-olive-residence-maitama",
     slug: "the-olive-residence-maitama",
     title: "The Olive Residence",
     tagline: "Quiet three-bedroom residence with private terrace and continuous solar power.",
@@ -77,7 +77,7 @@ export const PROPERTIES: Property[] = [
     featured: true,
   },
   {
-    id: "prop-2",
+    id: "prop_2_the-cedar-loft-wuse-2",
     slug: "the-cedar-loft-wuse-2",
     title: "The Cedar Loft",
     tagline: "Minimalist two-bedroom loft within walking distance of Banex and Adetokunbo Ademola.",
@@ -141,7 +141,7 @@ export const PROPERTIES: Property[] = [
     featured: true,
   },
   {
-    id: "prop-3",
+    id: "prop_3_the-palm-courtyard-lekki",
     slug: "the-palm-courtyard-lekki",
     title: "The Palm Courtyard",
     tagline: "Serene three-bedroom home in Lekki Phase 1 with a private dip pool.",
@@ -205,7 +205,7 @@ export const PROPERTIES: Property[] = [
     featured: true,
   },
   {
-    id: "prop-4",
+    id: "prop_4_the-bourdillon-suite-ikoyi",
     slug: "the-bourdillon-suite-ikoyi",
     title: "The Bourdillon Suite",
     tagline: "Refined two-bedroom residence in Old Ikoyi surrounded by mature mahogany trees.",
@@ -269,7 +269,7 @@ export const PROPERTIES: Property[] = [
     featured: true,
   },
   {
-    id: "prop-5",
+    id: "prop_5_the-asokoro-villa-abuja",
     slug: "the-asokoro-villa-abuja",
     title: "The Asokoro Terrace",
     tagline: "Spacious four-bedroom family villa with scenic views over Aso Rock.",
@@ -332,7 +332,7 @@ export const PROPERTIES: Property[] = [
     featured: false,
   },
   {
-    id: "prop-6",
+    id: "prop_6_the-eko-atlantic-horizon-lagos",
     slug: "the-eko-atlantic-horizon-lagos",
     title: "The Atlantic Horizon",
     tagline: "Minimalist ocean-facing two-bedroom apartment in Eko Atlantic City.",
@@ -395,7 +395,7 @@ export const PROPERTIES: Property[] = [
     featured: true,
   },
   {
-    id: "prop-7",
+    id: "prop_7_the-guzape-sanctuary-abuja",
     slug: "the-guzape-sanctuary-abuja",
     title: "The Guzape Sanctuary",
     tagline: "Modern hilltop one-bedroom studio with private balcony overlooking the city basin.",
@@ -457,7 +457,7 @@ export const PROPERTIES: Property[] = [
     featured: false,
   },
   {
-    id: "prop-8",
+    id: "prop_8_the-victoria-terrace-vi",
     slug: "the-victoria-terrace-vi",
     title: "The Victoria Terrace",
     tagline: "Tasteful three-bedroom serviced apartment on Victoria Island with pool and gym.",
@@ -519,7 +519,7 @@ export const PROPERTIES: Property[] = [
     featured: false,
   },
   {
-    id: "prop-9",
+    id: "prop_9_the-jabi-lake-residence-abuja",
     slug: "the-jabi-lake-residence-abuja",
     title: "The Jabi Lake Residence",
     tagline: "Serene two-bedroom apartment overlooking the water in Jabi, Abuja.",
@@ -581,7 +581,7 @@ export const PROPERTIES: Property[] = [
     featured: false,
   },
   {
-    id: "prop-10",
+    id: "prop_10_the-gra-garden-villa-ikeja",
     slug: "the-gra-garden-villa-ikeja",
     title: "The GRA Garden Villa",
     tagline: "Secluded three-bedroom residence in leafy Ikeja GRA with landscaped garden.",

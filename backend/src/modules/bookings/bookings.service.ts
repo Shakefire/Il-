@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, gt, lt, lte, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, like, gt, lt, lte, desc, sql, inArray } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
 import { BOOKING_STATUS } from "../../config/constants";
@@ -63,15 +63,22 @@ export const bookingsService = {
     // 2. Execute within an atomic PostgreSQL transaction
     return await db.transaction(async (tx) => {
       // A. Verify property is bookable & published
+      const normalizedPropId = parsed.propertyId.replace("prop-", "prop_");
       const [property] = await tx
         .select()
         .from(schema.properties)
         .where(
           and(
-            eq(schema.properties.id, parsed.propertyId),
+            or(
+              eq(schema.properties.id, parsed.propertyId),
+              eq(schema.properties.slug, parsed.propertyId),
+              like(schema.properties.id, `%${normalizedPropId}%`),
+              like(schema.properties.id, `%${parsed.propertyId}%`)
+            ),
             eq(schema.properties.status, "PUBLISHED")
           )
-        );
+        )
+        .limit(1);
 
       if (!property) {
         const err: any = new Error("Property not found or not published.");
@@ -304,13 +311,29 @@ export const bookingsService = {
    */
   async checkAvailability(propertyId: string, checkInDate: string, checkOutDate: string) {
     const db = getDb();
+    const normalizedPropId = propertyId.replace("prop-", "prop_");
+
+    const [prop] = await db
+      .select({ id: schema.properties.id })
+      .from(schema.properties)
+      .where(
+        or(
+          eq(schema.properties.id, propertyId),
+          eq(schema.properties.slug, propertyId),
+          like(schema.properties.id, `%${normalizedPropId}%`),
+          like(schema.properties.id, `%${propertyId}%`)
+        )
+      )
+      .limit(1);
+
+    const canonicalPropertyId = prop ? prop.id : propertyId;
 
     const conflicting = await db
       .select()
       .from(schema.availabilityBlocks)
       .where(
         and(
-          eq(schema.availabilityBlocks.propertyId, propertyId),
+          eq(schema.availabilityBlocks.propertyId, canonicalPropertyId),
           and(
             lt(schema.availabilityBlocks.startDate, checkOutDate),
             gt(schema.availabilityBlocks.endDate, checkInDate)
@@ -324,7 +347,7 @@ export const bookingsService = {
 
     return {
       available: conflicting.length === 0,
-      propertyId,
+      propertyId: canonicalPropertyId,
       checkInDate,
       checkOutDate,
       totalNights,
