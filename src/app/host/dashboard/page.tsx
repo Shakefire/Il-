@@ -27,6 +27,7 @@ import {
   CalendarX,
   TrendingUp,
   Layers,
+  RotateCcw,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
@@ -291,6 +292,18 @@ export default function HostDashboardPage() {
       loadProperties();
     } catch (err: any) {
       alert(err.message || "Failed to submit property for review");
+    }
+  };
+
+  const handleRelistProperty = async (propId: string) => {
+    if (!confirm("Relist this property? It will return to PUBLISHED status and become bookable again.")) return;
+    try {
+      await api.relistHostProperty(propId);
+      setActionMessage("Property relisted and is now live in search results!");
+      loadProperties();
+      loadStats();
+    } catch (err: any) {
+      alert(err.message || "Failed to relist property.");
     }
   };
 
@@ -663,13 +676,36 @@ export default function HostDashboardPage() {
 
                           {/* Rejected actions */}
                           {prop.status === "REJECTED" && (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleSubmitForReview(prop.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700"
+                              >
+                                <Send size={12} />
+                                <span>Resubmit for Review</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRelistProperty(prop.id)}
+                                title="Relist Property"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EDF3F0] text-[#0B5D45] text-xs font-semibold hover:bg-[#D5EAE1] border border-[#0B5D45]/20"
+                              >
+                                <RotateCcw size={12} />
+                                <span>Relist</span>
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Suspended actions */}
+                          {prop.status === "SUSPENDED" && (
                             <button
                               type="button"
-                              onClick={() => handleSubmitForReview(prop.id)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700"
+                              onClick={() => handleRelistProperty(prop.id)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EDF3F0] text-[#0B5D45] text-xs font-semibold hover:bg-[#D5EAE1] border border-[#0B5D45]/20"
                             >
-                              <Send size={12} />
-                              <span>Resubmit for Review</span>
+                              <RotateCcw size={12} />
+                              <span>Relist Property</span>
                             </button>
                           )}
 

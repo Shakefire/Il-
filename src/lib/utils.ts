@@ -36,3 +36,29 @@ export function calculateNights(checkIn?: string | null, checkOut?: string | nul
     return 1;
   }
 }
+
+export function getTodayISO(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function getDefaultDates(stayNights = 3): { checkIn: string; checkOut: string } {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  const checkIn = `${year}-${month}-${day}`;
+
+  const outDate = new Date(today);
+  outDate.setDate(today.getDate() + stayNights);
+  const outYear = outDate.getFullYear();
+  const outMonth = String(outDate.getMonth() + 1).padStart(2, "0");
+  const outDay = String(outDate.getDate()).padStart(2, "0");
+  const checkOut = `${outYear}-${outMonth}-${outDay}`;
+
+  return { checkIn, checkOut };
+}
+

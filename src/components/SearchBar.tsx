@@ -4,8 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Search, MapPin, Calendar, CalendarCheck, Users, ChevronDown,
-  Check, ChevronLeft, ChevronRight, Loader2,
+  Check, ChevronLeft, ChevronRight, Loader2, ArrowRight,
 } from "lucide-react";
+import { getDefaultDates, getTodayISO } from "@/lib/utils";
 
 /* ─── House Type Iconography System (20x20, 1.5px stroke, rounded) ──────── */
 
@@ -159,17 +160,18 @@ interface SearchBarProps {
 export default function SearchBar({
   initialDestination = "Abuja",
   initialPropertyType = "All Types",
-  initialCheckIn = "2026-09-24",
-  initialCheckOut = "2026-09-27",
+  initialCheckIn,
+  initialCheckOut,
   initialGuests = 2,
   compact = false,
 }: SearchBarProps) {
   const router = useRouter();
+  const defaultDates = getDefaultDates();
 
   const [destination, setDestination] = useState(initialDestination);
   const [propertyType, setPropertyType] = useState(initialPropertyType);
-  const [checkIn, setCheckIn] = useState(initialCheckIn);
-  const [checkOut, setCheckOut] = useState(initialCheckOut);
+  const [checkIn, setCheckIn] = useState(initialCheckIn || defaultDates.checkIn);
+  const [checkOut, setCheckOut] = useState(initialCheckOut || defaultDates.checkOut);
   const [guests, setGuests] = useState(initialGuests);
 
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -820,6 +822,22 @@ export default function SearchBar({
                     )}
                   </div>
                 </div>
+
+                {checkIn && (
+                  <div className="mt-3 pt-2.5 border-t border-[#F0EFEB] flex items-center justify-between">
+                    <span className="text-xs text-[#6B6B67]">
+                      {checkIn && checkOut ? `${checkIn} → ${checkOut}` : "Select check-out date"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActiveDropdown("guests")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-xs"
+                    >
+                      <span>Continue to Guests</span>
+                      <ArrowRight size={13} />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>

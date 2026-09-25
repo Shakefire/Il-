@@ -26,9 +26,15 @@ function emailShell(title: string, subtitle: string, bodyContent: string): strin
       </div>
       <div style="padding: 32px; background-color: #FFFFFF; border: 1px solid #E7E5E0; border-top: none; border-radius: 0 0 14px 14px; line-height: 1.6; color: #171717;">
         ${bodyContent}
-        <div style="margin-top: 36px; padding-top: 20px; border-top: 1px solid #F0EFEB; font-size: 12px; color: #8B8B86; text-align: center;">
-          <p style="margin: 0;">Ilé Nigerian Accommodation &amp; Shortlet Marketplace</p>
-          <p style="margin: 4px 0 0 0;">Abuja • Lagos • Nationwide Shortlets</p>
+        <div style="margin-top: 36px; padding-top: 24px; border-top: 1px solid #F0EFEB; font-size: 12.5px; color: #6B6B67; text-align: center; line-height: 1.6;">
+          <p style="margin: 0; font-weight: 700; color: #171717;">Ilé Nigerian Accommodation &amp; Shortlet Marketplace</p>
+          <p style="margin: 4px 0 0 0;">Abuja • Lagos • Nationwide Verified Stays</p>
+          <div style="margin: 14px 0 8px 0; padding: 12px 18px; background-color: #FAFAF8; border: 1px solid #EAE8E3; border-radius: 10px; display: inline-block; text-align: left;">
+            <p style="margin: 0 0 4px 0; font-weight: 700; color: #0B5D45;">Ilé Platform Support &amp; Concierge</p>
+            <p style="margin: 2px 0 0 0;">Email: <a href="mailto:support@ile.ng" style="color: #0B5D45; font-weight: 600; text-decoration: underline;">support@ile.ng</a></p>
+            <p style="margin: 2px 0 0 0;">24/7 Helpline: <a href="tel:+2348004537829" style="color: #171717; font-weight: 600; text-decoration: none;">+234 800 453 7829</a> · <a href="tel:+2349122029904" style="color: #171717; font-weight: 600; text-decoration: none;">+234 912 202 9904</a></p>
+          </div>
+          <p style="margin: 10px 0 0 0; font-size: 11px; color: #9B9B97;">© 2026 Ilé Technologies Ltd. All rights reserved.</p>
         </div>
       </div>
     </div>
@@ -82,6 +88,8 @@ export function bookingConfirmationEmail(data: {
   guestName: string;
   guestEmail: string;
   propertyTitle: string;
+  propertyType?: string;
+  guestCount?: number;
   referenceCode: string;
   checkIn: string;
   checkOut: string;
@@ -91,37 +99,55 @@ export function bookingConfirmationEmail(data: {
   const bookingUrl = `${env.FRONTEND_URL}/trips`;
 
   const content = `
-    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Reservation Confirmed</h2>
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Reservation Confirmed &amp; Verified</h2>
     <p>Hello ${data.guestName},</p>
-    <p>Your stay at <strong>${data.propertyTitle}</strong> is confirmed!</p>
-    <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 14px;">
-      <tr style="border-bottom: 1px solid #F0EFEB;">
-        <td style="padding: 10px 0; color: #6B6B67;">Booking Reference</td>
-        <td style="padding: 10px 0; font-weight: 700; text-align: right; color: #0B5D45;">${data.referenceCode}</td>
-      </tr>
-      <tr style="border-bottom: 1px solid #F0EFEB;">
-        <td style="padding: 10px 0; color: #6B6B67;">Check-in</td>
-        <td style="padding: 10px 0; font-weight: 600; text-align: right;">${data.checkIn}</td>
-      </tr>
-      <tr style="border-bottom: 1px solid #F0EFEB;">
-        <td style="padding: 10px 0; color: #6B6B67;">Check-out</td>
-        <td style="padding: 10px 0; font-weight: 600; text-align: right;">${data.checkOut}</td>
-      </tr>
-      <tr>
-        <td style="padding: 12px 0; font-weight: 700; color: #171717;">Total Paid</td>
-        <td style="padding: 12px 0; font-weight: 800; font-size: 16px; text-align: right; color: #171717;">₦${data.totalAmount.toLocaleString()}</td>
-      </tr>
-    </table>
+    <p>Your reservation for <strong>${data.propertyTitle}</strong> is locked in and confirmed.</p>
+
+    <div style="background-color: #F8F7F4; border: 1px solid #E7E5E0; border-radius: 12px; padding: 18px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr style="border-bottom: 1px solid #EAE8E3;">
+          <td style="padding: 8px 0; color: #6B6B67;">Booking Reference</td>
+          <td style="padding: 8px 0; font-weight: 700; text-align: right; color: #0B5D45; font-family: monospace; font-size: 15px;">${data.referenceCode}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #EAE8E3;">
+          <td style="padding: 8px 0; color: #6B6B67;">Guest Name</td>
+          <td style="padding: 8px 0; font-weight: 600; text-align: right; color: #171717;">${data.guestName}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #EAE8E3;">
+          <td style="padding: 8px 0; color: #6B6B67;">Apartment Category</td>
+          <td style="padding: 8px 0; font-weight: 600; text-align: right; color: #171717;">${data.propertyType || "Serviced Residence"}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #EAE8E3;">
+          <td style="padding: 8px 0; color: #6B6B67;">Number of Guests</td>
+          <td style="padding: 8px 0; font-weight: 600; text-align: right; color: #171717;">${data.guestCount || 1} ${(data.guestCount || 1) === 1 ? "Guest" : "Guests"}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #EAE8E3;">
+          <td style="padding: 8px 0; color: #6B6B67;">Check-in Date</td>
+          <td style="padding: 8px 0; font-weight: 600; text-align: right; color: #171717;">${data.checkIn}</td>
+        </tr>
+        <tr style="border-bottom: 1px solid #EAE8E3;">
+          <td style="padding: 8px 0; color: #6B6B67;">Check-out Date</td>
+          <td style="padding: 8px 0; font-weight: 600; text-align: right; color: #171717;">${data.checkOut}</td>
+        </tr>
+        <tr>
+          <td style="padding: 12px 0 4px 0; font-weight: 700; color: #171717; font-size: 15px;">Total Paid</td>
+          <td style="padding: 12px 0 4px 0; font-weight: 800; font-size: 18px; text-align: right; color: #0B5D45;">₦${data.totalAmount.toLocaleString("en-NG")}</td>
+        </tr>
+      </table>
+    </div>
+
+    <p style="font-size: 13.5px; color: #6B6B67;">Your digital gate clearance pass and exact street navigation details have also been dispatched to your email and are accessible anytime in your trips portal.</p>
+
     <div style="margin: 24px 0;">
-      <a href="${bookingUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">View My Trips</a>
+      <a href="${bookingUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 10px; text-decoration: none; font-size: 14px;">View Reservation in My Trips →</a>
     </div>
   `;
 
   return {
     to: data.guestEmail,
-    subject: `Booking Confirmed — ${data.propertyTitle} (${data.referenceCode})`,
+    subject: `Booking Confirmed: ${data.propertyTitle} (${data.referenceCode})`,
     html: emailShell("Booking Confirmed", "Your reservation is locked in", content),
-    text: `Booking Confirmed — ${data.propertyTitle}\n\nReference: ${data.referenceCode}\nCheck-in: ${data.checkIn}\nCheck-out: ${data.checkOut}\nTotal: ₦${data.totalAmount.toLocaleString()}\n\nView trips: ${bookingUrl}`,
+    text: `Booking Confirmed — ${data.propertyTitle}\n\nReference: ${data.referenceCode}\nGuest: ${data.guestName}\nType: ${data.propertyType || "Residence"}\nGuests: ${data.guestCount || 1}\nCheck-in: ${data.checkIn}\nCheck-out: ${data.checkOut}\nTotal: ₦${data.totalAmount.toLocaleString("en-NG")}\n\nView trips: ${bookingUrl}`,
   };
 }
 
@@ -135,32 +161,97 @@ export function bookingAccessPassEmail(data: {
   checkIn: string;
   checkOut: string;
   address: string;
+  unitNumber?: string;
+  city?: string;
+  state?: string;
+  latitude?: number;
+  longitude?: number;
   accessInstructions: string;
+  accessGateCode?: string;
+  hostName?: string;
   hostPhone?: string;
 }): EmailPayload {
+  const fullAddress = [
+    data.address,
+    data.unitNumber ? `Unit / Apt: ${data.unitNumber}` : "",
+    data.city,
+    data.state,
+    "Nigeria",
+  ].filter(Boolean).join(", ");
+
+  const mapQuery = data.latitude && data.longitude
+    ? `${data.latitude},${data.longitude}`
+    : encodeURIComponent(fullAddress);
+
+  const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapQuery}`;
+  const cleanPhone = (data.hostPhone || "").replace(/[^\d+]/g, "");
+  const waLink = cleanPhone ? `https://wa.me/${cleanPhone.replace("+", "")}` : "";
+
   const content = `
-    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Gate Pass &amp; Check-In Access</h2>
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Gate Pass &amp; Check-In Access Details</h2>
     <p>Hello ${data.guestName},</p>
-    <p>Here are your private check-in and estate clearance details for <strong>${data.propertyTitle}</strong>:</p>
-    
-    <div style="background-color: #EDF3F0; border: 1px solid #C3E2D8; border-radius: 10px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; color: #0B5D45; text-transform: uppercase;">Exact Address</p>
-      <p style="margin: 0; font-size: 15px; font-weight: 600; color: #171717;">${data.address}</p>
+    <p>Your payment for <strong>${data.propertyTitle}</strong> has been verified. Below are your unquarantined check-in clearance, physical address, and dedicated host contact details:</p>
+
+    <!-- SECTION 1: Exact Physical Address & Map Pin -->
+    <div style="background-color: #F8F7F4; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <div style="margin-bottom: 8px;">
+        <span style="font-size: 11px; font-weight: 700; color: #0B5D45; text-transform: uppercase; letter-spacing: 0.5px;">1. Exact Property Address</span>
+      </div>
+      <p style="margin: 0; font-size: 16px; font-weight: 700; color: #171717; line-height: 1.4;">
+        ${fullAddress}
+      </p>
+      ${data.unitNumber ? `<p style="margin: 4px 0 0 0; font-size: 13.5px; color: #6B6B67;">Apartment / Suite: <strong>${data.unitNumber}</strong></p>` : ""}
+
+      <!-- Map Pin Navigation Button -->
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid #EAE8E3;">
+        <a href="${googleMapsUrl}" target="_blank" style="display: inline-block; background-color: #FFFFFF; color: #0B5D45; border: 1.5px solid #0B5D45; font-weight: 600; font-size: 13px; padding: 9px 18px; border-radius: 8px; text-decoration: none;">
+          📍 Open in Google Maps (View Exact Pin &amp; Live Distance)
+        </a>
+      </div>
     </div>
 
-    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 10px; padding: 16px; margin: 20px 0;">
-      <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; color: #6B6B67; text-transform: uppercase;">Estate Gate Pass &amp; Entry Instructions</p>
-      <p style="margin: 0; font-size: 14px; color: #171717; white-space: pre-line;">${data.accessInstructions}</p>
+    <!-- SECTION 2: Estate Clearance & Gate Pass Code -->
+    <div style="background-color: #EDF3F0; border: 1.5px solid #0B5D45; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <span style="font-size: 11px; font-weight: 700; color: #0B5D45; text-transform: uppercase; letter-spacing: 0.5px;">2. Estate Gate Clearance &amp; Access Code</span>
+      ${data.accessGateCode ? `
+        <div style="margin: 12px 0 8px 0; background-color: #FFFFFF; border: 1px solid #C3E2D8; border-radius: 8px; padding: 12px 16px; display: inline-block;">
+          <span style="font-size: 11px; color: #6B6B67; display: block; margin-bottom: 2px;">Show this code at estate security gate:</span>
+          <span style="font-family: monospace; font-size: 22px; font-weight: 800; color: #0B5D45; letter-spacing: 2px;">${data.accessGateCode}</span>
+        </div>
+      ` : ""}
+      <p style="margin: 8px 0 0 0; font-size: 13.5px; color: #171717; line-height: 1.5; white-space: pre-line;">
+        ${data.accessInstructions}
+      </p>
     </div>
 
-    ${data.hostPhone ? `<p style="font-size: 14px; color: #6B6B67;">Host Contact Phone: <strong>${data.hostPhone}</strong></p>` : ""}
+    <!-- SECTION 3: Host / Arrival Guide Contact -->
+    <div style="background-color: #FFFFFF; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <span style="font-size: 11px; font-weight: 700; color: #6B6B67; text-transform: uppercase; letter-spacing: 0.5px;">3. Assigned Host &amp; Arrival Guide</span>
+      <p style="margin: 6px 0 2px 0; font-size: 15px; font-weight: 700; color: #171717;">
+        ${data.hostName || "Dedicated Property Host"}
+      </p>
+      ${data.hostPhone ? `
+        <p style="margin: 4px 0 10px 0; font-size: 13.5px; color: #6B6B67;">
+          Direct Line: <a href="tel:${cleanPhone}" style="color: #0B5D45; font-weight: 700; text-decoration: none;">${data.hostPhone}</a>
+        </p>
+        ${waLink ? `
+          <a href="${waLink}" target="_blank" style="display: inline-block; background-color: #25D366; color: #FFFFFF; font-weight: 600; font-size: 12.5px; padding: 8px 16px; border-radius: 8px; text-decoration: none;">
+            💬 Chat with Host on WhatsApp
+          </a>
+        ` : ""}
+      ` : `<p style="margin: 4px 0 0 0; font-size: 13px; color: #8B8B86;">Host contact activated. Check-in assistance available on arrival.</p>`}
+    </div>
+
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/trips" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 10px; text-decoration: none; font-size: 14px;">Open Gate Pass on My Phone →</a>
+    </div>
   `;
 
   return {
     to: data.guestEmail,
     subject: `Gate Pass & Check-In Details — ${data.referenceCode}`,
     html: emailShell("Access Clearance", "Check-in instructions and address", content),
-    text: `Gate Pass & Check-In Details\n\nReference: ${data.referenceCode}\nAddress: ${data.address}\nInstructions: ${data.accessInstructions}`,
+    text: `Gate Pass & Check-In Details\n\nReference: ${data.referenceCode}\nAddress: ${fullAddress}\nGate Code: ${data.accessGateCode || "None"}\nHost Phone: ${data.hostPhone || "Available on platform"}\nMap: ${googleMapsUrl}`,
   };
 }
 

@@ -65,6 +65,8 @@ export interface Property {
   };
   reviews: Review[];
   featured?: boolean;
+  isReserved?: boolean;
+  distanceKm?: number;
 }
 
 export interface SearchFilters {

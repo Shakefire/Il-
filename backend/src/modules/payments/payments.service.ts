@@ -273,20 +273,30 @@ export async function processSuccessfulPayment(data: {
       .limit(1);
 
     const [host] = await db
-      .select({ phone: schema.users.phone })
+      .select({
+        phone: schema.users.phone,
+        firstName: schema.users.firstName,
+        lastName: schema.users.lastName,
+      })
       .from(schema.users)
       .where(eq(schema.users.id, property?.hostId || ""))
       .limit(1);
 
     const propTitle = property?.title || "Shortlet Stay";
     const guestName = `${booking.guestFirstName} ${booking.guestLastName}`;
+    const hostFullName = host
+      ? `${host.firstName} ${host.lastName}`.trim()
+      : privateDetails?.contactName || "Designated Ilé Host";
+    const hostPhone = privateDetails?.contactPhone || host?.phone || undefined;
 
-    // A. Send Booking Confirmation
+    // A. Send Booking Confirmation (Now with apartment category, guest count, guest name)
     await sendEmail(
       bookingConfirmationEmail({
         guestName,
         guestEmail: booking.guestEmail,
         propertyTitle: propTitle,
+        propertyType: property?.propertyType || undefined,
+        guestCount: booking.guestCount || undefined,
         referenceCode: booking.referenceCode,
         checkIn: booking.checkInDate,
         checkOut: booking.checkOutDate,
@@ -295,7 +305,7 @@ export async function processSuccessfulPayment(data: {
       })
     );
 
-    // B. Send Private Gate Clearance / Access Pass
+    // B. Send Private Gate Clearance / Access Pass (Now with structured address, map pin, host guide)
     if (privateDetails) {
       await sendEmail(
         bookingAccessPassEmail({
@@ -306,8 +316,15 @@ export async function processSuccessfulPayment(data: {
           checkIn: booking.checkInDate,
           checkOut: booking.checkOutDate,
           address: privateDetails.exactAddress,
-          accessInstructions: privateDetails.checkInInstructions || (privateDetails.accessGateCode ? `Gate Code: ${privateDetails.accessGateCode}` : "Contact host on arrival for estate clearance."),
-          hostPhone: host?.phone || undefined,
+          unitNumber: privateDetails.unitNumber || undefined,
+          city: property?.city || undefined,
+          state: property?.state || undefined,
+          latitude: property?.latitude || undefined,
+          longitude: property?.longitude || undefined,
+          accessInstructions: privateDetails.checkInInstructions || "Present your reservation reference to estate security guards for swift clearance.",
+          accessGateCode: privateDetails.accessGateCode || undefined,
+          hostName: hostFullName,
+          hostPhone,
         })
       );
     }

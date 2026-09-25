@@ -99,6 +99,17 @@ export const authService = {
       throw new Error("Invalid credentials. Please check your email and password.");
     }
 
+    // Auto-link prior guest bookings matching email
+    await db
+      .update(schema.bookings)
+      .set({ guestId: user.id })
+      .where(
+        and(
+          eq(schema.bookings.guestEmail, cleanEmail),
+          isNull(schema.bookings.guestId)
+        )
+      );
+
     return user;
   },
 

@@ -44,8 +44,6 @@ export default function HomePage() {
             <SearchBar
               initialDestination="Abuja"
               initialPropertyType="All Types"
-              initialCheckIn="2026-09-24"
-              initialCheckOut="2026-09-27"
               initialGuests={2}
             />
           </div>

@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
-import { X, Check, ShieldCheck, CreditCard, Building2, Lock, Key, MapPin, Phone, Mail, Loader2, AlertCircle } from "lucide-react";
+import { X, Check, ShieldCheck, CreditCard, Building2, Lock, Key, MapPin, Phone, Loader2, AlertCircle, Smartphone, Mail } from "lucide-react";
 import { Property } from "@/types";
 import { formatNaira, calculateNights } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 
 interface BookingModalProps {
   property: Property;
@@ -39,11 +40,12 @@ export default function BookingModal({
   checkOut,
   guests,
 }: BookingModalProps) {
+  const { user } = useAuth();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [guestName, setGuestName] = useState("");
   const [guestEmail, setGuestEmail] = useState("");
   const [guestPhone, setGuestPhone] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"card" | "transfer">("transfer");
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "transfer" | "ussd">("card");
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -51,6 +53,16 @@ export default function BookingModal({
   // Server state for booking
   const [serverBooking, setServerBooking] = useState<any>(null);
   const [confirmedData, setConfirmedData] = useState<ConfirmedBookingDetails | null>(null);
+
+  // Auto-prefill guest details from authenticated user session
+  useEffect(() => {
+    if (user && isOpen) {
+      const fullName = [user.firstName, user.lastName].filter(Boolean).join(" ");
+      if (fullName) setGuestName(fullName);
+      if (user.email) setGuestEmail(user.email);
+      if (user.phone) setGuestPhone(user.phone);
+    }
+  }, [user, isOpen]);
 
   if (!isOpen) return null;
 
@@ -314,7 +326,7 @@ export default function BookingModal({
 
               <div className="flex items-center gap-3 pt-2 text-[13px] text-[#6B6B67]">
                 <ShieldCheck size={18} className="text-[#24483A] shrink-0" />
-                <span>Exact address &amp; gate access code are strictly quarantined until payment confirmation.</span>
+                <span>Your reservation confirmation, exact address, estate gate pass, and host contact will be sent to your email immediately after payment.</span>
               </div>
 
               <div className="pt-4 flex gap-3">
@@ -347,102 +359,120 @@ export default function BookingModal({
           {/* Step 3: Payment */}
           {step === 3 && (
             <div className="space-y-5">
-              <div className="flex items-center justify-between pb-2 border-b border-[#E7E5E0]">
-                <div className="text-[14px] text-[#6B6B67]">
-                  Total Reservation Amount:{" "}
-                  <span className="font-bold text-base text-[#171717]">
+              {/* Amount summary */}
+              <div className="flex items-center justify-between pb-3 border-b border-[#E7E5E0]">
+                <div>
+                  <div className="text-[12px] uppercase tracking-wider font-semibold text-[#8B8B86]">Total Amount</div>
+                  <div className="text-[22px] font-bold text-[#171717] mt-0.5">
                     {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}
-                  </span>
+                  </div>
+                  <div className="text-[12px] text-[#6B6B67]">{nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}</div>
                 </div>
-                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#EDF3F0] text-[#0B5D45]">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/15">
                   <ShieldCheck size={13} />
-                  <span>Secured by Paystack</span>
+                  <span>Paystack Secured</span>
                 </span>
               </div>
 
-              <div className="space-y-3">
-                {/* Paystack Card / Transfer Option */}
-                <div
-                  onClick={() => setPaymentMethod("card")}
-                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                    paymentMethod === "card"
-                      ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]"
-                      : "border-[#E7E5E0] hover:border-[#171717]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex gap-3">
-                      <CreditCard size={20} className="text-[#24483A] mt-0.5" />
-                      <div>
-                        <div className="text-[15px] font-medium text-[#171717]">
-                          Paystack Checkout (Card, Transfer, USSD, Apple Pay)
+              {/* Payment method selector */}
+              <div>
+                <p className="text-[12px] font-semibold uppercase tracking-wider text-[#8B8B86] mb-3">
+                  Select payment method
+                </p>
+                <div className="space-y-2.5">
+                  {/* Card & Digital Wallets */}
+                  <div
+                    onClick={() => setPaymentMethod("card")}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                      paymentMethod === "card"
+                        ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]/40"
+                        : "border-[#E7E5E0] hover:border-[#BFBFBA]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-[#EDF3F0] flex items-center justify-center">
+                          <CreditCard size={18} className="text-[#0B5D45]" />
                         </div>
-                        <div className="text-[13px] text-[#6B6B67]">
-                          Mastercard, Visa, Verve &amp; dynamic Nigerian virtual bank accounts.
+                        <div>
+                          <div className="text-[14px] font-semibold text-[#171717]">Card &amp; Digital Wallets</div>
+                          <div className="text-[12px] text-[#6B6B67]">Mastercard · Visa · Verve · Apple Pay · Google Pay</div>
                         </div>
                       </div>
-                    </div>
-                    <div
-                      className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        paymentMethod === "card"
-                          ? "border-[#24483A] bg-[#24483A]"
-                          : "border-[#8B8B86]"
-                      }`}
-                    >
-                      {paymentMethod === "card" && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                      )}
+                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "card" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                        {paymentMethod === "card" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                {/* Direct Bank Transfer Option */}
-                <div
-                  onClick={() => setPaymentMethod("transfer")}
-                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                    paymentMethod === "transfer"
-                      ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]"
-                      : "border-[#E7E5E0] hover:border-[#171717]"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex gap-3">
-                      <Building2 size={20} className="text-[#24483A] mt-0.5" />
-                      <div>
-                        <div className="text-[15px] font-medium text-[#171717]">
-                          Instant Bank Transfer (Nigerian Bank Accounts)
+                  {/* Direct Bank Transfer */}
+                  <div
+                    onClick={() => setPaymentMethod("transfer")}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                      paymentMethod === "transfer"
+                        ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]/40"
+                        : "border-[#E7E5E0] hover:border-[#BFBFBA]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center">
+                          <Building2 size={18} className="text-amber-700" />
                         </div>
-                        <div className="text-[13px] text-[#6B6B67]">
-                          Direct transfer via GTBank, Access, Zenith, or Kuda virtual accounts.
+                        <div>
+                          <div className="text-[14px] font-semibold text-[#171717]">Nigerian Bank Transfer</div>
+                          <div className="text-[12px] text-[#6B6B67]">GTBank · Access · Zenith · Kuda · Virtual account</div>
                         </div>
                       </div>
+                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "transfer" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                        {paymentMethod === "transfer" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
                     </div>
-                    <div
-                      className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                        paymentMethod === "transfer"
-                          ? "border-[#24483A] bg-[#24483A]"
-                          : "border-[#8B8B86]"
-                      }`}
-                    >
-                      {paymentMethod === "transfer" && (
-                        <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                      )}
+                  </div>
+
+                  {/* USSD */}
+                  <div
+                    onClick={() => setPaymentMethod("ussd")}
+                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                      paymentMethod === "ussd"
+                        ? "border-[#24483A] bg-[#EDF3F0]/40 ring-1 ring-[#24483A]/40"
+                        : "border-[#E7E5E0] hover:border-[#BFBFBA]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-blue-50 flex items-center justify-center">
+                          <Smartphone size={18} className="text-blue-600" />
+                        </div>
+                        <div>
+                          <div className="text-[14px] font-semibold text-[#171717]">USSD &amp; Mobile Money</div>
+                          <div className="text-[12px] text-[#6B6B67]">*737# · *919# · *901# and all Nigerian networks</div>
+                        </div>
+                      </div>
+                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "ussd" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                        {paymentMethod === "ussd" && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Quarantined detail notice */}
-              <div className="p-3 bg-[#FAFAF8] rounded-xl border border-[#E7E5E0] flex items-center gap-2.5 text-[12.5px] text-[#6B6B67]">
-                <Lock size={15} className="text-[#0B5D45] shrink-0" />
-                <span>Exact address and gate code unlock immediately upon payment confirmation.</span>
+              {/* Post-payment delivery notice */}
+              <div className="p-3.5 bg-[#F5F9F7] rounded-xl border border-[#0B5D45]/20 flex items-start gap-3">
+                <Mail size={15} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                <div className="text-[12.5px] text-[#4A4A45] leading-relaxed">
+                  <span className="font-semibold text-[#0B5D45]">Instant delivery after payment:</span>{" "}
+                  Booking confirmation, exact property address, estate gate pass code, and your host&apos;s direct contact will be emailed to{" "}
+                  <span className="font-medium text-[#171717]">{guestEmail || "your email"}</span>{" "}
+                  within seconds.
+                </div>
               </div>
 
-              <div className="pt-4 flex flex-col sm:flex-row gap-3">
+              <div className="pt-2 flex flex-col sm:flex-row gap-3">
                 <button
                   type="button"
                   onClick={() => setStep(2)}
-                  className="px-5 py-3 border border-[#E7E5E0] text-[#171717] rounded-xl hover:bg-[#FAFAF8]"
+                  className="px-5 py-3 border border-[#E7E5E0] text-[#171717] rounded-xl hover:bg-[#FAFAF8] text-[14px] font-medium transition-colors"
                 >
                   Back
                 </button>
@@ -450,24 +480,16 @@ export default function BookingModal({
                   type="button"
                   onClick={() => handlePay("paystack")}
                   disabled={isProcessing}
-                  className="flex-1 py-3.5 bg-[#0B5D45] text-white rounded-xl font-medium hover:bg-[#084936] transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-3.5 bg-[#0B5D45] text-white rounded-xl font-semibold text-[15px] hover:bg-[#084936] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-60"
                 >
                   {isProcessing ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
-                      <span>Connecting to Paystack...</span>
+                      <span>Connecting to Paystack…</span>
                     </>
                   ) : (
-                    <span>Pay with Paystack {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
+                    <span>Confirm &amp; Pay {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
                   )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handlePay("direct")}
-                  disabled={isProcessing}
-                  className="px-4 py-3.5 border border-[#E7E5E0] text-[#6B6B67] hover:text-[#171717] rounded-xl text-xs font-medium hover:bg-[#FAFAF8] transition-colors"
-                >
-                  Instant Test Pay
                 </button>
               </div>
             </div>
@@ -497,7 +519,7 @@ export default function BookingModal({
                 <div className="p-4.5 rounded-xl bg-[#EDF3F0]/60 border border-[#24483A]/30 text-left space-y-3.5 text-[14px]">
                   <div className="flex items-center gap-2 text-[#0B5D45] font-semibold text-xs uppercase tracking-wider">
                     <Key size={14} />
-                    <span>Quarantined Access Details (Unlocked)</span>
+                    <span>Your Arrival Details</span>
                   </div>
 
                   <div className="space-y-2">

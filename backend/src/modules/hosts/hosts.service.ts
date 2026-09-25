@@ -793,4 +793,52 @@ export const hostsService = {
 
     return { success: true, message: "Property listing deleted successfully." };
   },
+
+  async relistProperty(userId: string, propertyId: string) {
+    const db = getDb();
+    const [property] = await db
+      .select()
+      .from(schema.properties)
+      .where(and(eq(schema.properties.id, propertyId), eq(schema.properties.hostId, userId)))
+      .limit(1);
+
+    if (!property) {
+      const err: any = new Error("Property not found or unauthorized");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (property.status === "SUSPENDED") {
+      const err: any = new Error("This property was suspended by platform administrators and cannot be self-relisted.");
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // 1. Release any expired reservation blocks so dates are open again
+    const todayStr = new Date().toISOString().split("T")[0];
+    await db
+      .delete(schema.availabilityBlocks)
+      .where(
+        and(
+          eq(schema.availabilityBlocks.propertyId, propertyId),
+          lt(schema.availabilityBlocks.endDate, todayStr)
+        )
+      );
+
+    // 2. Set property status back to PUBLISHED
+    const [updated] = await db
+      .update(schema.properties)
+      .set({
+        status: "PUBLISHED",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.properties.id, propertyId))
+      .returning();
+
+    return {
+      success: true,
+      message: "Property relisted successfully and published back to explore listings!",
+      property: updated,
+    };
+  },
 };

@@ -51,17 +51,20 @@ export default function PropertyCard({
 
   return (
     <Link
-      href={`/stay/${property.slug}`}
+      href={property.isReserved ? "#" : `/stay/${property.slug}`}
+      onClick={(e) => { if (property.isReserved) e.preventDefault(); }}
       onMouseEnter={() => onHover && onHover(property.id)}
       onMouseLeave={() => onHover && onHover(null)}
-      className="group block focus:outline-none h-full"
+      className={`group block focus:outline-none h-full ${property.isReserved ? "pointer-events-auto" : ""}`}
     >
-      {/* Unified Card Container: Resolves container ambiguity with clean border, background, and soft hover elevation */}
+      {/* Unified Card Container */}
       <div
-        className={`h-full bg-white rounded-[18px] border p-3 sm:p-3.5 flex flex-col transition-all duration-300 shadow-xs hover:shadow-md ${
-          isHovered
-            ? "border-[#24483A] shadow-md ring-1 ring-[#24483A]/15"
-            : "border-[#EAE8E3] hover:border-[#D1CEC7]"
+        className={`h-full bg-white rounded-[18px] border p-3 sm:p-3.5 flex flex-col transition-all duration-300 shadow-xs ${
+          property.isReserved
+            ? "opacity-65 border-[#EAE8E3] cursor-not-allowed"
+            : isHovered
+            ? "border-[#24483A] shadow-md ring-1 ring-[#24483A]/15 hover:shadow-md"
+            : "border-[#EAE8E3] hover:border-[#D1CEC7] hover:shadow-md"
         }`}
       >
         {/* Image Container with Mini-Gallery Affordances */}
@@ -79,14 +82,24 @@ export default function PropertyCard({
             onError={() => setImgError(true)}
           />
 
+          {/* 0. Reserved Overlay Badge */}
+          {property.isReserved && (
+            <div className="absolute inset-0 bg-black/30 flex items-center justify-center rounded-[13px]">
+              <span className="bg-white/95 text-[#171717] text-[12px] font-semibold px-3 py-1.5 rounded-full shadow-md border border-white/60 backdrop-blur-sm">
+                Already Reserved
+              </span>
+            </div>
+          )}
+
           {/* 1. Verified Stay Pill Badge */}
-          {property.verified && (
+          {property.verified && !property.isReserved && (
             <div className="absolute top-3 left-3 bg-white/95 backdrop-blur-sm px-2.5 py-0.5 rounded-full text-[11.5px] font-semibold text-[#171717] tracking-tight border border-[#E7E5E0]/60 shadow-xs pointer-events-none">
               Verified stay
             </div>
           )}
 
           {/* 2. Quick Action: Save / Favorite Button */}
+          {!property.isReserved && (
           <button
             type="button"
             onClick={handleToggleFavorite}
@@ -102,9 +115,10 @@ export default function PropertyCard({
               }`}
             />
           </button>
+          )}
 
           {/* 3. Image Affordances: Mini Carousel Navigation Arrows */}
-          {images.length > 1 && (
+          {images.length > 1 && !property.isReserved && (
             <>
               {/* Previous Arrow */}
               <button

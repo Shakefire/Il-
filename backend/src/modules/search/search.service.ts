@@ -106,7 +106,8 @@ export async function searchProperties(params: SearchParams) {
 
   // 5. Filter properties
   const filtered = allPublished.filter((p: any) => {
-    if (unavailableIds.has(p.id)) return false;
+    // If date range given, only hide properties that are blocked AND the user wants "available only"
+    // We keep reserved properties in — they'll be ranked lower and marked isReserved
     if (p.maxGuests < guests) return false;
 
     if (propType) {
@@ -161,10 +162,19 @@ export async function searchProperties(params: SearchParams) {
     return true;
   });
 
-  // Sort by geographic distance if coordinates are present
-  if (targetLat !== null && targetLng !== null) {
-    filtered.sort((a: any, b: any) => (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999));
-  }
+  // Stamp isReserved on each property before sorting
+  filtered.forEach((p: any) => {
+    p.isReserved = unavailableIds.has(p.id);
+  });
+
+  // Sort: available first, then reserved. Within each tier, sort by geographic distance if available.
+  filtered.sort((a: any, b: any) => {
+    if (a.isReserved !== b.isReserved) return a.isReserved ? 1 : -1;
+    if (targetLat !== null && targetLng !== null) {
+      return (a.distanceKm ?? 9999) - (b.distanceKm ?? 9999);
+    }
+    return 0;
+  });
 
   const totalResults = filtered.length;
 
@@ -228,6 +238,7 @@ export async function searchProperties(params: SearchParams) {
     return {
       ...enrichProperty(prop, propImages, propAmenities, host),
       distanceKm: prop.distanceKm,
+      isReserved: prop.isReserved ?? false,
     };
   });
 

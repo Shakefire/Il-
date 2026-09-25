@@ -231,6 +231,17 @@ export const api = {
     return body;
   },
 
+  async relistHostProperty(propertyId: string) {
+    const res = await fetch(`/api/host/properties/${propertyId}/relist`, {
+      method: "POST",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to relist property");
+    return body;
+  },
+
   async updateHostProperty(propertyId: string, propertyData: any) {
     const res = await fetch(`/api/host/properties/${propertyId}`, {
       method: "PUT",

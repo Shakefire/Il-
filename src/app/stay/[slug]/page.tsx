@@ -36,7 +36,7 @@ export default function StayDetailPage({
   return (
     <div className="min-h-screen pb-24 sm:pb-32">
       {/* Back Link */}
-      <div className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 pt-8 pb-4">
+      <div className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 pt-6 pb-3">
         <Link
           href={`/search?destination=${encodeURIComponent(property.city)}`}
           className="inline-flex items-center gap-2 text-sm text-[#6B6B67] hover:text-[#171717] transition-colors"
@@ -47,7 +47,7 @@ export default function StayDetailPage({
       </div>
 
       {/* Main Content Area */}
-      <article className="max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 space-y-8">
+      <article className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 space-y-6 sm:space-y-8">
         {/* Title & Metadata Header */}
         <header className="space-y-2">
           <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4">

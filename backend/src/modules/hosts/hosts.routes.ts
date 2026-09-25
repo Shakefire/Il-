@@ -168,6 +168,20 @@ export async function hostsRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // POST /api/host/properties/:id/relist — Relist property
+  fastify.post("/properties/:id/relist", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    try {
+      const result = await hostsService.relistProperty(session.userId, id);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({ error: error.message });
+    }
+  });
+
   // GET /api/host/dashboard — Host dashboard
   fastify.get("/dashboard", async (request, reply) => {
     const session = await authenticateRequest(request, reply);
