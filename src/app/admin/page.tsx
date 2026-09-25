@@ -56,10 +56,19 @@ export default function AdminPortalPage() {
         api.getSystemHealth().catch(() => null),
       ]);
 
-      if (statsRes) setStats(statsRes);
-      if (propsRes) setProperties(propsRes.properties || []);
-      if (bookingsRes) setBookings(bookingsRes.bookings || []);
-      if (auditRes) setAuditLogs(auditRes.logs || []);
+      const rawStats = statsRes?.stats || statsRes;
+      if (rawStats) {
+        setStats({
+          pendingReview: rawStats.pendingReview ?? rawStats.pendingCount ?? 0,
+          totalProperties: rawStats.totalProperties ?? rawStats.properties ?? 0,
+          totalBookings: rawStats.totalBookings ?? rawStats.bookings ?? 0,
+          totalRevenue: rawStats.totalRevenue ?? rawStats.revenue ?? 0,
+          users: rawStats.users ?? 0,
+        });
+      }
+      if (propsRes) setProperties(propsRes.data || propsRes.properties || []);
+      if (bookingsRes) setBookings(bookingsRes.data || bookingsRes.bookings || []);
+      if (auditRes) setAuditLogs(auditRes.data || auditRes.logs || []);
       if (healthRes) setHealthData(healthRes);
     } catch (err) {
       console.warn("Failed loading admin portal data:", err);
