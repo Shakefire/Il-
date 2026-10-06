@@ -15,6 +15,8 @@ export const users = pgTable("users", {
   phoneVerified: boolean("phone_verified").default(false).notNull(),
   phoneVerificationCode: varchar("phone_verification_code", { length: 10 }),
   phoneVerificationExpiresAt: timestamp("phone_verification_expires_at", { withTimezone: true }),
+  resetToken: varchar("reset_token", { length: 100 }),
+  resetTokenExpiresAt: timestamp("reset_token_expires_at", { withTimezone: true }),
   status: varchar("status", { length: 30 }).default("ACTIVE").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

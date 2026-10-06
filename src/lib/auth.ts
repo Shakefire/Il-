@@ -27,8 +27,9 @@ export interface RegisterCredentials {
 }
 
 export interface RegisterOwnerCredentials {
-  firstName: string;
-  lastName: string;
+  fullName?: string;
+  firstName?: string;
+  lastName?: string;
   email: string;
   phone?: string;
   password: string;
@@ -58,9 +59,22 @@ export const authApi = {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || "We couldn't sign you in with those details.");
+        if (res.status === 404) {
+          throw new Error("Unable to connect to the authentication service. Please check your network and try again.");
+        }
+        const errorMsg = data?.error || data?.message;
+        if (!errorMsg || errorMsg === "Not Found") {
+          throw new Error("We couldn't sign you in with those details. Please check your credentials.");
+        }
+        throw new Error(errorMsg);
       }
 
       if (typeof window !== "undefined" && data.token) {
@@ -96,9 +110,22 @@ export const authApi = {
         body: JSON.stringify(credentials),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || "Registration failed.");
+        if (res.status === 404) {
+          throw new Error("Unable to connect to registration service. Please try again.");
+        }
+        const errorMsg = data?.error || data?.message;
+        if (!errorMsg || errorMsg === "Not Found") {
+          throw new Error("Registration failed. Please try again.");
+        }
+        throw new Error(errorMsg);
       }
 
       if (typeof window !== "undefined" && data.token) {
@@ -118,8 +145,11 @@ export const authApi = {
   },
 
   async registerOwner(credentials: RegisterOwnerCredentials): Promise<AuthResponse> {
-    if (!credentials.email || !credentials.password || !credentials.firstName || !credentials.lastName) {
-      throw new Error("Please fill in all required fields.");
+    if (!credentials.email || !credentials.password) {
+      throw new Error("Please enter your email and password.");
+    }
+    if (!credentials.firstName && !credentials.fullName) {
+      throw new Error("Please enter your legal name.");
     }
 
     if (credentials.password.length < 8) {
@@ -134,9 +164,22 @@ export const authApi = {
         body: JSON.stringify(credentials),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || "Owner registration failed.");
+        if (res.status === 404) {
+          throw new Error("Unable to reach the Ilé authentication service. Please check your network connection and try again.");
+        }
+        const errorMsg = data?.error || data?.message;
+        if (!errorMsg || errorMsg === "Not Found") {
+          throw new Error("Unable to create owner account at this time. Please try again.");
+        }
+        throw new Error(errorMsg);
       }
 
       if (typeof window !== "undefined" && data.token) {
@@ -167,8 +210,23 @@ export const authApi = {
       body: JSON.stringify({ code }),
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Email verification failed.");
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error("Unable to reach the verification service. Please try again.");
+      }
+      const msg = data?.error || data?.message;
+      if (!msg || msg === "Not Found") {
+        throw new Error("Email verification failed. Please check your code.");
+      }
+      throw new Error(msg);
+    }
     return data;
   },
 
@@ -275,14 +333,28 @@ export const authApi = {
     };
   },
 
-  async resetPassword({ password }: { password: string }): Promise<AuthResponse> {
+  async resetPassword({ token, password }: { token: string; password: string }): Promise<AuthResponse> {
+    if (!token) {
+      throw new Error("Password reset token is missing. Please use the link provided in your email.");
+    }
     if (!password || password.length < 8) {
       throw new Error("Password must be at least 8 characters long.");
     }
 
+    const res = await fetch("/api/auth/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, password }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Password reset failed. Please request a new link.");
+    }
+
     return {
       success: true,
-      message: "Your password has been reset successfully.",
+      message: data.message || "Your password has been reset successfully.",
     };
   },
 };

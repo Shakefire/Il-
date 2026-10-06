@@ -8,9 +8,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Building2,
-  UserCheck,
   CreditCard,
-  Home,
   FileText,
   Upload,
   ArrowRight,
@@ -19,11 +17,9 @@ import {
   Mail,
   Phone,
   Camera,
-  RefreshCw,
-  Lock,
-  Building,
+  RotateCw,
+  Home,
   Check,
-  HelpCircle,
   Sparkles,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
@@ -60,7 +56,15 @@ const NIGERIAN_BANKS = [
   "Zenith Bank",
 ];
 
-const NIGERIAN_CITIES = ["Abuja", "Lagos", "Port Harcourt", "Ibadan", "Enugu", "Calabar", "Kaduna"];
+const NIGERIAN_CITIES = [
+  "Abuja",
+  "Lagos",
+  "Port Harcourt",
+  "Ibadan",
+  "Enugu",
+  "Calabar",
+  "Kaduna",
+];
 
 const ID_TYPES = [
   { id: "nin", label: "National Identification Number (NIN)", desc: "NIN Slip or Digital NIN Card" },
@@ -72,21 +76,27 @@ const ID_TYPES = [
 const HOST_TYPES = [
   {
     id: "individual_owner",
-    title: "Individual Property Owner",
+    title: "I own the property",
+    subtitle: "Individual Property Owner",
     desc: "I directly own this property and hold the title deed, C of O, or utility records.",
     docLabel: "Proof of Ownership (Deed of Assignment, C of O, or Recent Utility Bill)",
+    icon: Home,
   },
   {
     id: "property_manager",
-    title: "Authorized Property Manager",
+    title: "I manage property for someone else",
+    subtitle: "Authorized Property Manager",
     desc: "I am an agent or manager contracted with written authorization to list and host.",
     docLabel: "Management Agreement or Signed Power of Attorney / Mandate Letter",
+    icon: Building2,
   },
   {
     id: "company",
-    title: "Corporate Entity / Hospitality Brand",
+    title: "I represent a company / hospitality business",
+    subtitle: "Corporate Entity / Hospitality Brand",
     desc: "The property is managed or owned by a registered Nigerian business entity.",
     docLabel: "CAC Certificate of Incorporation / Business Registration & Board Authorization",
+    icon: Building2,
   },
 ];
 
@@ -94,9 +104,9 @@ export default function OwnerOnboardingWizard() {
   const router = useRouter();
   const { user, isAuthenticated, isLoading: authLoading, refreshUser } = useAuth();
 
-  // Wizard Stage:
-  // 1 = Account Creation & Email OTP
-  // 2 = Tell Us About Yourself & Phone OTP
+  // Onboarding Stage:
+  // 1 = Tell Us About Your Property Business (Partner Qualification)
+  // 2 = About You & Operating Location
   // 3 = Identity / KYC (Govt ID + Selfie)
   // 4 = Authority & Nigerian Bank Payouts
   // 5 = Preliminary Property Details & Infrastructure
@@ -107,20 +117,20 @@ export default function OwnerOnboardingWizard() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // Stage 1 State: Account Creation & Email OTP
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
-  const [hostType, setHostType] = useState<"individual_owner" | "property_manager" | "company">("individual_owner");
-  const [companyName, setCompanyName] = useState("");
+  // Email verification barrier if accessed directly before verifying
   const [emailOtp, setEmailOtp] = useState("");
-  const [emailVerified, setEmailVerified] = useState(false);
   const [verifyingEmail, setVerifyingEmail] = useState(false);
   const [resendingEmailOtp, setResendingEmailOtp] = useState(false);
 
+  // Stage 1 State: Business Qualification
+  const [hostType, setHostType] = useState<"individual_owner" | "property_manager" | "company">("individual_owner");
+  const [companyName, setCompanyName] = useState("");
+  const [companyRegNumber, setCompanyRegNumber] = useState("");
+  const [phone, setPhone] = useState("");
+
   // Stage 2 State: Personal & Operational Profile
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [residentialAddress, setResidentialAddress] = useState("");
   const [operatingCity, setOperatingCity] = useState("Abuja");
@@ -136,7 +146,6 @@ export default function OwnerOnboardingWizard() {
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
 
   // Stage 4 State: Authority Proof & Nigerian Bank Details
-  const [companyRegNumber, setCompanyRegNumber] = useState("");
   const [authorityDocType, setAuthorityDocType] = useState("deed_of_ownership");
   const [authorityDocUrl, setAuthorityDocUrl] = useState("");
   const [bankName, setBankName] = useState("Guaranty Trust Bank (GTBank)");
@@ -175,14 +184,16 @@ export default function OwnerOnboardingWizard() {
         return;
       }
 
+      setFirstName(user.firstName || "");
+      setLastName(user.lastName || "");
+      if (user.phone) setPhone(user.phone);
+
       try {
         const res = await api.getHostOnboardingStatus();
         if (res && res.user) {
-          setFirstName(res.user.firstName || "");
-          setLastName(res.user.lastName || "");
-          setEmail(res.user.email || "");
-          setPhone(res.user.phone || "");
-          setEmailVerified(!!res.user.emailVerified);
+          if (res.user.firstName) setFirstName(res.user.firstName);
+          if (res.user.lastName) setLastName(res.user.lastName);
+          if (res.user.phone) setPhone(res.user.phone);
 
           if (res.profile) {
             setHostType(res.profile.hostType || "individual_owner");
@@ -226,8 +237,7 @@ export default function OwnerOnboardingWizard() {
             ) {
               setIsApplicationSubmitted(true);
               setCurrentStage(6);
-            } else if (res.profile.onboardingStep) {
-              // Restore user to where they left off
+            } else if (res.profile.onboardingStep && res.profile.onboardingStep > 1) {
               setCurrentStage(Math.min(res.profile.onboardingStep, 6));
             }
           }
@@ -245,28 +255,36 @@ export default function OwnerOnboardingWizard() {
   // Handle Image / Document Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !activeUploadField) return;
+    const targetField = activeUploadField;
+    e.target.value = "";
 
-    setUploadingDoc(activeUploadField);
+    if (!file || !targetField) return;
+
+    setUploadingDoc(targetField);
     setErrorMsg(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64 = reader.result as string;
-        const uploadRes = await api.uploadImage(base64, "kyc");
-        if (uploadRes && uploadRes.url) {
-          if (activeUploadField === "idFront") setIdFrontUrl(uploadRes.url);
-          else if (activeUploadField === "idBack") setIdBackUrl(uploadRes.url);
-          else if (activeUploadField === "selfie") setSelfieUrl(uploadRes.url);
-          else if (activeUploadField === "authority") setAuthorityDocUrl(uploadRes.url);
-          setSuccessMsg("Document uploaded successfully.");
-        }
-        setUploadingDoc(null);
-      };
-      reader.readAsDataURL(file);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to upload document.");
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Failed to read file from disk."));
+        reader.readAsDataURL(file);
+      });
+
+      const uploadRes = await api.uploadImage(base64, "kyc");
+      if (uploadRes && uploadRes.url) {
+        if (targetField === "idFront") setIdFrontUrl(uploadRes.url);
+        else if (targetField === "idBack") setIdBackUrl(uploadRes.url);
+        else if (targetField === "selfie") setSelfieUrl(uploadRes.url);
+        else if (targetField === "authority") setAuthorityDocUrl(uploadRes.url);
+        setSuccessMsg("Document uploaded successfully.");
+      } else {
+        throw new Error(uploadRes?.error || "Document upload failed.");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to upload document.";
+      setErrorMsg(msg);
+    } finally {
       setUploadingDoc(null);
     }
   };
@@ -276,44 +294,7 @@ export default function OwnerOnboardingWizard() {
     fileInputRef.current?.click();
   };
 
-  // ── Stage 1: Create Owner Account ──
-  const handleCreateOwnerAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-    setSuccessMsg(null);
-
-    if (!firstName || !lastName || !email || !password) {
-      setErrorMsg("Please fill in all required fields.");
-      return;
-    }
-    if (password.length < 8) {
-      setErrorMsg("Password must be at least 8 characters long.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await authApi.registerOwner({
-        firstName,
-        lastName,
-        email,
-        phone,
-        password,
-        hostType,
-        companyName: hostType === "company" ? companyName : undefined,
-        operatingCity,
-      });
-
-      await refreshUser();
-      setSuccessMsg("Owner account created! Enter the 6-digit verification code sent to your email.");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to create owner account.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // ── Stage 1: Verify Email OTP ──
+  // ── Email Verification Sub-step (If unverified) ──
   const handleVerifyEmailOtp = async () => {
     if (!emailOtp || emailOtp.trim().length !== 6) {
       setErrorMsg("Please enter the 6-digit verification code.");
@@ -324,35 +305,62 @@ export default function OwnerOnboardingWizard() {
     setErrorMsg(null);
     try {
       await authApi.verifyEmail(emailOtp.trim());
-      setEmailVerified(true);
       await refreshUser();
-      setSuccessMsg("Email verified! Let's proceed to personal details.");
-      setTimeout(() => {
-        setCurrentStage(2);
-        setSuccessMsg(null);
-      }, 900);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Invalid verification code.");
+      setSuccessMsg("Email verified! Let's proceed with onboarding.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Invalid verification code.";
+      setErrorMsg(msg);
     } finally {
       setVerifyingEmail(false);
     }
   };
 
-  // ── Stage 1: Resend Email OTP ──
   const handleResendEmailOtp = async () => {
     setResendingEmailOtp(true);
     setErrorMsg(null);
     try {
       await authApi.resendEmailOtp();
       setSuccessMsg("A new verification code has been dispatched to your email.");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to resend code.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to resend code.";
+      setErrorMsg(msg);
     } finally {
       setResendingEmailOtp(false);
     }
   };
 
+  // ── Stage 1: Save Business Qualification & Move to Step 2 ──
+  const handleSaveBusinessStage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
 
+    if (hostType === "company" && !companyName.trim()) {
+      setErrorMsg("Please enter your company or brand name.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api.updateHostOnboardingAuthority({
+        hostType,
+        companyName: hostType === "company" ? companyName.trim() : undefined,
+        companyRegistrationNumber: hostType === "company" ? companyRegNumber.trim() : undefined,
+      });
+
+      if (phone.trim()) {
+        await api.updateHostOnboardingProfile({
+          phone: phone.trim(),
+        });
+      }
+
+      setCurrentStage(2);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save business details.";
+      setErrorMsg(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // ── Stage 2: Save Profile & Move to Step 3 ──
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -377,8 +385,9 @@ export default function OwnerOnboardingWizard() {
         bio,
       });
       setCurrentStage(3);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to save profile.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save profile.";
+      setErrorMsg(msg);
     } finally {
       setSubmitting(false);
     }
@@ -412,8 +421,9 @@ export default function OwnerOnboardingWizard() {
         selfieUrl,
       });
       setCurrentStage(4);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to submit identity documents.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to submit identity documents.";
+      setErrorMsg(msg);
     } finally {
       setSubmitting(false);
     }
@@ -450,8 +460,9 @@ export default function OwnerOnboardingWizard() {
         bankAccountName,
       });
       setCurrentStage(5);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to save authority and bank details.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save authority and bank details.";
+      setErrorMsg(msg);
     } finally {
       setSubmitting(false);
     }
@@ -490,8 +501,9 @@ export default function OwnerOnboardingWizard() {
         },
       });
       setCurrentStage(6);
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to save initial property details.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to save initial property details.";
+      setErrorMsg(msg);
     } finally {
       setSubmitting(false);
     }
@@ -505,9 +517,10 @@ export default function OwnerOnboardingWizard() {
       await api.submitHostOnboarding();
       setIsApplicationSubmitted(true);
       setVerificationStatus("UNDER_REVIEW");
-      setSuccessMsg("Congratulations! Your application has been submitted for review.");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to submit application.");
+      setSuccessMsg("Congratulations! Your partner application has been submitted for official review.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to submit application.";
+      setErrorMsg(msg);
     } finally {
       setSubmitting(false);
     }
@@ -517,7 +530,7 @@ export default function OwnerOnboardingWizard() {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center">
         <Loader2 className="w-10 h-10 animate-spin text-[#0B5D45] mb-4" />
-        <p className="text-gray-600 font-medium text-[15px]">Loading partner onboarding dossier...</p>
+        <p className="text-[#6B6B67] font-medium text-[15px]">Loading partner onboarding dossier...</p>
       </div>
     );
   }
@@ -528,10 +541,10 @@ export default function OwnerOnboardingWizard() {
       ? 100
       : verificationStatus === "UNDER_REVIEW"
       ? 95
-      : Math.round(((currentStage - 1) / 5) * 85 + 15);
+      : Math.round(((currentStage - 1) / 5) * 80 + 20);
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
       {/* Hidden file input for document and selfie uploads */}
       <input
         type="file"
@@ -563,7 +576,7 @@ export default function OwnerOnboardingWizard() {
         </div>
 
         {/* Multi-step progress bar */}
-        <div className="w-full bg-gray-200 h-2.5 rounded-full overflow-hidden">
+        <div className="w-full bg-gray-200 h-2 rounded-full overflow-hidden">
           <div
             className="bg-[#0B5D45] h-full transition-all duration-500 rounded-full"
             style={{ width: `${progressPct}%` }}
@@ -573,11 +586,11 @@ export default function OwnerOnboardingWizard() {
         {/* Step Indicator Badges */}
         <div className="grid grid-cols-6 gap-1 mt-4 text-center">
           {[
-            { num: 1, label: "Account" },
+            { num: 1, label: "Business" },
             { num: 2, label: "Profile" },
             { num: 3, label: "Identity" },
             { num: 4, label: "Authority" },
-            { num: 5, label: "Listing" },
+            { num: 5, label: "Property" },
             { num: 6, label: "Review" },
           ].map((st) => (
             <button
@@ -585,7 +598,7 @@ export default function OwnerOnboardingWizard() {
               type="button"
               disabled={isApplicationSubmitted && st.num < 6}
               onClick={() => {
-                if (st.num <= currentStage || emailVerified) {
+                if (st.num <= currentStage) {
                   setCurrentStage(st.num);
                 }
               }}
@@ -597,7 +610,7 @@ export default function OwnerOnboardingWizard() {
                   : "text-gray-400 bg-gray-100"
               }`}
             >
-              <span className="hidden sm:inline">Stage {st.num}: </span>
+              <span className="hidden sm:inline">Step {st.num}: </span>
               {st.label}
             </button>
           ))}
@@ -630,240 +643,196 @@ export default function OwnerOnboardingWizard() {
         </div>
       )}
 
+      {/* Email Verification Banner if user email is unverified */}
+      {user && !user.emailVerified && (
+        <div className="mb-6 p-6 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 space-y-4">
+          <div className="flex items-start gap-3">
+            <Mail className="w-6 h-6 text-amber-700 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-base">Please verify your email address</h3>
+              <p className="text-sm text-amber-800 mt-1">
+                We sent a 6-digit verification code to <strong>{user.email}</strong>. Please confirm it below to continue.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+            <input
+              type="text"
+              maxLength={6}
+              value={emailOtp}
+              onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, ""))}
+              placeholder="123456"
+              className="w-40 text-center font-mono text-xl tracking-widest py-2 px-3 border border-amber-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <button
+              type="button"
+              disabled={verifyingEmail || emailOtp.length !== 6}
+              onClick={handleVerifyEmailOtp}
+              className="px-5 py-2.5 rounded-xl bg-[#0B5D45] text-white text-sm font-semibold hover:bg-[#084936] disabled:opacity-50 transition-colors shadow-xs"
+            >
+              {verifyingEmail ? "Verifying..." : "Verify Code"}
+            </button>
+            <button
+              type="button"
+              disabled={resendingEmailOtp}
+              onClick={handleResendEmailOtp}
+              className="text-xs text-amber-800 underline hover:text-amber-900"
+            >
+              Resend Code
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* STAGE CONTAINER */}
       <div className="bg-white border border-[#E7E5E0] rounded-2xl shadow-sm p-6 sm:p-8">
-        {/* ─── STAGE 1: ACCOUNT CREATION & EMAIL VERIFICATION ─── */}
+        {/* ─── STAGE 1: PROPERTY BUSINESS QUALIFICATION ─── */}
         {currentStage === 1 && (
           <div>
             <div className="border-b border-gray-100 pb-5 mb-6">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Stage 1 of 6</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Step 1 of 6</span>
               <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
-                Property Owner Account &amp; Email Verification
+                Tell us about your property business
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Create your partner account. We verify your email address to secure your property administration.
+                Which best describes how you operate on Ilé?
               </p>
             </div>
 
-            {!isAuthenticated || !user ? (
-              <form onSubmit={handleCreateOwnerAccount} className="space-y-6">
-                {/* Host Type Selector */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-800 mb-2">
-                    How are you listing on Ilé?
-                  </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {HOST_TYPES.map((t) => (
+            <form onSubmit={handleSaveBusinessStage} className="space-y-6">
+              {/* Host Type Selector */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-800 mb-3">
+                  Which best describes you?
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  {HOST_TYPES.map((t) => {
+                    const isSelected = hostType === t.id;
+                    const IconComp = t.icon;
+                    return (
                       <button
                         key={t.id}
                         type="button"
                         onClick={() => setHostType(t.id as any)}
-                        className={`p-3.5 rounded-xl border text-left transition-all ${
-                          hostType === t.id
-                            ? "border-[#0B5D45] bg-[#0B5D45]/5 ring-1 ring-[#0B5D45]"
+                        className={`p-4 rounded-xl border text-left transition-all relative ${
+                          isSelected
+                            ? "border-[#0B5D45] bg-[#EDF3F0]/60 ring-2 ring-[#0B5D45]"
                             : "border-gray-200 hover:border-gray-300 bg-white"
                         }`}
                       >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className={`p-2 rounded-lg ${isSelected ? "bg-[#0B5D45] text-white" : "bg-gray-100 text-gray-600"}`}>
+                            <IconComp size={18} />
+                          </div>
+                          {isSelected && <Check size={18} className="text-[#0B5D45]" />}
+                        </div>
                         <p className="text-sm font-semibold text-gray-900">{t.title}</p>
-                        <p className="text-xs text-gray-500 mt-1">{t.desc}</p>
+                        <p className="text-xs text-gray-500 mt-1 leading-relaxed">{t.desc}</p>
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
+              </div>
 
-                {hostType === "company" && (
+              {/* Company Fields if Corporate Entity */}
+              {hostType === "company" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0]">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Company / Brand Name</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Company / Brand Name *</label>
                     <input
                       type="text"
                       required
                       value={companyName}
                       onChange={(e) => setCompanyName(e.target.value)}
                       placeholder="e.g. Apex Luxury Suites Ltd"
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none bg-white"
                     />
                   </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Legal First Name</label>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">CAC Registration (RC / BN Number)</label>
                     <input
                       type="text"
-                      required
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="As shown on official ID"
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Legal Last Name (Surname)</label>
-                    <input
-                      type="text"
-                      required
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder="As shown on official ID"
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
+                      value={companyRegNumber}
+                      onChange={(e) => setCompanyRegNumber(e.target.value)}
+                      placeholder="e.g. RC 1948201"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none bg-white"
                     />
                   </div>
                 </div>
+              )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@domain.com"
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number (WhatsApp)</label>
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="0803 123 4567"
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Create Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimum 8 characters"
-                    className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Must be at least 8 characters with numbers or symbols.</p>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="w-full py-3.5 px-6 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white font-medium text-sm flex items-center justify-center gap-2 transition-all shadow-sm"
-                >
-                  {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Create Account & Send Verification Code →"}
-                </button>
-
-                <p className="text-center text-xs text-gray-500 mt-2">
-                  Already have an owner account?{" "}
-                  <Link href="/login?next=/signup" className="text-[#0B5D45] font-semibold underline">
-                    Log in here
-                  </Link>
-                </p>
-              </form>
-            ) : !emailVerified ? (
-              /* Email OTP Verification Sub-step */
-              <div className="max-w-md mx-auto text-center py-4">
-                <div className="w-14 h-14 rounded-2xl bg-[#0B5D45]/10 text-[#0B5D45] flex items-center justify-center mx-auto mb-4">
-                  <Mail className="w-7 h-7" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900">Check your inbox</h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  We sent a 6-digit verification code to <strong>{user.email}</strong>.
-                </p>
-
-                <div className="mt-6 space-y-4">
-                  <input
-                    type="text"
-                    maxLength={6}
-                    value={emailOtp}
-                    onChange={(e) => setEmailOtp(e.target.value.replace(/\D/g, ""))}
-                    placeholder="123456"
-                    className="w-48 mx-auto text-center font-mono text-2xl tracking-widest py-2.5 border-2 border-gray-300 rounded-xl focus:border-[#0B5D45] focus:outline-none"
-                  />
-
-                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                    <button
-                      type="button"
-                      disabled={verifyingEmail || emailOtp.length !== 6}
-                      onClick={handleVerifyEmailOtp}
-                      className="px-6 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-medium flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      {verifyingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : "Verify Code"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={resendingEmailOtp}
-                      onClick={handleResendEmailOtp}
-                      className="px-4 py-2.5 rounded-xl border border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-medium flex items-center justify-center gap-2"
-                    >
-                      {resendingEmailOtp ? <Loader2 className="w-4 h-4 animate-spin" /> : "Resend Code"}
-                    </button>
-                  </div>
-
-                  <p className="text-xs text-gray-400">
-                    Did not receive? Check your spam folder or click Resend Code.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              /* Already Verified state */
-              <div className="text-center py-6">
-                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900">Email Verified</h3>
-                <p className="text-sm text-gray-500 mt-1">
-                  {user.email} is confirmed. Continue to your personal and operational profile.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setCurrentStage(2)}
-                  className="mt-6 px-6 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-medium inline-flex items-center gap-2"
-                >
-                  Continue to Personal Profile →
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ─── STAGE 2: TELL US ABOUT YOURSELF & CONTACT DETAILS ─── */}
-        {currentStage === 2 && (
-          <div>
-            <div className="border-b border-gray-100 pb-5 mb-6">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Stage 2 of 6</span>
-              <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
-                Tell Us About Yourself &amp; Contact Details
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                This builds your verified owner identity. Contact details are quarantined and shared only with confirmed guests.
-              </p>
-            </div>
-
-            <form onSubmit={handleSaveProfile} className="space-y-6">
-              {/* Phone Input */}
+              {/* Phone / WhatsApp for guest operations */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Contact Phone Number (Calls / WhatsApp)
+                <label className="block text-sm font-semibold text-gray-800 mb-1">
+                  Contact Phone / WhatsApp Number
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
-                    <Phone className="w-4 h-4 text-gray-400" />
+                    <Phone className="w-4 h-4" />
                   </div>
                   <input
                     type="tel"
                     required
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="0803 123 4567"
+                    placeholder="+234 803 123 4567"
                     className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
                   />
                 </div>
-                <p className="text-xs text-gray-400 mt-1">
-                  Used for guest check-in coordination after a reservation is confirmed.
+                <p className="text-xs text-gray-500 mt-1">
+                  Required for reservations, urgent guest arrivals, and physical property inspection clearance.
                 </p>
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-6 py-3 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-semibold flex items-center gap-2 transition-all shadow-xs"
+                >
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Continue to Personal Profile →"}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+
+        {/* ─── STAGE 2: ABOUT YOU & OPERATING LOCATION ─── */}
+        {currentStage === 2 && (
+          <div>
+            <div className="border-b border-gray-100 pb-5 mb-6">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Step 2 of 6</span>
+              <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
+                About you &amp; operating location
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Tell us where you operate and provide your residential address for compliance.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveProfile} className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Legal First Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Legal Last Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -896,7 +865,7 @@ export default function OwnerOnboardingWizard() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Residential / Business Office Address
+                  Residential / Business Office Street Address *
                 </label>
                 <input
                   type="text"
@@ -958,12 +927,12 @@ export default function OwnerOnboardingWizard() {
         {currentStage === 3 && (
           <div>
             <div className="border-b border-gray-100 pb-5 mb-6">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Stage 3 of 6</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Step 3 of 6</span>
               <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
                 Government Identity / KYC Verification
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                We need to know who is listing properties on our platform so we can protect tenants and maintain a trusted marketplace.
+                We verify who is listing properties on our platform so we can protect tenants and maintain community trust.
               </p>
             </div>
 
@@ -994,7 +963,7 @@ export default function OwnerOnboardingWizard() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  ID Number (NIN / Licence No. / Passport No.)
+                  ID Number (NIN / Licence No. / Passport No.) *
                 </label>
                 <input
                   type="text"
@@ -1010,7 +979,7 @@ export default function OwnerOnboardingWizard() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* ID Front */}
                 <div className="border border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-gray-400 bg-gray-50">
-                  <p className="text-xs font-semibold text-gray-700 mb-2">Document Front Photo / Scan</p>
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Document Front Photo / Scan *</p>
                   {idFrontUrl ? (
                     <div className="space-y-2">
                       <img src={idFrontUrl} alt="ID Front" className="h-32 mx-auto rounded-lg object-cover" />
@@ -1038,9 +1007,9 @@ export default function OwnerOnboardingWizard() {
                   )}
                 </div>
 
-                {/* ID Back (Optional depending on ID) */}
+                {/* ID Back */}
                 <div className="border border-dashed border-gray-300 rounded-xl p-4 text-center hover:border-gray-400 bg-gray-50">
-                  <p className="text-xs font-semibold text-gray-700 mb-2">Document Back Photo (If applicable)</p>
+                  <p className="text-xs font-semibold text-gray-700 mb-2">Document Back Photo (Optional)</p>
                   {idBackUrl ? (
                     <div className="space-y-2">
                       <img src={idBackUrl} alt="ID Back" className="h-32 mx-auto rounded-lg object-cover" />
@@ -1061,7 +1030,7 @@ export default function OwnerOnboardingWizard() {
                         onClick={() => triggerUpload("idBack")}
                         className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-50 shadow-sm"
                       >
-                        {uploadingDoc === "idBack" ? "Uploading..." : "Upload ID Back (Optional)"}
+                        {uploadingDoc === "idBack" ? "Uploading..." : "Upload ID Back"}
                       </button>
                       <p className="text-[11px] text-gray-400 mt-2">JPG, PNG or PDF up to 10MB</p>
                     </div>
@@ -1069,12 +1038,12 @@ export default function OwnerOnboardingWizard() {
                 </div>
               </div>
 
-              {/* Selfie / Liveness Photo */}
+              {/* Selfie Photo */}
               <div className="p-4 border border-emerald-100 bg-emerald-50/50 rounded-xl">
                 <div className="flex items-start gap-3">
                   <Camera className="w-5 h-5 text-[#0B5D45] flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <h4 className="text-sm font-semibold text-gray-900">Verification Selfie Photo</h4>
+                    <h4 className="text-sm font-semibold text-gray-900">Verification Selfie Photo *</h4>
                     <p className="text-xs text-gray-600 mt-0.5">
                       Take a clear photo of your face looking straight at the camera. Ensure good lighting with no hats or sunglasses.
                     </p>
@@ -1131,12 +1100,12 @@ export default function OwnerOnboardingWizard() {
         {currentStage === 4 && (
           <div>
             <div className="border-b border-gray-100 pb-5 mb-6">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Stage 4 of 6</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Step 4 of 6</span>
               <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
                 Property Authority &amp; Nigerian Bank Payouts
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Distinguish your listing authority (Owner vs Manager vs Company) and connect your Nigerian bank account for automated payouts.
+                Upload proof of authority to host and connect your Nigerian bank account for automated payouts.
               </p>
             </div>
 
@@ -1144,7 +1113,7 @@ export default function OwnerOnboardingWizard() {
               {/* Authority Document Upload */}
               <div className="bg-[#FAFAF8] p-5 rounded-xl border border-gray-200">
                 <label className="block text-sm font-semibold text-gray-800 mb-1">
-                  Upload Authority / Ownership Credential
+                  Upload Authority / Ownership Credential *
                 </label>
                 <p className="text-xs text-gray-500 mb-3">
                   {HOST_TYPES.find((t) => t.id === hostType)?.docLabel || "Proof of ownership or legal management agreement"}
@@ -1178,7 +1147,7 @@ export default function OwnerOnboardingWizard() {
                     >
                       {uploadingDoc === "authority" ? "Uploading..." : "Upload Ownership / Authority Document"}
                     </button>
-                    <p className="text-[11px] text-gray-400 mt-2">Accepted: Deed, C of O, Utility Bill, or Mandate (PDF, JPG, PNG)</p>
+                    <p className="text-[11px] text-gray-400 mt-2">Accepted: Deed, C of O, Utility Bill, or Mandate Letter (PDF, JPG, PNG)</p>
                   </div>
                 )}
               </div>
@@ -1194,7 +1163,7 @@ export default function OwnerOnboardingWizard() {
 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Bank</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Bank *</label>
                     <select
                       value={bankName}
                       onChange={(e) => setBankName(e.target.value)}
@@ -1211,7 +1180,7 @@ export default function OwnerOnboardingWizard() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        10-Digit NUBAN Account Number
+                        10-Digit NUBAN Account Number *
                       </label>
                       <input
                         type="text"
@@ -1224,7 +1193,7 @@ export default function OwnerOnboardingWizard() {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Account Holder Name</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Account Holder Name *</label>
                       <input
                         type="text"
                         required
@@ -1262,7 +1231,7 @@ export default function OwnerOnboardingWizard() {
         {currentStage === 5 && (
           <div>
             <div className="border-b border-gray-100 pb-5 mb-6">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Stage 5 of 6</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Step 5 of 6</span>
               <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
                 First Property Setup &amp; Infrastructure Standards
               </h2>
@@ -1273,7 +1242,7 @@ export default function OwnerOnboardingWizard() {
 
             <form onSubmit={handleSavePropertyDraft} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Property Listing Title</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Property Listing Title *</label>
                 <input
                   type="text"
                   required
@@ -1300,7 +1269,7 @@ export default function OwnerOnboardingWizard() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Neighborhood / District</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Neighborhood / District *</label>
                   <input
                     type="text"
                     required
@@ -1436,7 +1405,7 @@ export default function OwnerOnboardingWizard() {
         {currentStage === 6 && (
           <div>
             <div className="border-b border-gray-100 pb-5 mb-6">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Stage 6 of 6</span>
+              <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Step 6 of 6</span>
               <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
                 Application Review &amp; Approval Status
               </h2>
@@ -1465,11 +1434,11 @@ export default function OwnerOnboardingWizard() {
                   </div>
                   <div className="flex justify-between py-1 border-b border-gray-100">
                     <span className="font-semibold text-gray-800">Estimated Review Time:</span>
-                    <span className="text-gray-900 font-medium">Within 24 Hours</span>
+                    <span className="text-gray-900 font-medium">Within 24 to 48 Hours</span>
                   </div>
                   <div className="flex justify-between py-1">
                     <span className="font-semibold text-gray-800">Registered Email:</span>
-                    <span className="text-gray-900 font-medium">{email || user?.email}</span>
+                    <span className="text-gray-900 font-medium">{user?.email}</span>
                   </div>
                 </div>
 
@@ -1515,15 +1484,19 @@ export default function OwnerOnboardingWizard() {
               /* Pre-submission Summary Review Cards */
               <div className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Account & Profile Summary */}
+                  {/* Business & Profile Summary */}
                   <div className="bg-[#FAFAF8] p-4 rounded-xl border border-gray-200">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-[#0B5D45] mb-2">
-                      1. Account &amp; Identity
+                      1. Business &amp; Contact
                     </h4>
-                    <p className="text-sm font-semibold text-gray-900">{firstName} {lastName}</p>
-                    <p className="text-xs text-gray-600">{email} (Verified: {emailVerified ? "Yes" : "No"})</p>
-                    <p className="text-xs text-gray-600">Phone: {phone || "Not specified"}</p>
-                    <p className="text-xs text-gray-600 mt-1">{operatingCity} • {residentialAddress}</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {HOST_TYPES.find((t) => t.id === hostType)?.title}
+                    </p>
+                    {hostType === "company" && companyName && (
+                      <p className="text-xs text-gray-600">Company: {companyName} ({companyRegNumber || "No RC"})</p>
+                    )}
+                    <p className="text-xs text-gray-600 mt-1">Phone: {phone || user?.phone || "Not set"}</p>
+                    <p className="text-xs text-gray-600">{operatingCity} • {residentialAddress}</p>
                   </div>
 
                   {/* KYC & Identity Summary */}
@@ -1543,7 +1516,7 @@ export default function OwnerOnboardingWizard() {
                       3. Authority &amp; Payout Account
                     </h4>
                     <p className="text-sm font-semibold text-gray-900">
-                      {HOST_TYPES.find((t) => t.id === hostType)?.title}
+                      ✓ Document Attached
                     </p>
                     <p className="text-xs text-gray-600">{bankName}</p>
                     <p className="text-xs font-mono text-gray-700">Acct: {bankAccountNumber} ({bankAccountName})</p>
@@ -1579,12 +1552,12 @@ export default function OwnerOnboardingWizard() {
                     <ArrowLeft className="w-4 h-4" /> Back to Listing
                   </button>
                   <button
-                    type="button"
+                    type="submit"
                     disabled={submitting}
                     onClick={handleSubmitApplication}
                     className="px-8 py-3 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-bold flex items-center gap-2 shadow-md transition-all"
                   >
-                    {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : "Submit Dossier for Official Approval →"}
+                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Submit Dossier for Official Approval →"}
                   </button>
                 </div>
               </div>

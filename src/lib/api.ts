@@ -561,6 +561,21 @@ export const api = {
     return body;
   },
 
+  async suspendAdminHost(id: string, reason?: string) {
+    const res = await fetch(`/api/admin/hosts/${id}/suspend`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify({ reason }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to suspend host");
+    return body;
+  },
+
   // Payments API (Paystack Integration)
   async initializePayment(bookingIdOrRef: string) {
     const res = await fetch("/api/payments/initialize", {

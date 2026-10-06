@@ -21,6 +21,8 @@ const TABLE_STATEMENTS = [
       phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
       phone_verification_code VARCHAR(10),
       phone_verification_expires_at TIMESTAMPTZ,
+      reset_token VARCHAR(100),
+      reset_token_expires_at TIMESTAMPTZ,
       status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -278,6 +280,8 @@ export async function initAndSeedDb() {
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;`,
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verification_code VARCHAR(10);`,
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verification_expires_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(100);`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ;`,
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE';`,
 
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_step INT NOT NULL DEFAULT 1;`,

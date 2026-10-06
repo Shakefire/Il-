@@ -71,6 +71,8 @@ export default function AdminPortalPage() {
   const [rejectingHostId, setRejectingHostId] = useState<string | null>(null);
   const [requestInfoText, setRequestInfoText] = useState("");
   const [requestingInfoHostId, setRequestingInfoHostId] = useState<string | null>(null);
+  const [suspendHostReason, setSuspendHostReason] = useState("");
+  const [suspendingHostId, setSuspendingHostId] = useState<string | null>(null);
 
   // Detail Modal States
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
@@ -238,6 +240,26 @@ export default function AdminPortalPage() {
       await loadAdminData();
     } catch (err: any) {
       alert(err.message || "Request failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleSuspendHost = async (hostId: string) => {
+    setActionLoading(hostId);
+    setActionFeedback(null);
+    try {
+      const res = await api.suspendAdminHost(hostId, suspendHostReason || "Account suspended due to policy violation.");
+      setActionFeedback(res.message || "Host partner account has been suspended.");
+      setSuspendingHostId(null);
+      setSuspendHostReason("");
+      if (selectedHost?.id === hostId) {
+        setSelectedHost(null);
+        setSelectedHostDossier(null);
+      }
+      await loadAdminData();
+    } catch (err: any) {
+      alert(err.message || "Suspension failed");
     } finally {
       setActionLoading(null);
     }
@@ -2128,6 +2150,43 @@ export default function AdminPortalPage() {
                   </div>
                 )}
 
+                {/* Inline Suspend Prompt */}
+                {suspendingHostId === selectedHost.id && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                      Specify Suspension Reason (All Host Listings Will Be Deactivated)
+                    </h5>
+                    <textarea
+                      rows={2}
+                      value={suspendHostReason}
+                      onChange={(e) => setSuspendHostReason(e.target.value)}
+                      placeholder="e.g. Account suspended due to unresolved identity discrepancies or safety complaints."
+                      className="w-full p-2.5 bg-white border border-amber-300 rounded-lg text-xs text-[#171717] focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSuspendingHostId(null);
+                          setSuspendHostReason("");
+                        }}
+                        className="px-3 py-1.5 text-xs text-stone-700 bg-white border border-stone-300 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionLoading === selectedHost.id}
+                        onClick={() => handleSuspendHost(selectedHost.id)}
+                        className="px-4 py-1.5 text-xs font-semibold text-white bg-amber-700 rounded-lg hover:bg-amber-800 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {actionLoading === selectedHost.id && <Loader2 size={12} className="animate-spin" />}
+                        <span>Confirm Account Suspension</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Footer Review Controls */}
                 <div className="pt-4 border-t border-[#E7E5E0] flex flex-wrap items-center justify-between gap-3">
                   <div className="text-xs text-[#8B8B86]">
@@ -2157,6 +2216,7 @@ export default function AdminPortalPage() {
                         onClick={() => {
                           setRequestingInfoHostId(selectedHost.id);
                           setRejectingHostId(null);
+                          setSuspendingHostId(null);
                         }}
                         className="px-3.5 py-2 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold rounded-xl hover:bg-blue-100 transition-colors"
                       >
@@ -2170,10 +2230,25 @@ export default function AdminPortalPage() {
                         onClick={() => {
                           setRejectingHostId(selectedHost.id);
                           setRequestingInfoHostId(null);
+                          setSuspendingHostId(null);
                         }}
                         className="px-3.5 py-2 bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl hover:bg-rose-100 transition-colors"
                       >
                         Reject Application
+                      </button>
+                    )}
+
+                    {selectedHost.profile?.verificationStatus !== "SUSPENDED" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSuspendingHostId(selectedHost.id);
+                          setRejectingHostId(null);
+                          setRequestingInfoHostId(null);
+                        }}
+                        className="px-3.5 py-2 bg-amber-50 text-amber-800 border border-amber-300 text-xs font-semibold rounded-xl hover:bg-amber-100 transition-colors"
+                      >
+                        Suspend Host
                       </button>
                     )}
 

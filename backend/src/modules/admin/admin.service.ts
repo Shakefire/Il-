@@ -519,4 +519,75 @@ export const adminService = {
       profile: updatedProfile,
     };
   },
+
+  async suspendHostApplication(hostId: string, reason: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+
+    const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
+    if (!host) throw new Error("Host user not found");
+
+    const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
+    const prevStatus = profile?.verificationStatus || "REGISTERED";
+
+    // 1. Update user profile to SUSPENDED & isVerified to false
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        isVerified: false,
+        verificationStatus: "SUSPENDED",
+        reviewFeedback: reason || "Account suspended by platform administration.",
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, hostId))
+      .returning();
+
+    // 2. Mark user status as SUSPENDED
+    await db
+      .update(schema.users)
+      .set({
+        status: "SUSPENDED",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, hostId));
+
+    // 3. Suspend all active/published properties for this host
+    await db
+      .update(schema.properties)
+      .set({
+        status: "SUSPENDED",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.properties.hostId, hostId));
+
+    // 4. Record in verification logs
+    await db.insert(schema.verificationLogs).values({
+      id: `vlog_${crypto.randomUUID()}`,
+      hostId,
+      adminId,
+      previousStatus: prevStatus,
+      newStatus: "SUSPENDED",
+      action: "SUSPEND",
+      reason: reason || "Administrative suspension",
+      notes: `Suspended by admin. Reason: ${reason || "Account suspended."}`,
+    });
+
+    // 5. Record in audit logs
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "HOST_SUSPENDED",
+      entityType: "host",
+      entityId: hostId,
+      details: `Host ${host.firstName} ${host.lastName} (${host.email}) suspended. Reason: ${reason || "Violation of platform policies"}`,
+      ipAddress: ipAddress || null,
+    });
+
+    return {
+      success: true,
+      message: `Host account and all associated listings have been suspended.`,
+      profile: updatedProfile,
+    };
+  },
 };

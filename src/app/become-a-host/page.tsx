@@ -25,6 +25,7 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import LocationAutocomplete, { SelectedLocation } from "@/components/LocationAutocomplete";
 import { formatNaira } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 const PROPERTY_TYPES = [
   "Apartment",
@@ -108,11 +109,37 @@ export default function BecomeAHostPage() {
     "Continuous 24/7 power supply with automatic inverter switchover during grid cuts."
   );
 
+  // Host verification barrier state
+  const [checkingVerification, setCheckingVerification] = useState(true);
+  const [hostProfile, setHostProfile] = useState<any>(null);
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       router.push("/login?next=/become-a-host");
+      return;
     }
-  }, [isLoading, isAuthenticated, router]);
+
+    if (isAuthenticated && user) {
+      if (user.role === "admin") {
+        setCheckingVerification(false);
+        return;
+      }
+
+      api
+        .getHostOnboardingStatus()
+        .then((res) => {
+          if (res?.profile) {
+            setHostProfile(res.profile);
+          }
+        })
+        .catch((err) => {
+          console.warn("Failed to check host verification status:", err);
+        })
+        .finally(() => {
+          setCheckingVerification(false);
+        });
+    }
+  }, [isLoading, isAuthenticated, user, router]);
 
   // Auto-save draft when moving between steps
   const saveDraft = async (): Promise<string | null> => {
@@ -293,10 +320,90 @@ export default function BecomeAHostPage() {
     }
   };
 
-  if (isLoading || !isAuthenticated) {
+  if (isLoading || !isAuthenticated || checkingVerification) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center bg-[#FAFAF8]">
         <div className="w-8 h-8 rounded-full border-2 border-[#0B5D45] border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  // Verification Gate for non-admin hosts
+  const isApprovedHost =
+    user?.role === "admin" ||
+    (hostProfile?.isVerified && hostProfile?.verificationStatus === "APPROVED");
+
+  if (!isApprovedHost) {
+    const status = hostProfile?.verificationStatus || "NOT_STARTED";
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center bg-[#FAFAF8] py-12 px-4 sm:px-6">
+        <div className="max-w-lg w-full bg-white border border-[#E7E5E0] rounded-2xl p-8 shadow-sm space-y-6 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-[#0B5D45] border border-emerald-200 flex items-center justify-center mx-auto">
+            <Building2 size={32} />
+          </div>
+
+          <div className="space-y-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-800 text-xs font-semibold uppercase tracking-wider">
+              Verification Required
+            </span>
+            <h2 className="text-2xl font-bold font-display text-[#171717]">
+              {status === "UNDER_REVIEW"
+                ? "Host Application Under Review"
+                : status === "ACTION_REQUIRED"
+                ? "Action Required on Your Application"
+                : status === "REJECTED"
+                ? "Application Not Approved"
+                : status === "SUSPENDED"
+                ? "Host Partner Account Suspended"
+                : "Host Verification Required to List"}
+            </h2>
+            <p className="text-sm text-[#6B6B67] leading-relaxed">
+              {status === "UNDER_REVIEW"
+                ? "Your identity and property ownership documents are currently undergoing administrative review. Once approved, you will be able to create and publish listings immediately."
+                : status === "ACTION_REQUIRED"
+                ? hostProfile?.reviewFeedback || "The platform compliance team has requested revised or clearer documents before your account can list properties."
+                : status === "REJECTED"
+                ? hostProfile?.reviewFeedback || "Your host application was not approved. Please update your details and resubmit for review."
+                : status === "SUSPENDED"
+                ? "Your host partner account has been suspended by administration. Please contact support@ile.ng for assistance."
+                : "To maintain quality standards and guest security across Nigeria, all property partners must complete identity verification and submit proof of ownership or management authority before listing."}
+            </p>
+          </div>
+
+          <div className="pt-2 flex flex-col gap-3">
+            {status === "UNDER_REVIEW" ? (
+              <Link
+                href="/host/dashboard"
+                className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
+              >
+                Go to Host Dashboard
+              </Link>
+            ) : status === "SUSPENDED" ? (
+              <a
+                href="mailto:support@ile.ng"
+                className="w-full py-3 px-4 rounded-xl bg-stone-900 text-white hover:bg-black text-sm font-semibold transition-colors text-center"
+              >
+                Contact Support
+              </a>
+            ) : (
+              <Link
+                href="/host/onboarding"
+                className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
+              >
+                {status === "ACTION_REQUIRED" || status === "REJECTED"
+                  ? "Update Host Documents & Resubmit →"
+                  : "Complete Host Onboarding →"}
+              </Link>
+            )}
+
+            <Link
+              href="/"
+              className="w-full py-2.5 rounded-xl border border-[#E7E5E0] text-sm font-medium text-[#6B6B67] hover:text-[#171717] transition-colors text-center"
+            >
+              Back to Marketplace
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }

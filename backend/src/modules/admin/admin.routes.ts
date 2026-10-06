@@ -168,4 +168,25 @@ export async function adminRoutes(fastify: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   });
+
+  // POST /api/admin/hosts/:id/suspend — Suspend host partner account
+  fastify.post("/hosts/:id/suspend", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    const { reason } = (request.body || {}) as { reason?: string };
+
+    try {
+      const result = await adminService.suspendHostApplication(
+        id,
+        reason || "Account suspended due to policy violation.",
+        session.userId,
+        request.ip
+      );
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
 }

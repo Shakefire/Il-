@@ -7,10 +7,9 @@ import AuthLayout from "@/components/auth/AuthLayout";
 import AuthInput from "@/components/auth/AuthInput";
 import PasswordInput from "@/components/auth/PasswordInput";
 import PrimaryButton from "@/components/auth/PrimaryButton";
-import SocialButton from "@/components/auth/SocialButton";
-import AuthDivider from "@/components/auth/AuthDivider";
 import FormAlert from "@/components/auth/FormAlert";
 import { useAuth } from "@/context/AuthContext";
+import { api } from "@/lib/api";
 
 function LoginForm() {
   const router = useRouter();
@@ -22,7 +21,6 @@ function LoginForm() {
   const [password, setPassword] = useState("");
 
   const [isLoading, setIsLoading] = useState(false);
-  const [socialLoading, setSocialLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
 
@@ -52,7 +50,7 @@ function LoginForm() {
     setIsLoading(true);
 
     try {
-      const user = await login({ email, password });
+      const user = await login({ email: email.trim().toLowerCase(), password });
 
       // Determine redirect path
       if (nextUrl) {
@@ -60,7 +58,17 @@ function LoginForm() {
       } else if (user.role === "admin") {
         router.push("/admin");
       } else if (user.role === "host") {
-        router.push("/host/dashboard");
+        try {
+          const statusRes = await api.getHostOnboardingStatus();
+          const vStatus = statusRes?.verificationStatus;
+          if (vStatus === "APPROVED" || vStatus === "UNDER_REVIEW") {
+            router.push("/host/dashboard");
+          } else {
+            router.push("/host/onboarding");
+          }
+        } catch {
+          router.push("/host/dashboard");
+        }
       } else {
         router.push("/profile");
       }
@@ -75,24 +83,10 @@ function LoginForm() {
     }
   };
 
-  const handleGoogleLogin = async () => {
-    setSocialLoading(true);
-    setErrorMessage(null);
-
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      router.push(nextUrl || "/");
-    } catch {
-      setErrorMessage("Unable to connect with Google. Please try again.");
-    } finally {
-      setSocialLoading(false);
-    }
-  };
-
   return (
     <AuthLayout
       heading="Welcome back."
-      supportingText="Sign in to manage your stays and reservations."
+      supportingText="Log in to your Ilé partner account to manage your listings and bookings."
       imageAlt="Earthy minimalist Nigerian interior with natural light"
     >
       <div className="space-y-6">
@@ -102,9 +96,9 @@ function LoginForm() {
         <form onSubmit={handleLogin} className="space-y-4" noValidate>
           {/* Email */}
           <AuthInput
-            label="Email"
+            label="Email Address"
             type="email"
-            placeholder="your@email.com"
+            placeholder="you@example.com"
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
@@ -150,37 +144,19 @@ function LoginForm() {
               isLoading={isLoading}
               loadingText="Signing in..."
             >
-              Log in
+              Log in →
             </PrimaryButton>
           </div>
         </form>
 
-        {/* Divider */}
-        <AuthDivider />
-
-        {/* Social Auth */}
-        <SocialButton onClick={handleGoogleLogin} isLoading={socialLoading} />
-
         {/* Bottom Switcher */}
-        <div className="pt-2 text-center text-[14px] text-[#6B6B67]">
+        <div className="pt-4 border-t border-[#E7E5E0] text-center text-[14px] text-[#6B6B67]">
           Don&apos;t have an account?{" "}
           <Link
             href={`/signup${nextUrl ? `?next=${encodeURIComponent(nextUrl)}` : ""}`}
-            className="font-semibold text-[#171717] hover:text-[#0B5D45] hover:underline transition-colors"
+            className="font-semibold text-[#0B5D45] hover:underline transition-colors"
           >
-            Sign up
-          </Link>
-        </div>
-
-        {/* Subtle Host Path per Section 3.4 */}
-        <div className="pt-3 border-t border-[#E7E5E0] text-center text-[13px] text-[#6B6B67]">
-          Own a property in Nigeria?{" "}
-          <Link
-            href="/login?next=/become-a-host"
-            className="font-medium text-[#0B5D45] hover:underline inline-flex items-center gap-1"
-          >
-            <span>Become a host</span>
-            <span>→</span>
+            Become an Ilé Property Partner
           </Link>
         </div>
       </div>

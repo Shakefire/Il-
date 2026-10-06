@@ -227,15 +227,22 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/reset-password
   fastify.post("/reset-password", async (request, reply) => {
-    const { token, password } = request.body as any;
+    const { token, password } = (request.body || {}) as any;
+    if (!token || typeof token !== "string") {
+      return reply.status(400).send({ error: "A valid password reset token is required." });
+    }
     if (!password || typeof password !== "string" || password.length < 8) {
       return reply.status(400).send({ error: "Password must be at least 8 characters long." });
     }
 
-    await authService.resetPassword(token, password);
-    return reply.send({
-      success: true,
-      message: "Your password has been reset successfully. Please log in with your new credentials.",
-    });
+    try {
+      await authService.resetPassword(token, password);
+      return reply.send({
+        success: true,
+        message: "Your password has been reset successfully. Please log in with your new credentials.",
+      });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message || "Failed to reset password." });
+    }
   });
 }

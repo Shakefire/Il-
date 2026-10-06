@@ -77,11 +77,11 @@ export async function uploadImage(
       success: false,
       url: "",
       storageKey: "",
-      error: `Unsupported image type (${mimeType}). Allowed: ${ALLOWED_IMAGE_TYPES.join(", ")}`,
+      error: `Unsupported file type (${mimeType}). Allowed: ${ALLOWED_IMAGE_TYPES.join(", ")}`,
     };
   }
 
-  const ext = mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1];
+  const ext = mimeType === "application/pdf" ? "pdf" : mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1];
   const filename = `${crypto.randomUUID()}.${ext}`;
   const prefix = getNormalizedPrefix();
   
@@ -143,7 +143,16 @@ export async function getImageObject(
     const stream = fs.createReadStream(filePath);
     const stats = fs.statSync(filePath);
     const ext = path.extname(filePath).toLowerCase();
-    const contentType = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+    const contentType =
+      ext === ".png"
+        ? "image/png"
+        : ext === ".webp"
+        ? "image/webp"
+        : ext === ".pdf"
+        ? "application/pdf"
+        : ext === ".avif"
+        ? "image/avif"
+        : "image/jpeg";
 
     return {
       stream,

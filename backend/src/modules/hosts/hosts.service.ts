@@ -1111,6 +1111,35 @@ export const hostsService = {
       throw err;
     }
 
+    // Host must be verified and approved
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (user?.role !== "admin") {
+      const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
+      if (!profile || !profile.isVerified || profile.verificationStatus !== "APPROVED") {
+        const err: any = new Error("Your host verification must be approved before you can relist properties.");
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+
+    if (property.status === "DRAFT") {
+      const err: any = new Error("Draft properties cannot be published directly. Please submit your listing for admin review.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (property.status === "PENDING_REVIEW") {
+      const err: any = new Error("This property is currently under review by platform administrators.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (property.status === "REJECTED") {
+      const err: any = new Error("This property was rejected. Please review feedback, edit details, and submit for review.");
+      err.statusCode = 400;
+      throw err;
+    }
+
     if (property.status === "SUSPENDED") {
       const err: any = new Error("This property was suspended by platform administrators and cannot be self-relisted.");
       err.statusCode = 403;

@@ -47,6 +47,7 @@ export const ALLOWED_IMAGE_TYPES = [
   "image/png",
   "image/webp",
   "image/avif",
+  "application/pdf",
 ] as const;
 /** Max images per property */
 export const MAX_IMAGES_PER_PROPERTY = 20;

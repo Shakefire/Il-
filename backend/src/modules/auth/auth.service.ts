@@ -19,8 +19,9 @@ export const RegisterSchema = z.object({
 });
 
 export const RegisterOwnerSchema = z.object({
-  firstName: z.string().min(1, "First name is required"),
-  lastName: z.string().min(1, "Last name is required"),
+  fullName: z.string().optional(),
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
   email: z.string().email("Valid email required"),
   phone: z.string().optional(),
   password: z.string().min(8, "Password must be at least 8 characters"),
@@ -122,14 +123,26 @@ export const authService = {
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
+    let first = data.firstName?.trim() || "";
+    let last = data.lastName?.trim() || "";
+
+    if (!first && data.fullName) {
+      const parts = data.fullName.trim().split(/\s+/);
+      first = parts[0] || "Partner";
+      last = parts.slice(1).join(" ") || "Owner";
+    }
+
+    if (!first) first = "Partner";
+    if (!last) last = "Owner";
+
     const [newUser] = await db
       .insert(schema.users)
       .values({
         id: userId,
         email: cleanEmail,
         passwordHash,
-        firstName: data.firstName.trim(),
-        lastName: data.lastName.trim(),
+        firstName: first,
+        lastName: last,
         phone: data.phone?.trim() || null,
         role: "host",
         emailVerified: false,
@@ -159,7 +172,7 @@ export const authService = {
     // Dispatch verification OTP email
     sendEmail(
       ownerEmailOtpEmail({
-        name: data.firstName.trim(),
+        name: first,
         email: cleanEmail,
         code: otpCode,
       })
@@ -420,6 +433,17 @@ export const authService = {
     }
 
     const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenExpiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour validity
+
+    await db
+      .update(schema.users)
+      .set({
+        resetToken,
+        resetTokenExpiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, user.id));
+
     const { env } = await import("../../config/env");
     const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(cleanEmail)}`;
 
@@ -434,7 +458,41 @@ export const authService = {
     return true;
   },
 
-  async resetPassword(_token: string, _password: string) {
+  async resetPassword(token: string, password: string) {
+    if (!token || typeof token !== "string") {
+      throw new Error("A valid password reset token is required.");
+    }
+    if (!password || password.length < 8) {
+      throw new Error("Password must be at least 8 characters long.");
+    }
+
+    const db = getDb();
+    const [user] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.resetToken, token.trim()))
+      .limit(1);
+
+    if (!user) {
+      throw new Error("Invalid or expired password reset link.");
+    }
+
+    if (user.resetTokenExpiresAt && new Date() > user.resetTokenExpiresAt) {
+      throw new Error("This password reset link has expired. Please request a new password reset link.");
+    }
+
+    const newPasswordHash = await hashPassword(password);
+
+    await db
+      .update(schema.users)
+      .set({
+        passwordHash: newPasswordHash,
+        resetToken: null,
+        resetTokenExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, user.id));
+
     return true;
   },
 };

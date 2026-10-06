@@ -119,7 +119,7 @@ export async function hostsRoutes(fastify: FastifyInstance) {
       if (error.issues) {
         return reply.status(400).send({ error: error.issues[0]?.message || "Validation failed" });
       }
-      return reply.status(400).send({ error: error.message });
+      return reply.status(error.statusCode || 400).send({ error: error.message });
     }
   });
 
