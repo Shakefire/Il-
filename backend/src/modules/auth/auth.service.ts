@@ -55,6 +55,10 @@ export const authService = {
     const passwordHash = await hashPassword(data.password);
     const userId = `usr_${crypto.randomUUID()}`;
 
+    // Generate 6-digit OTP code for email verification
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
     // 3. Create user
     const [newUser] = await db
       .insert(schema.users)
@@ -67,6 +71,8 @@ export const authService = {
         phone: data.phone?.trim() || null,
         role: "guest",
         emailVerified: false,
+        emailVerificationCode: otpCode,
+        emailVerificationExpiresAt: otpExpiresAt,
         phoneVerified: false,
         status: "ACTIVE",
       })
@@ -94,9 +100,15 @@ export const authService = {
         )
       );
 
-    // 6. Send transactional welcome email via Resend
-    sendEmail(welcomeEmail({ name: data.firstName.trim(), email: cleanEmail })).catch((err) => {
-      console.warn("[Auth] Failed to dispatch welcome email:", err);
+    // 6. Send transactional OTP email for verification via Resend
+    sendEmail(
+      ownerEmailOtpEmail({
+        name: data.firstName.trim(),
+        email: cleanEmail,
+        code: otpCode,
+      })
+    ).catch((err) => {
+      console.warn("[Auth] Failed to dispatch OTP email:", err);
     });
 
     return newUser;

@@ -145,7 +145,7 @@ function SignupForm() {
     try {
       await authApi.verifyEmail(fullCode);
       await refreshUser();
-      router.push(nextUrl);
+      router.push("/host/onboarding/business-type");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Verification code incorrect or expired.";
       setErrorMessage(msg);
@@ -246,9 +246,15 @@ function SignupForm() {
               </button>
             </div>
 
-            <p className="text-[12px] text-[#8B8B86]">
-              Tip: You can also use code <strong className="font-mono text-[#171717]">123456</strong> in development or preview mode.
-            </p>
+            <div className="pt-3 border-t border-[#E7E5E0]">
+              <Link
+                href="/host/dashboard"
+                className="text-[13px] font-medium text-[#6B6B67] hover:text-[#171717] hover:underline inline-flex items-center gap-1"
+              >
+                <span>Skip to Host Dashboard</span>
+                <span>→</span>
+              </Link>
+            </div>
           </div>
         </div>
       </AuthLayout>

@@ -6,16 +6,18 @@ import { Eye, EyeOff } from "lucide-react";
 
 interface PasswordInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: string;
+  contextHint?: React.ReactNode;
   error?: string;
 }
 
 const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
-  ({ label = "Password", ...props }, ref) => {
+  ({ label = "Password", contextHint, ...props }, ref) => {
     const [showPassword, setShowPassword] = useState(false);
 
     return (
       <AuthInput
         label={label}
+        contextHint={contextHint}
         ref={ref}
         type={showPassword ? "text" : "password"}
         rightElement={

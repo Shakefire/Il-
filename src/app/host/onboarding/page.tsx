@@ -1,45 +1,28 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import OwnerOnboardingWizard from "@/components/onboarding/OwnerOnboardingWizard";
-import { useAuth } from "@/context/AuthContext";
+import { useOnboarding } from "@/context/OnboardingContext";
 import { Loader2 } from "lucide-react";
 
-function OnboardingContent() {
+export default function HostOnboardingIndexPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { data } = useOnboarding();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      router.push("/login?next=/host/onboarding");
+    if (!data.isLoaded) return;
+
+    if (data.isApplicationSubmitted || data.verificationStatus === "UNDER_REVIEW") {
+      router.replace("/host/onboarding/status");
+    } else {
+      router.replace("/host/onboarding/business-type");
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [data.isLoaded, data.isApplicationSubmitted, data.verificationStatus, router]);
 
-  if (isLoading || !isAuthenticated) {
-    return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center">
-        <Loader2 className="w-8 h-8 animate-spin text-[#0B5D45] mb-3" />
-        <p className="text-sm text-[#6B6B67] font-medium">Verifying authentication session...</p>
-      </div>
-    );
-  }
-
-  return <OwnerOnboardingWizard />;
-}
-
-export default function HostOnboardingPage() {
   return (
-    <div className="min-h-screen bg-[#FDFCFB] py-6 sm:py-10">
-      <Suspense
-        fallback={
-          <div className="min-h-[70vh] flex items-center justify-center">
-            <Loader2 className="w-8 h-8 animate-spin text-[#0B5D45]" />
-          </div>
-        }
-      >
-        <OnboardingContent />
-      </Suspense>
+    <div className="min-h-[50vh] flex flex-col items-center justify-center text-center">
+      <Loader2 className="w-8 h-8 animate-spin text-[#0B5D45] mb-3" />
+      <p className="text-sm text-[#6B6B67] font-medium">Loading onboarding workspace...</p>
     </div>
   );
 }

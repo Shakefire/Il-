@@ -452,11 +452,11 @@ export default function HostDashboardPage() {
               </Link>
             ) : (
               <Link
-                href="/signup"
+                href="/host/onboarding"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[14px] font-medium transition-colors shadow-sm"
               >
                 <Lock size={15} />
-                <span>Complete Verification to List</span>
+                <span>Submit Documents to List Houses</span>
               </Link>
             )}
           </div>
@@ -480,14 +480,14 @@ export default function HostDashboardPage() {
                     ? "Your host dossier is under priority review"
                     : onboardingStatus.verificationStatus === "ACTION_REQUIRED"
                     ? "Action Required: Update Verification Documents"
-                    : "Complete Your Host Onboarding to Publish Listings"}
+                    : "Account Verification Required to List Houses"}
                 </h3>
                 <p className="text-sm text-gray-600 max-w-2xl">
                   {onboardingStatus.verificationStatus === "UNDER_REVIEW"
-                    ? "Our compliance team is verifying your Nigerian government ID and ownership authority. Review typically completes within 24 hours."
+                    ? "Our compliance team is verifying your Nigerian government ID and ownership authority. Review typically completes within 1-2 hours."
                     : onboardingStatus.reviewFeedback
                     ? onboardingStatus.reviewFeedback
-                    : "To protect guests and guarantee marketplace standards, Ilé requires identity and property authority verification before listings can be published live."}
+                    : "To guarantee guest safety and quality standards across Nigeria, your identity and property ownership documents must be submitted and approved before your listings can be published or booked."}
                 </p>
               </div>
 
@@ -497,10 +497,10 @@ export default function HostDashboardPage() {
                   <span className="text-lg font-bold text-[#0B5D45]">{onboardingStatus.progressPct || 25}%</span>
                 </div>
                 <Link
-                  href="/signup"
+                  href={onboardingStatus.verificationStatus === "UNDER_REVIEW" ? "/host/onboarding/status" : "/host/onboarding"}
                   className="px-5 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-semibold shadow-sm transition-all whitespace-nowrap"
                 >
-                  {onboardingStatus.verificationStatus === "UNDER_REVIEW" ? "View Application Status →" : "Continue Onboarding →"}
+                  {onboardingStatus.verificationStatus === "UNDER_REVIEW" ? "View Application Status →" : "Submit Documents for Verification →"}
                 </Link>
               </div>
             </div>
