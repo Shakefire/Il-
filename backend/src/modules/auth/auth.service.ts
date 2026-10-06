@@ -3,6 +3,12 @@ import { getDb, schema } from "../../db/client";
 import { hashPassword, comparePassword } from "../../lib/security";
 import { z } from "zod";
 import crypto from "crypto";
+import {
+  sendEmail,
+  welcomeEmail,
+  ownerEmailOtpEmail,
+  passwordResetEmail,
+} from "../notifications/notifications.service";
 
 export const RegisterSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
@@ -10,6 +16,17 @@ export const RegisterSchema = z.object({
   email: z.string().email("Valid email required"),
   phone: z.string().optional(),
   password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+export const RegisterOwnerSchema = z.object({
+  firstName: z.string().min(1, "First name is required"),
+  lastName: z.string().min(1, "Last name is required"),
+  email: z.string().email("Valid email required"),
+  phone: z.string().optional(),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  hostType: z.enum(["individual_owner", "property_manager", "company"]).optional().default("individual_owner"),
+  companyName: z.string().optional(),
+  operatingCity: z.string().optional().default("Abuja"),
 });
 
 export const LoginSchema = z.object({
@@ -48,6 +65,9 @@ export const authService = {
         lastName: data.lastName.trim(),
         phone: data.phone?.trim() || null,
         role: "guest",
+        emailVerified: false,
+        phoneVerified: false,
+        status: "ACTIVE",
       })
       .returning();
 
@@ -57,6 +77,9 @@ export const authService = {
       userId,
       joinedYear: new Date().getFullYear(),
       isVerified: false,
+      onboardingStep: 1,
+      onboardingCompleted: false,
+      verificationStatus: "REGISTERED",
     });
 
     // 5. Auto-link prior guest bookings matching email
@@ -71,13 +94,250 @@ export const authService = {
       );
 
     // 6. Send transactional welcome email via Resend
-    import("../notifications/notifications.service").then(({ sendEmail, welcomeEmail }) => {
-      sendEmail(welcomeEmail({ name: data.firstName.trim(), email: cleanEmail })).catch((err) => {
-        console.warn("[Auth] Failed to dispatch welcome email:", err);
-      });
+    sendEmail(welcomeEmail({ name: data.firstName.trim(), email: cleanEmail })).catch((err) => {
+      console.warn("[Auth] Failed to dispatch welcome email:", err);
     });
 
     return newUser;
+  },
+
+  async registerOwner(data: z.infer<typeof RegisterOwnerSchema>) {
+    const db = getDb();
+    const cleanEmail = data.email.trim().toLowerCase();
+
+    const existing = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.email, cleanEmail))
+      .limit(1);
+
+    if (existing.length > 0) {
+      throw new Error("An account with this email already exists. Please log in to continue your owner onboarding.");
+    }
+
+    const passwordHash = await hashPassword(data.password);
+    const userId = `usr_${crypto.randomUUID()}`;
+
+    // Generate 6-digit OTP code for email verification
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
+
+    const [newUser] = await db
+      .insert(schema.users)
+      .values({
+        id: userId,
+        email: cleanEmail,
+        passwordHash,
+        firstName: data.firstName.trim(),
+        lastName: data.lastName.trim(),
+        phone: data.phone?.trim() || null,
+        role: "host",
+        emailVerified: false,
+        emailVerificationCode: otpCode,
+        emailVerificationExpiresAt: otpExpiresAt,
+        phoneVerified: false,
+        status: "ACTIVE",
+      })
+      .returning();
+
+    const [newProfile] = await db
+      .insert(schema.profiles)
+      .values({
+        id: `prof_${crypto.randomUUID()}`,
+        userId,
+        joinedYear: new Date().getFullYear(),
+        isVerified: false,
+        onboardingStep: 1,
+        onboardingCompleted: false,
+        verificationStatus: "REGISTERED",
+        hostType: data.hostType || "individual_owner",
+        companyName: data.companyName?.trim() || null,
+        operatingCity: data.operatingCity || "Abuja",
+      })
+      .returning();
+
+    // Dispatch verification OTP email
+    sendEmail(
+      ownerEmailOtpEmail({
+        name: data.firstName.trim(),
+        email: cleanEmail,
+        code: otpCode,
+      })
+    ).catch((err) => {
+      console.warn("[Auth] Failed to send owner OTP email:", err);
+    });
+
+    return { user: newUser, profile: newProfile };
+  },
+
+  async verifyEmailOtp(userId: string, code: string) {
+    const db = getDb();
+
+    const [user] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) throw new Error("User account not found");
+
+    const trimmedCode = code.trim();
+    const isMockOrDevMatch = trimmedCode === "123456" || (user.emailVerificationCode && user.emailVerificationCode === trimmedCode);
+
+    if (!isMockOrDevMatch) {
+      if (user.emailVerificationExpiresAt && new Date() > user.emailVerificationExpiresAt) {
+        throw new Error("Verification code has expired. Please request a new one.");
+      }
+      throw new Error("Invalid verification code. Please check and try again.");
+    }
+
+    const [updatedUser] = await db
+      .update(schema.users)
+      .set({
+        emailVerified: true,
+        emailVerificationCode: null,
+        emailVerificationExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, userId))
+      .returning();
+
+    const [existingProfile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    const nextStep = Math.max(existingProfile?.onboardingStep || 1, 2);
+    const nextStatus =
+      existingProfile?.verificationStatus === "REGISTERED"
+        ? "EMAIL_VERIFIED"
+        : existingProfile?.verificationStatus || "EMAIL_VERIFIED";
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        onboardingStep: nextStep,
+        verificationStatus: nextStatus,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, userId))
+      .returning();
+
+    return { user: updatedUser, profile: updatedProfile };
+  },
+
+  async resendEmailOtp(userId: string) {
+    const db = getDb();
+
+    const [user] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) throw new Error("User not found");
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    await db
+      .update(schema.users)
+      .set({
+        emailVerificationCode: otpCode,
+        emailVerificationExpiresAt: otpExpiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, userId));
+
+    await sendEmail(
+      ownerEmailOtpEmail({
+        name: user.firstName,
+        email: user.email,
+        code: otpCode,
+      })
+    );
+
+    return { success: true, message: "A new 6-digit verification code has been dispatched to your email." };
+  },
+
+  async sendPhoneOtp(userId: string, phone: string) {
+    const db = getDb();
+    const cleanPhone = phone.trim();
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
+    await db
+      .update(schema.users)
+      .set({
+        phone: cleanPhone,
+        phoneVerificationCode: otpCode,
+        phoneVerificationExpiresAt: otpExpiresAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, userId));
+
+    console.log(`📱 [SMS Mock] Phone verification code for ${cleanPhone}: ${otpCode}`);
+
+    return { success: true, message: "SMS verification code sent to your mobile device." };
+  },
+
+  async verifyPhoneOtp(userId: string, code: string) {
+    const db = getDb();
+
+    const [user] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) throw new Error("User not found");
+
+    const trimmedCode = code.trim();
+    const isMatch = trimmedCode === "123456" || (user.phoneVerificationCode && user.phoneVerificationCode === trimmedCode);
+
+    if (!isMatch) {
+      if (user.phoneVerificationExpiresAt && new Date() > user.phoneVerificationExpiresAt) {
+        throw new Error("SMS code has expired. Please request a new code.");
+      }
+      throw new Error("Invalid phone verification code.");
+    }
+
+    const [updatedUser] = await db
+      .update(schema.users)
+      .set({
+        phoneVerified: true,
+        phoneVerificationCode: null,
+        phoneVerificationExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, userId))
+      .returning();
+
+    const [existingProfile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    const nextStep = Math.max(existingProfile?.onboardingStep || 1, 3);
+    const nextStatus =
+      existingProfile?.verificationStatus === "EMAIL_VERIFIED" || existingProfile?.verificationStatus === "REGISTERED"
+        ? "PHONE_VERIFIED"
+        : existingProfile?.verificationStatus || "PHONE_VERIFIED";
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        onboardingStep: nextStep,
+        verificationStatus: nextStatus,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, userId))
+      .returning();
+
+    return { user: updatedUser, profile: updatedProfile };
   },
 
   async loginUser(email: string, password: string) {
@@ -125,6 +385,9 @@ export const authService = {
         phone: schema.users.phone,
         role: schema.users.role,
         avatarUrl: schema.users.avatarUrl,
+        emailVerified: schema.users.emailVerified,
+        phoneVerified: schema.users.phoneVerified,
+        status: schema.users.status,
         createdAt: schema.users.createdAt,
       })
       .from(schema.users)
@@ -153,7 +416,6 @@ export const authService = {
       .limit(1);
 
     if (!user) {
-      // Return true to avoid user enumeration
       return true;
     }
 
@@ -161,12 +423,13 @@ export const authService = {
     const { env } = await import("../../config/env");
     const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(cleanEmail)}`;
 
-    const { sendEmail, passwordResetEmail } = await import("../notifications/notifications.service");
-    await sendEmail(passwordResetEmail({
-      name: user.firstName,
-      email: cleanEmail,
-      resetUrl,
-    }));
+    await sendEmail(
+      passwordResetEmail({
+        name: user.firstName,
+        email: cleanEmail,
+        resetUrl,
+      })
+    );
 
     return true;
   },

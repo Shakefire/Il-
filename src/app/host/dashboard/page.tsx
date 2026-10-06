@@ -106,6 +106,7 @@ export default function HostDashboardPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [onboardingStatus, setOnboardingStatus] = useState<any>(null);
 
   // New Property Form State
   const [title, setTitle] = useState("");
@@ -240,10 +241,22 @@ export default function HostDashboardPage() {
     }
   };
 
+  const loadOnboardingStatus = async () => {
+    try {
+      const res = await api.getHostOnboardingStatus();
+      if (res) {
+        setOnboardingStatus(res);
+      }
+    } catch (err: any) {
+      console.warn("Could not load onboarding status:", err);
+    }
+  };
+
   useEffect(() => {
     loadProperties();
     loadBookings();
     loadStats();
+    loadOnboardingStatus();
   }, []);
 
   const handleCreateProperty = async (e: React.FormEvent) => {
@@ -409,6 +422,11 @@ export default function HostDashboardPage() {
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#0B5D45]">
               <Home size={15} />
               <span>Host Management Portal</span>
+              {onboardingStatus?.verificationStatus === "APPROVED" && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
+                  <ShieldCheck size={13} /> Verified Partner
+                </span>
+              )}
             </div>
             <h1 className="font-display text-3xl sm:text-4xl text-[#171717] font-normal mt-1">
               Your Properties &amp; Listings
@@ -424,15 +442,82 @@ export default function HostDashboardPage() {
                 Go to Admin Portal →
               </Link>
             )}
-            <Link
-              href="/become-a-host"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B5D45] text-white text-[14px] font-medium hover:bg-[#084936] transition-colors shadow-sm"
-            >
-              <Plus size={16} />
-              <span>List New Property</span>
-            </Link>
+            {onboardingStatus?.verificationStatus === "APPROVED" || user?.role === "admin" ? (
+              <Link
+                href="/become-a-host"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B5D45] text-white text-[14px] font-medium hover:bg-[#084936] transition-colors shadow-sm"
+              >
+                <Plus size={16} />
+                <span>List New Property</span>
+              </Link>
+            ) : (
+              <Link
+                href="/signup"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[14px] font-medium transition-colors shadow-sm"
+              >
+                <Lock size={15} />
+                <span>Complete Verification to List</span>
+              </Link>
+            )}
           </div>
         </div>
+
+        {/* Verification Status Banner (If not yet approved) */}
+        {onboardingStatus && onboardingStatus.verificationStatus !== "APPROVED" && (
+          <div className="bg-white border-2 border-amber-300 rounded-2xl p-6 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-800">
+                    {onboardingStatus.verificationStatus}
+                  </span>
+                  <span className="text-xs font-semibold text-gray-500">
+                    Host Verification Incomplete
+                  </span>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 mt-1">
+                  {onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                    ? "Your host dossier is under priority review"
+                    : onboardingStatus.verificationStatus === "ACTION_REQUIRED"
+                    ? "Action Required: Update Verification Documents"
+                    : "Complete Your Host Onboarding to Publish Listings"}
+                </h3>
+                <p className="text-sm text-gray-600 max-w-2xl">
+                  {onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                    ? "Our compliance team is verifying your Nigerian government ID and ownership authority. Review typically completes within 24 hours."
+                    : onboardingStatus.reviewFeedback
+                    ? onboardingStatus.reviewFeedback
+                    : "To protect guests and guarantee marketplace standards, Ilé requires identity and property authority verification before listings can be published live."}
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                <div className="text-left sm:text-right mr-2">
+                  <span className="text-xs text-gray-500 block">Progress</span>
+                  <span className="text-lg font-bold text-[#0B5D45]">{onboardingStatus.progressPct || 25}%</span>
+                </div>
+                <Link
+                  href="/signup"
+                  className="px-5 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-semibold shadow-sm transition-all whitespace-nowrap"
+                >
+                  {onboardingStatus.verificationStatus === "UNDER_REVIEW" ? "View Application Status →" : "Continue Onboarding →"}
+                </Link>
+              </div>
+            </div>
+
+            {/* Missing Requirements List */}
+            {onboardingStatus.missingRequirements && onboardingStatus.missingRequirements.length > 0 && onboardingStatus.verificationStatus !== "UNDER_REVIEW" && (
+              <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-2 items-center text-xs text-gray-600">
+                <span className="font-semibold text-gray-700">Remaining Steps:</span>
+                {onboardingStatus.missingRequirements.map((req: string, idx: number) => (
+                  <span key={idx} className="px-2.5 py-1 rounded-md bg-stone-100 text-stone-700 font-medium">
+                    • {req}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Operational Performance Summary */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

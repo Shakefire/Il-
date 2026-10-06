@@ -15,6 +15,13 @@ const TABLE_STATEMENTS = [
       phone VARCHAR(30),
       role VARCHAR(20) NOT NULL DEFAULT 'guest',
       avatar_url TEXT,
+      email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+      email_verification_code VARCHAR(10),
+      email_verification_expires_at TIMESTAMPTZ,
+      phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
+      phone_verification_code VARCHAR(10),
+      phone_verification_expires_at TIMESTAMPTZ,
+      status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -29,8 +36,45 @@ const TABLE_STATEMENTS = [
       joined_year INT DEFAULT 2026,
       is_verified BOOLEAN DEFAULT FALSE,
       identity_document_url TEXT,
+      onboarding_step INT NOT NULL DEFAULT 1,
+      onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE,
+      verification_status VARCHAR(40) NOT NULL DEFAULT 'REGISTERED',
+      host_type VARCHAR(40),
+      company_name VARCHAR(255),
+      company_reg_number VARCHAR(100),
+      residential_address TEXT,
+      date_of_birth VARCHAR(30),
+      operating_city VARCHAR(100),
+      operating_areas TEXT,
+      id_type VARCHAR(50),
+      id_number VARCHAR(100),
+      id_document_back_url TEXT,
+      selfie_url TEXT,
+      authority_doc_type VARCHAR(50),
+      authority_doc_url TEXT,
+      bank_name VARCHAR(100),
+      bank_code VARCHAR(20),
+      bank_account_number VARCHAR(20),
+      bank_account_name VARCHAR(150),
+      property_draft_data TEXT,
+      review_feedback TEXT,
+      reviewed_by VARCHAR(100),
+      reviewed_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
+  sql`
+    CREATE TABLE IF NOT EXISTS verification_logs (
+      id VARCHAR(100) PRIMARY KEY,
+      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      admin_id VARCHAR(100) REFERENCES users(id) ON DELETE SET NULL,
+      previous_status VARCHAR(40) NOT NULL,
+      new_status VARCHAR(40) NOT NULL,
+      action VARCHAR(50) NOT NULL,
+      reason TEXT,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `,
   sql`
@@ -226,7 +270,51 @@ export async function initAndSeedDb() {
     await db.execute(stmt);
   }
 
-  console.log("✅ Schema initialized. Checking seed data...");
+  // Safe schema migrations for existing databases
+  const MIGRATIONS = [
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_code VARCHAR(10);`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verification_code VARCHAR(10);`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verification_expires_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE';`,
+
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_step INT NOT NULL DEFAULT 1;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS verification_status VARCHAR(40) NOT NULL DEFAULT 'REGISTERED';`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS host_type VARCHAR(40);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS company_reg_number VARCHAR(100);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS residential_address TEXT;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS date_of_birth VARCHAR(30);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS operating_city VARCHAR(100);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS operating_areas TEXT;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS id_type VARCHAR(50);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS id_number VARCHAR(100);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS id_document_back_url TEXT;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS selfie_url TEXT;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS authority_doc_type VARCHAR(50);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS authority_doc_url TEXT;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bank_code VARCHAR(20);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bank_account_number VARCHAR(20);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bank_account_name VARCHAR(150);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS property_draft_data TEXT;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS review_feedback TEXT;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(100);`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;`,
+  ];
+
+  for (const m of MIGRATIONS) {
+    try {
+      await db.execute(m);
+    } catch {
+      // Ignore if already applied
+    }
+  }
+
+  console.log("✅ Schema initialized & migrations applied. Checking seed data...");
 
   const existingUsers = await db.select().from(schema.users);
   const passwordHash = await bcrypt.hash("Password123!", 10);
@@ -244,6 +332,9 @@ export async function initAndSeedDb() {
       lastName: "Administrator",
       phone: "+2348000000001",
       role: "admin",
+      emailVerified: true,
+      phoneVerified: true,
+      status: "ACTIVE",
     });
 
     await db.insert(schema.users).values({
@@ -254,6 +345,9 @@ export async function initAndSeedDb() {
       lastName: "Bello",
       phone: "+2348031234567",
       role: "host",
+      emailVerified: true,
+      phoneVerified: true,
+      status: "ACTIVE",
     });
 
     await db.insert(schema.profiles).values({
@@ -264,6 +358,11 @@ export async function initAndSeedDb() {
       responseTime: "Within an hour",
       joinedYear: 2022,
       isVerified: true,
+      onboardingStep: 6,
+      onboardingCompleted: true,
+      verificationStatus: "APPROVED",
+      hostType: "individual_owner",
+      operatingCity: "Abuja",
     });
 
     await db.insert(schema.users).values({

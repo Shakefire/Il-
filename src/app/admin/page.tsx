@@ -35,6 +35,10 @@ import {
   Receipt,
   Users,
   Zap,
+  BadgeCheck,
+  Camera,
+  Landmark,
+  FileSearch,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
@@ -42,7 +46,7 @@ import { useAuth } from "@/context/AuthContext";
 
 export default function AdminPortalPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState<"pending" | "all" | "bookings" | "audit" | "health">("pending");
+  const [activeTab, setActiveTab] = useState<"pending" | "all" | "hosts" | "bookings" | "audit" | "health">("pending");
   const [stats, setStats] = useState<any>(null);
   const [properties, setProperties] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
@@ -56,6 +60,17 @@ export default function AdminPortalPage() {
   const [testEmailTo, setTestEmailTo] = useState("delivered@resend.dev");
   const [testEmailLoading, setTestEmailLoading] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
+
+  // Host Verification & KYC State
+  const [hosts, setHosts] = useState<any[]>([]);
+  const [hostFilter, setHostFilter] = useState<string>("ALL");
+  const [selectedHost, setSelectedHost] = useState<any | null>(null);
+  const [selectedHostDossier, setSelectedHostDossier] = useState<any | null>(null);
+  const [loadingHostDossier, setLoadingHostDossier] = useState(false);
+  const [rejectHostReason, setRejectHostReason] = useState("");
+  const [rejectingHostId, setRejectingHostId] = useState<string | null>(null);
+  const [requestInfoText, setRequestInfoText] = useState("");
+  const [requestingInfoHostId, setRequestingInfoHostId] = useState<string | null>(null);
 
   // Detail Modal States
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
@@ -73,18 +88,20 @@ export default function AdminPortalPage() {
   const loadAdminData = async () => {
     setLoading(true);
     try {
-      const [statsRes, propsRes, bookingsRes, auditRes, healthRes] = await Promise.all([
+      const [statsRes, propsRes, bookingsRes, auditRes, healthRes, hostsRes] = await Promise.all([
         api.getAdminStats().catch(() => null),
         api.getAdminProperties().catch(() => ({ properties: [] })),
         api.getAdminBookings().catch(() => ({ bookings: [] })),
         api.getAdminAuditLogs().catch(() => ({ logs: [] })),
         api.getSystemHealth().catch(() => null),
+        api.getAdminHosts().catch(() => ({ data: [] })),
       ]);
 
       const rawStats = statsRes?.stats || statsRes;
       if (rawStats) {
         setStats({
           pendingReview: rawStats.pendingReview ?? rawStats.pendingCount ?? 0,
+          pendingHosts: rawStats.pendingHosts ?? 0,
           totalProperties: rawStats.totalProperties ?? rawStats.properties ?? 0,
           totalBookings: rawStats.totalBookings ?? rawStats.bookings ?? 0,
           totalRevenue: rawStats.totalRevenue ?? rawStats.revenue ?? 0,
@@ -95,6 +112,7 @@ export default function AdminPortalPage() {
       if (bookingsRes) setBookings(bookingsRes.data || bookingsRes.bookings || []);
       if (auditRes) setAuditLogs(auditRes.data || auditRes.logs || []);
       if (healthRes) setHealthData(healthRes);
+      if (hostsRes) setHosts(hostsRes.data || hostsRes.items || []);
     } catch (err) {
       console.warn("Failed loading admin portal data:", err);
     } finally {
@@ -149,6 +167,77 @@ export default function AdminPortalPage() {
       await loadAdminData();
     } catch (err: any) {
       alert(err.message || "Suspension failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const openHostDossier = async (host: any) => {
+    setSelectedHost(host);
+    setLoadingHostDossier(true);
+    try {
+      const res = await api.getAdminHost(host.id);
+      setSelectedHostDossier(res);
+    } catch {
+      setSelectedHostDossier(null);
+    } finally {
+      setLoadingHostDossier(false);
+    }
+  };
+
+  const handleApproveHost = async (hostId: string) => {
+    setActionLoading(hostId);
+    setActionFeedback(null);
+    try {
+      const res = await api.approveAdminHost(hostId);
+      setActionFeedback(res.message || "Host approved successfully!");
+      if (selectedHost?.id === hostId) {
+        setSelectedHost(null);
+        setSelectedHostDossier(null);
+      }
+      await loadAdminData();
+    } catch (err: any) {
+      alert(err.message || "Host approval failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRejectHost = async (hostId: string) => {
+    setActionLoading(hostId);
+    setActionFeedback(null);
+    try {
+      const res = await api.rejectAdminHost(hostId, rejectHostReason || "Document standards not met.");
+      setActionFeedback(res.message || "Host application rejected.");
+      setRejectingHostId(null);
+      setRejectHostReason("");
+      if (selectedHost?.id === hostId) {
+        setSelectedHost(null);
+        setSelectedHostDossier(null);
+      }
+      await loadAdminData();
+    } catch (err: any) {
+      alert(err.message || "Rejection failed");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleRequestHostInfo = async (hostId: string) => {
+    setActionLoading(hostId);
+    setActionFeedback(null);
+    try {
+      const res = await api.requestAdminHostInfo(hostId, requestInfoText || "Please re-upload clearer photos of your identity documents.");
+      setActionFeedback(res.message || "Additional information requested from host.");
+      setRequestingInfoHostId(null);
+      setRequestInfoText("");
+      if (selectedHost?.id === hostId) {
+        setSelectedHost(null);
+        setSelectedHostDossier(null);
+      }
+      await loadAdminData();
+    } catch (err: any) {
+      alert(err.message || "Request failed");
     } finally {
       setActionLoading(null);
     }
@@ -246,15 +335,27 @@ export default function AdminPortalPage() {
         )}
 
         {/* Metric Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
           <div className="bg-white p-5 rounded-2xl border border-[#E7E5E0] shadow-sm">
             <span className="text-xs uppercase tracking-wider text-[#8B8B86] font-semibold">
-              Pending Reviews
+              Pending Listings
             </span>
             <div className="text-3xl font-bold text-amber-600 mt-1">
               {stats ? stats.pendingReview : pendingProperties.length}
             </div>
-            <div className="text-xs text-[#6B6B67] mt-1">Awaiting physical verification</div>
+            <div className="text-xs text-[#6B6B67] mt-1">Awaiting physical review</div>
+          </div>
+
+          <div className="bg-white p-5 rounded-2xl border border-[#E7E5E0] shadow-sm">
+            <span className="text-xs uppercase tracking-wider text-[#8B8B86] font-semibold">
+              Host KYC Dossiers
+            </span>
+            <div className="text-3xl font-bold text-[#0B5D45] mt-1">
+              {hosts.filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW").length}
+            </div>
+            <div className="text-xs text-[#6B6B67] mt-1">
+              {hosts.length} total registered hosts
+            </div>
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-[#E7E5E0] shadow-sm">
@@ -277,7 +378,7 @@ export default function AdminPortalPage() {
             <div className="text-xs text-[#6B6B67] mt-1">Reservation transactions</div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-[#E7E5E0] shadow-sm">
+          <div className="bg-white p-5 rounded-2xl border border-[#E7E5E0] shadow-sm col-span-2 lg:col-span-1">
             <span className="text-xs uppercase tracking-wider text-[#8B8B86] font-semibold">
               Platform Volume
             </span>
@@ -289,22 +390,39 @@ export default function AdminPortalPage() {
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex border-b border-[#E7E5E0] gap-8">
+        <div className="flex border-b border-[#E7E5E0] gap-8 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab("pending")}
-            className={`pb-3 text-sm font-semibold transition-all relative ${
+            className={`pb-3 text-sm font-semibold transition-all relative shrink-0 ${
               activeTab === "pending"
                 ? "text-[#0B5D45] border-b-2 border-[#0B5D45]"
                 : "text-[#6B6B67] hover:text-[#171717]"
             }`}
           >
-            Pending Verification ({pendingProperties.length})
+            Pending Listings ({pendingProperties.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("hosts")}
+            className={`pb-3 text-sm font-semibold transition-all relative shrink-0 flex items-center gap-1.5 ${
+              activeTab === "hosts"
+                ? "text-[#0B5D45] border-b-2 border-[#0B5D45]"
+                : "text-[#6B6B67] hover:text-[#171717]"
+            }`}
+          >
+            <ShieldCheck size={16} />
+            <span>Host Verification &amp; KYC</span>
+            {hosts.filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW").length > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                {hosts.filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW").length}
+              </span>
+            )}
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("all")}
-            className={`pb-3 text-sm font-semibold transition-all relative ${
+            className={`pb-3 text-sm font-semibold transition-all relative shrink-0 ${
               activeTab === "all"
                 ? "text-[#0B5D45] border-b-2 border-[#0B5D45]"
                 : "text-[#6B6B67] hover:text-[#171717]"
@@ -315,7 +433,7 @@ export default function AdminPortalPage() {
           <button
             type="button"
             onClick={() => setActiveTab("bookings")}
-            className={`pb-3 text-sm font-semibold transition-all relative ${
+            className={`pb-3 text-sm font-semibold transition-all relative shrink-0 ${
               activeTab === "bookings"
                 ? "text-[#0B5D45] border-b-2 border-[#0B5D45]"
                 : "text-[#6B6B67] hover:text-[#171717]"
@@ -326,7 +444,7 @@ export default function AdminPortalPage() {
           <button
             type="button"
             onClick={() => setActiveTab("audit")}
-            className={`pb-3 text-sm font-semibold transition-all relative ${
+            className={`pb-3 text-sm font-semibold transition-all relative shrink-0 ${
               activeTab === "audit"
                 ? "text-[#0B5D45] border-b-2 border-[#0B5D45]"
                 : "text-[#6B6B67] hover:text-[#171717]"
@@ -337,7 +455,7 @@ export default function AdminPortalPage() {
           <button
             type="button"
             onClick={() => setActiveTab("health")}
-            className={`pb-3 text-sm font-semibold transition-all relative flex items-center gap-1.5 ${
+            className={`pb-3 text-sm font-semibold transition-all relative shrink-0 flex items-center gap-1.5 ${
               activeTab === "health"
                 ? "text-[#0B5D45] border-b-2 border-[#0B5D45]"
                 : "text-[#6B6B67] hover:text-[#171717]"
@@ -467,6 +585,263 @@ export default function AdminPortalPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Host Verification & KYC Tab */}
+            {activeTab === "hosts" && (
+              <div className="space-y-4">
+                {/* Header & Filter Controls */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-white rounded-2xl border border-[#E7E5E0]">
+                  <div>
+                    <h3 className="text-base font-semibold text-[#171717] flex items-center gap-2">
+                      <ShieldCheck size={18} className="text-[#0B5D45]" />
+                      <span>Host Onboarding &amp; Verification Dossiers</span>
+                    </h3>
+                    <p className="text-xs text-[#6B6B67] mt-0.5">
+                      Review government ID credentials, selfie biometric matches, ownership mandates, and payout accounts before approving hosts.
+                    </p>
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      { key: "ALL", label: `All (${hosts.length})` },
+                      {
+                        key: "UNDER_REVIEW",
+                        label: `Awaiting Review (${hosts.filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW").length})`,
+                        highlight: hosts.filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW").length > 0,
+                      },
+                      {
+                        key: "APPROVED",
+                        label: `Approved (${hosts.filter((h) => h.profile?.verificationStatus === "APPROVED").length})`,
+                      },
+                      {
+                        key: "ACTION_REQUIRED",
+                        label: `Info Requested (${hosts.filter((h) => h.profile?.verificationStatus === "ACTION_REQUIRED").length})`,
+                      },
+                      {
+                        key: "REJECTED",
+                        label: `Rejected (${hosts.filter((h) => h.profile?.verificationStatus === "REJECTED").length})`,
+                      },
+                      {
+                        key: "DRAFT",
+                        label: `Incomplete (${hosts.filter((h) => ["REGISTERED", "EMAIL_VERIFIED", "PROFILE_COMPLETED", "DRAFT"].includes(h.profile?.verificationStatus || "")).length})`,
+                      },
+                    ].map((f) => {
+                      const isActive = hostFilter === f.key;
+                      return (
+                        <button
+                          key={f.key}
+                          type="button"
+                          onClick={() => setHostFilter(f.key)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
+                            isActive
+                              ? "bg-[#0B5D45] text-white shadow-xs"
+                              : f.highlight
+                              ? "bg-amber-100 text-amber-900 hover:bg-amber-200"
+                              : "bg-[#FAFAF8] text-[#6B6B67] hover:text-[#171717] border border-[#E7E5E0]"
+                          }`}
+                        >
+                          {f.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Applications Table */}
+                {(() => {
+                  const filteredHosts = hosts.filter((h) => {
+                    if (hostFilter === "ALL") return true;
+                    const status = h.profile?.verificationStatus || "REGISTERED";
+                    if (hostFilter === "DRAFT") {
+                      return ["REGISTERED", "EMAIL_VERIFIED", "PROFILE_COMPLETED", "DRAFT"].includes(status);
+                    }
+                    return status === hostFilter;
+                  });
+
+                  if (filteredHosts.length === 0) {
+                    return (
+                      <div className="p-12 bg-white rounded-2xl border border-[#E7E5E0] text-center space-y-2">
+                        <CheckCircle2 size={36} className="text-[#0B5D45] mx-auto" />
+                        <h4 className="font-display text-lg text-[#171717]">No applications match filter</h4>
+                        <p className="text-xs text-[#6B6B67]">
+                          There are currently no host profiles with status &ldquo;{hostFilter}&rdquo;.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="bg-white rounded-2xl border border-[#E7E5E0] overflow-hidden">
+                      <table className="w-full text-left text-sm divide-y divide-[#E7E5E0]">
+                        <thead className="bg-[#FAFAF8] text-xs font-semibold uppercase text-[#6B6B67]">
+                          <tr>
+                            <th className="p-4">Host Applicant</th>
+                            <th className="p-4">Applicant Type</th>
+                            <th className="p-4">KYC Credentials</th>
+                            <th className="p-4">Bank Payout</th>
+                            <th className="p-4">Verification Status</th>
+                            <th className="p-4 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#E7E5E0]">
+                          {filteredHosts.map((h) => {
+                            const prof = h.profile || {};
+                            const status = prof.verificationStatus || "REGISTERED";
+                            const hostTypeLabel =
+                              prof.hostType === "CORPORATE_ENTITY"
+                                ? "Company / Corporate"
+                                : prof.hostType === "PROPERTY_MANAGER"
+                                ? "Property Manager"
+                                : "Individual Owner";
+
+                            return (
+                              <tr
+                                key={h.id}
+                                className="hover:bg-[#FAFAF8] transition-colors cursor-pointer group"
+                                onClick={() => openHostDossier(h)}
+                              >
+                                <td className="p-4">
+                                  <div className="font-semibold text-[#171717] group-hover:text-[#0B5D45] transition-colors">
+                                    {h.firstName} {h.lastName}
+                                  </div>
+                                  <div className="text-xs text-[#6B6B67] flex items-center gap-1 mt-0.5">
+                                    <span>{h.email}</span>
+                                    {h.emailVerified ? (
+                                      <CheckCircle2 size={12} className="text-emerald-600 shrink-0" />
+                                    ) : (
+                                      <span className="text-[10px] text-amber-600 bg-amber-50 px-1 rounded">Unverified</span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-[#8B8B86]">
+                                    {h.phone || "No phone"} {h.phoneVerified && "✓"}
+                                  </div>
+                                </td>
+
+                                <td className="p-4">
+                                  <span className="inline-block text-xs font-medium text-[#171717] bg-[#FAFAF8] px-2.5 py-1 rounded-md border border-[#E7E5E0]">
+                                    {hostTypeLabel}
+                                  </span>
+                                  {prof.companyName && (
+                                    <div className="text-xs text-[#6B6B67] mt-1 font-medium">
+                                      {prof.companyName}
+                                    </div>
+                                  )}
+                                  <div className="text-[11px] text-[#8B8B86] mt-0.5">
+                                    {prof.operatingCity || "Location unset"}
+                                  </div>
+                                </td>
+
+                                <td className="p-4">
+                                  <div className="text-xs font-medium text-[#171717]">
+                                    {prof.idType ? prof.idType.replace(/_/g, " ") : "No ID selected"}
+                                  </div>
+                                  <div className="flex items-center gap-1 mt-1 text-[11px]">
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded ${
+                                        prof.idDocumentUrl
+                                          ? "bg-emerald-50 text-emerald-700"
+                                          : "bg-stone-100 text-stone-500"
+                                      }`}
+                                    >
+                                      ID: {prof.idDocumentUrl ? "Uploaded" : "Missing"}
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded ${
+                                        prof.selfieUrl
+                                          ? "bg-emerald-50 text-emerald-700"
+                                          : "bg-stone-100 text-stone-500"
+                                      }`}
+                                    >
+                                      Selfie: {prof.selfieUrl ? "Uploaded" : "Missing"}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                <td className="p-4">
+                                  {prof.bankName ? (
+                                    <div>
+                                      <div className="text-xs font-semibold text-[#171717]">
+                                        {prof.bankName}
+                                      </div>
+                                      <div className="text-xs font-mono text-[#6B6B67]">
+                                        {prof.bankAccountNumber}
+                                      </div>
+                                      <div className="text-[11px] text-[#8B8B86]">
+                                        {prof.bankAccountName || "—"}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-[#8B8B86]">Pending submission</span>
+                                  )}
+                                </td>
+
+                                <td className="p-4">
+                                  <span
+                                    className={`px-2.5 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 ${
+                                      status === "APPROVED"
+                                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                        : status === "UNDER_REVIEW"
+                                        ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                        : status === "ACTION_REQUIRED"
+                                        ? "bg-blue-50 text-blue-700 border border-blue-200"
+                                        : status === "REJECTED"
+                                        ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                        : "bg-gray-100 text-gray-700 border border-gray-200"
+                                    }`}
+                                  >
+                                    {status === "APPROVED" && <CheckCircle2 size={12} />}
+                                    {status === "UNDER_REVIEW" && <Clock size={12} />}
+                                    {status === "ACTION_REQUIRED" && <AlertTriangle size={12} />}
+                                    {status === "REJECTED" && <XCircle size={12} />}
+                                    <span>{status.replace(/_/g, " ")}</span>
+                                  </span>
+                                  {prof.reviewFeedback && (
+                                    <p className="text-[11px] text-rose-600 mt-1 line-clamp-1 italic">
+                                      &ldquo;{prof.reviewFeedback}&rdquo;
+                                    </p>
+                                  )}
+                                </td>
+
+                                <td
+                                  className="p-4 text-right space-x-2"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => openHostDossier(h)}
+                                    className="px-3 py-1.5 bg-[#FAFAF8] text-[#171717] border border-[#E7E5E0] hover:bg-[#E7E5E0] rounded-lg text-xs font-medium transition-colors inline-flex items-center gap-1"
+                                  >
+                                    <Eye size={12} />
+                                    <span>Inspect</span>
+                                  </button>
+
+                                  {status !== "APPROVED" && (
+                                    <button
+                                      type="button"
+                                      disabled={actionLoading === h.id}
+                                      onClick={() => handleApproveHost(h.id)}
+                                      className="px-3 py-1.5 bg-[#0B5D45] text-white hover:bg-[#084936] rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1 disabled:opacity-50"
+                                    >
+                                      {actionLoading === h.id ? (
+                                        <Loader2 size={12} className="animate-spin" />
+                                      ) : (
+                                        <CheckCircle2 size={12} />
+                                      )}
+                                      <span>Approve</span>
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1333,6 +1708,496 @@ export default function AdminPortalPage() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal 3: Host KYC & Verification Dossier ── */}
+      {selectedHost && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[92vh] overflow-y-auto shadow-2xl border border-[#E7E5E0] p-6 space-y-6">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-4 border-b border-[#E7E5E0]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wider text-[#8B8B86] font-semibold flex items-center gap-1">
+                    <ShieldCheck size={14} className="text-[#0B5D45]" />
+                    Host Dossier &amp; KYC Verification
+                  </span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      selectedHost.profile?.verificationStatus === "APPROVED"
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : selectedHost.profile?.verificationStatus === "UNDER_REVIEW"
+                        ? "bg-amber-50 text-amber-700 border border-amber-200"
+                        : selectedHost.profile?.verificationStatus === "ACTION_REQUIRED"
+                        ? "bg-blue-50 text-blue-700 border border-blue-200"
+                        : selectedHost.profile?.verificationStatus === "REJECTED"
+                        ? "bg-rose-50 text-rose-700 border border-rose-200"
+                        : "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    {selectedHost.profile?.verificationStatus || "REGISTERED"}
+                  </span>
+                </div>
+                <h3 className="font-display text-2xl text-[#171717] font-semibold mt-1">
+                  {selectedHost.firstName} {selectedHost.lastName}
+                </h3>
+                <p className="text-xs text-[#6B6B67]">
+                  {selectedHost.email} · Registered on{" "}
+                  {selectedHost.createdAt ? new Date(selectedHost.createdAt).toLocaleDateString("en-GB") : "Recently"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedHost(null);
+                  setSelectedHostDossier(null);
+                  setRejectingHostId(null);
+                  setRequestingInfoHostId(null);
+                }}
+                className="p-2 text-[#8B8B86] hover:text-[#171717] rounded-full hover:bg-[#FAFAF8] transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {loadingHostDossier ? (
+              <div className="py-16 text-center text-[#6B6B67] space-y-2">
+                <Loader2 size={28} className="animate-spin mx-auto text-[#0B5D45]" />
+                <p className="text-sm">Retrieving full encrypted applicant verification dossier...</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Section 1: Personal & Operational Profile */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                    <User size={14} className="text-[#0B5D45]" />
+                    <span>Personal &amp; Operational Profile</span>
+                  </h4>
+                  <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-[#8B8B86] block">Legal Name:</span>
+                      <span className="font-semibold text-[#171717]">
+                        {selectedHost.firstName} {selectedHost.lastName}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#8B8B86] block">Applicant Type:</span>
+                      <span className="font-semibold text-[#0B5D45]">
+                        {selectedHost.profile?.hostType === "CORPORATE_ENTITY"
+                          ? "Corporate Entity"
+                          : selectedHost.profile?.hostType === "PROPERTY_MANAGER"
+                          ? "Authorized Property Manager"
+                          : "Individual Property Owner"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#8B8B86] block">Email Address:</span>
+                      <span className="font-medium text-[#171717] flex items-center gap-1">
+                        {selectedHost.email}
+                        {selectedHost.emailVerified ? (
+                          <span className="text-[10px] text-emerald-700 bg-emerald-100 px-1 rounded">Verified</span>
+                        ) : (
+                          <span className="text-[10px] text-amber-700 bg-amber-100 px-1 rounded">Pending</span>
+                        )}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#8B8B86] block">Phone Number:</span>
+                      <span className="font-medium text-[#171717] flex items-center gap-1">
+                        {selectedHost.phone || "Not specified"}
+                        {selectedHost.phoneVerified ? (
+                          <span className="text-[10px] text-emerald-700 bg-emerald-100 px-1 rounded">Verified</span>
+                        ) : (
+                          <span className="text-[10px] text-amber-700 bg-amber-100 px-1 rounded">Pending</span>
+                        )}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#8B8B86] block">Residential Address:</span>
+                      <span className="font-medium text-[#171717]">
+                        {selectedHost.profile?.residentialAddress || "Not specified"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#8B8B86] block">Operating Region:</span>
+                      <span className="font-medium text-[#171717]">
+                        {selectedHost.profile?.operatingCity || "Abuja"}
+                        {selectedHost.profile?.operatingAreas ? ` (${selectedHost.profile.operatingAreas})` : ""}
+                      </span>
+                    </div>
+                    {selectedHost.profile?.companyName && (
+                      <div className="sm:col-span-2 pt-2 border-t border-[#E7E5E0] grid grid-cols-2 gap-3">
+                        <div>
+                          <span className="text-[#8B8B86] block">Company Name:</span>
+                          <span className="font-bold text-[#171717]">{selectedHost.profile.companyName}</span>
+                        </div>
+                        <div>
+                          <span className="text-[#8B8B86] block">CAC Registration No:</span>
+                          <span className="font-mono font-bold text-[#171717]">{selectedHost.profile.companyRegNumber || "N/A"}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Section 2: Identity & Biometric KYC */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                    <Camera size={14} className="text-[#0B5D45]" />
+                    <span>Government ID &amp; Biometric Verification</span>
+                  </h4>
+                  <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-4 text-xs">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <span className="text-[#8B8B86] block">ID Document Type:</span>
+                        <span className="font-bold text-[#171717]">
+                          {selectedHost.profile?.idType ? selectedHost.profile.idType.replace(/_/g, " ") : "Not selected"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#8B8B86] block">Document / NIN Number:</span>
+                        <span className="font-mono font-bold text-[#171717]">
+                          {selectedHost.profile?.idNumber || "Not entered"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Image Previews */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-[#E7E5E0]">
+                      <div>
+                        <span className="text-[#8B8B86] block mb-1 font-medium">ID Document (Front):</span>
+                        {selectedHost.profile?.idDocumentUrl ? (
+                          <a
+                            href={selectedHost.profile.idDocumentUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block relative h-36 rounded-lg overflow-hidden border border-[#E7E5E0] bg-stone-100 group"
+                          >
+                            <Image
+                              src={selectedHost.profile.idDocumentUrl}
+                              alt="ID Document Front"
+                              fill
+                              className="object-cover group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity">
+                              Open Full Size ↗
+                            </div>
+                          </a>
+                        ) : (
+                          <div className="h-36 rounded-lg border border-dashed border-[#D2D0CA] bg-white flex items-center justify-center text-[#8B8B86] text-center p-2">
+                            No front image uploaded
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="text-[#8B8B86] block mb-1 font-medium">ID Document (Back):</span>
+                        {selectedHost.profile?.idDocumentBackUrl ? (
+                          <a
+                            href={selectedHost.profile.idDocumentBackUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block relative h-36 rounded-lg overflow-hidden border border-[#E7E5E0] bg-stone-100 group"
+                          >
+                            <Image
+                              src={selectedHost.profile.idDocumentBackUrl}
+                              alt="ID Document Back"
+                              fill
+                              className="object-cover group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity">
+                              Open Full Size ↗
+                            </div>
+                          </a>
+                        ) : (
+                          <div className="h-36 rounded-lg border border-dashed border-[#D2D0CA] bg-white flex items-center justify-center text-[#8B8B86] text-center p-2">
+                            Optional / Not uploaded
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <span className="text-[#8B8B86] block mb-1 font-medium">Live Biometric Selfie:</span>
+                        {selectedHost.profile?.selfieUrl ? (
+                          <a
+                            href={selectedHost.profile.selfieUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block relative h-36 rounded-lg overflow-hidden border border-[#E7E5E0] bg-stone-100 group"
+                          >
+                            <Image
+                              src={selectedHost.profile.selfieUrl}
+                              alt="Applicant Selfie"
+                              fill
+                              className="object-cover group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity">
+                              Open Full Size ↗
+                            </div>
+                          </a>
+                        ) : (
+                          <div className="h-36 rounded-lg border border-dashed border-[#D2D0CA] bg-white flex items-center justify-center text-[#8B8B86] text-center p-2">
+                            No selfie uploaded
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: Property Authority & Mandate */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                    <FileText size={14} className="text-[#0B5D45]" />
+                    <span>Property Authority &amp; Legal Mandate</span>
+                  </h4>
+                  <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-[#8B8B86] block">Mandate / Authority Type:</span>
+                        <span className="font-semibold text-[#171717]">
+                          {selectedHost.profile?.authorityDocType
+                            ? selectedHost.profile.authorityDocType.replace(/_/g, " ")
+                            : "Deed of Assignment / Mandate"}
+                        </span>
+                      </div>
+                      {selectedHost.profile?.authorityDocUrl && (
+                        <a
+                          href={selectedHost.profile.authorityDocUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1.5 bg-white border border-[#E7E5E0] hover:bg-[#E7E5E0] rounded-lg text-xs font-medium text-[#0B5D45] inline-flex items-center gap-1 shadow-xs"
+                        >
+                          <span>View Legal Document</span>
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 4: Settlement Bank Account */}
+                <div className="space-y-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                    <Landmark size={14} className="text-[#0B5D45]" />
+                    <span>Settlement / Payout Bank Account</span>
+                  </h4>
+                  <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <span className="text-[#8B8B86] block">Bank Name:</span>
+                      <span className="font-bold text-[#171717]">
+                        {selectedHost.profile?.bankName || "Not configured"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#8B8B86] block">Account Number (NUBAN):</span>
+                      <span className="font-mono font-bold text-[#171717]">
+                        {selectedHost.profile?.bankAccountNumber || "—"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[#8B8B86] block">Account Holder Name:</span>
+                      <span className="font-medium text-[#171717]">
+                        {selectedHost.profile?.bankAccountName || "—"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 5: Preliminary Property Draft (if present) */}
+                {selectedHost.profile?.propertyDraftData && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                      <Building size={14} className="text-[#0B5D45]" />
+                      <span>Preliminary Property Draft Submitted</span>
+                    </h4>
+                    <div className="p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#171717] text-sm">
+                          {selectedHost.profile.propertyDraftData.title || "Untitled Property"}
+                        </span>
+                        <span className="font-bold text-[#0B5D45]">
+                          {formatNaira(selectedHost.profile.propertyDraftData.pricePerNight || 0)} / night
+                        </span>
+                      </div>
+                      <div className="text-[#6B6B67]">
+                        {selectedHost.profile.propertyDraftData.propertyType} · {selectedHost.profile.propertyDraftData.city} (
+                        {selectedHost.profile.propertyDraftData.neighborhood}) · {selectedHost.profile.propertyDraftData.bedrooms} Bedrooms
+                      </div>
+                      <div className="text-[#6B6B67] pt-1">
+                        Power Setup: <span className="font-medium text-[#171717]">{selectedHost.profile.propertyDraftData.powerType || "24/7 dedicated inverter"}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Section 6: Verification Audit Logs */}
+                {selectedHostDossier?.verificationLogs && selectedHostDossier.verificationLogs.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-[#8B8B86] flex items-center gap-1.5">
+                      <Clock size={14} className="text-[#0B5D45]" />
+                      <span>Verification Audit Trail</span>
+                    </h4>
+                    <div className="divide-y divide-[#E7E5E0] border border-[#E7E5E0] rounded-xl overflow-hidden bg-white text-xs">
+                      {selectedHostDossier.verificationLogs.map((log: any) => (
+                        <div key={log.id} className="p-3 flex items-start justify-between gap-3">
+                          <div>
+                            <span className="font-semibold text-[#171717] block">
+                              {log.action}: {log.previousStatus} → {log.newStatus}
+                            </span>
+                            {log.notes && <p className="text-[#6B6B67] mt-0.5">{log.notes}</p>}
+                            {log.reason && <p className="text-rose-600 mt-0.5 font-medium">Reason: {log.reason}</p>}
+                          </div>
+                          <span className="text-[11px] text-[#8B8B86] shrink-0 font-mono">
+                            {new Date(log.createdAt).toLocaleString("en-GB")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Rejection Prompt */}
+                {rejectingHostId === selectedHost.id && (
+                  <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-3">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-rose-800">
+                      Specify Rejection Reason (Dispatched to Host via Email)
+                    </h5>
+                    <textarea
+                      rows={2}
+                      value={rejectHostReason}
+                      onChange={(e) => setRejectHostReason(e.target.value)}
+                      placeholder="e.g. Identity card is blurry or expired; please upload a clear photo of your Nigerian International Passport or NIN slip."
+                      className="w-full p-2.5 bg-white border border-rose-300 rounded-lg text-xs text-[#171717] focus:ring-1 focus:ring-rose-500 focus:outline-none"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRejectingHostId(null);
+                          setRejectHostReason("");
+                        }}
+                        className="px-3 py-1.5 text-xs text-stone-700 bg-white border border-stone-300 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionLoading === selectedHost.id}
+                        onClick={() => handleRejectHost(selectedHost.id)}
+                        className="px-4 py-1.5 text-xs font-semibold text-white bg-rose-600 rounded-lg hover:bg-rose-700 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {actionLoading === selectedHost.id && <Loader2 size={12} className="animate-spin" />}
+                        <span>Confirm Rejection</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Inline Request Info Prompt */}
+                {requestingInfoHostId === selectedHost.id && (
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl space-y-3">
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-blue-800">
+                      Request Missing Information / Clearer Documents
+                    </h5>
+                    <textarea
+                      rows={2}
+                      value={requestInfoText}
+                      onChange={(e) => setRequestInfoText(e.target.value)}
+                      placeholder="e.g. Please provide a clear, glare-free photo of your National Identity Number (NIN) and update your settlement bank account name to match your legal name."
+                      className="w-full p-2.5 bg-white border border-blue-300 rounded-lg text-xs text-[#171717] focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRequestingInfoHostId(null);
+                          setRequestInfoText("");
+                        }}
+                        className="px-3 py-1.5 text-xs text-stone-700 bg-white border border-stone-300 rounded-lg"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={actionLoading === selectedHost.id}
+                        onClick={() => handleRequestHostInfo(selectedHost.id)}
+                        className="px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {actionLoading === selectedHost.id && <Loader2 size={12} className="animate-spin" />}
+                        <span>Send Instructions to Host</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Footer Review Controls */}
+                <div className="pt-4 border-t border-[#E7E5E0] flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-xs text-[#8B8B86]">
+                    Host ID: <span className="font-mono">{selectedHost.id}</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {selectedHost.profile?.verificationStatus !== "APPROVED" && (
+                      <button
+                        type="button"
+                        disabled={actionLoading === selectedHost.id}
+                        onClick={() => handleApproveHost(selectedHost.id)}
+                        className="px-4 py-2 bg-[#0B5D45] text-white text-xs font-semibold rounded-xl hover:bg-[#084936] transition-colors flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                      >
+                        {actionLoading === selectedHost.id ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <CheckCircle2 size={13} />
+                        )}
+                        <span>Approve Host &amp; Grant Listing Authority</span>
+                      </button>
+                    )}
+
+                    {selectedHost.profile?.verificationStatus !== "ACTION_REQUIRED" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRequestingInfoHostId(selectedHost.id);
+                          setRejectingHostId(null);
+                        }}
+                        className="px-3.5 py-2 bg-blue-50 text-blue-700 border border-blue-200 text-xs font-semibold rounded-xl hover:bg-blue-100 transition-colors"
+                      >
+                        Request Info
+                      </button>
+                    )}
+
+                    {selectedHost.profile?.verificationStatus !== "REJECTED" && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRejectingHostId(selectedHost.id);
+                          setRequestingInfoHostId(null);
+                        }}
+                        className="px-3.5 py-2 bg-rose-50 text-rose-700 border border-rose-200 text-xs font-semibold rounded-xl hover:bg-rose-100 transition-colors"
+                      >
+                        Reject Application
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedHost(null);
+                        setSelectedHostDossier(null);
+                        setRejectingHostId(null);
+                        setRequestingInfoHostId(null);
+                      }}
+                      className="px-4 py-2 bg-stone-100 text-stone-700 text-xs font-semibold rounded-xl hover:bg-stone-200 transition-colors"
+                    >
+                      Close Dossier
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

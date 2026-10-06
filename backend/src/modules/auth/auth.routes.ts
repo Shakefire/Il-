@@ -1,11 +1,127 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { authService, RegisterSchema, LoginSchema } from "./auth.service";
+import { authService, RegisterSchema, RegisterOwnerSchema, LoginSchema } from "./auth.service";
 import { createSessionToken, authenticateRequest } from "../../lib/security";
 import { env } from "../../config/env";
 
 export async function authRoutes(fastify: FastifyInstance) {
-  // POST /api/auth/register
+  // POST /api/auth/register-owner — Primary public signup for Property Owners
+  fastify.post("/register-owner", async (request, reply) => {
+    const parse = RegisterOwnerSchema.safeParse(request.body);
+    if (!parse.success) {
+      return reply.status(400).send({ error: parse.error.issues[0]?.message || "Validation failed" });
+    }
+
+    try {
+      const { user, profile } = await authService.registerOwner(parse.data);
+      const token = createSessionToken(user.id, user.email, user.role);
+
+      reply.setCookie("session_token", token, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        maxAge: env.SESSION_MAX_AGE_DAYS * 24 * 60 * 60,
+      });
+
+      return reply.status(201).send({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          phone: user.phone,
+          role: user.role,
+          emailVerified: user.emailVerified,
+          phoneVerified: user.phoneVerified,
+          status: user.status,
+        },
+        profile,
+        message: "Owner account created. Please verify your email with the 6-digit code sent.",
+      });
+    } catch (err: any) {
+      const status = err.message.includes("already exists") ? 409 : 400;
+      return reply.status(status).send({ error: err.message });
+    }
+  });
+
+  // POST /api/auth/verify-email
+  fastify.post("/verify-email", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const { code } = (request.body || {}) as { code?: string };
+    if (!code || typeof code !== "string" || code.trim().length !== 6) {
+      return reply.status(400).send({ error: "Please provide a valid 6-digit verification code." });
+    }
+
+    try {
+      const result = await authService.verifyEmailOtp(session.userId, code.trim());
+      return reply.send({
+        success: true,
+        message: "Email successfully verified. You can now proceed with your owner profile.",
+        ...result,
+      });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/auth/resend-email-otp
+  fastify.post("/resend-email-otp", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await authService.resendEmailOtp(session.userId);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/auth/send-phone-otp
+  fastify.post("/send-phone-otp", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const { phone } = (request.body || {}) as { phone?: string };
+    if (!phone || typeof phone !== "string" || phone.trim().length < 9) {
+      return reply.status(400).send({ error: "Please enter a valid phone number." });
+    }
+
+    try {
+      const result = await authService.sendPhoneOtp(session.userId, phone.trim());
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/auth/verify-phone
+  fastify.post("/verify-phone", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const { code } = (request.body || {}) as { code?: string };
+    if (!code || typeof code !== "string" || code.trim().length !== 6) {
+      return reply.status(400).send({ error: "Please enter a valid 6-digit phone verification code." });
+    }
+
+    try {
+      const result = await authService.verifyPhoneOtp(session.userId, code.trim());
+      return reply.send({
+        success: true,
+        message: "Phone number verified successfully.",
+        ...result,
+      });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/auth/register (legacy / guest registration support)
   fastify.post("/register", async (request, reply) => {
     const parse = RegisterSchema.safeParse(request.body);
     if (!parse.success) {

@@ -131,12 +131,12 @@ export default function Navbar() {
             </Link>
           ) : (
             <Link
-              href={isAuthenticated ? "/become-a-host" : "/login?next=/become-a-host"}
+              href={isAuthenticated ? "/signup" : "/signup"}
               className={`transition-colors py-2 relative hover:text-white ${
                 isHostActive ? "text-white font-semibold" : ""
               }`}
             >
-              <span>Become a Host</span>
+              <span>Partner as Host</span>
               {isHostActive && (
                 <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
               )}
@@ -290,8 +290,8 @@ export default function Navbar() {
                 href="/signup"
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0B5D45] hover:bg-[#084936] text-white transition-all font-semibold text-[14px] shadow-sm"
               >
-                <UserIcon size={15} />
-                <span>Sign Up</span>
+                <Building2 size={15} />
+                <span>Partner Sign Up</span>
               </Link>
             </div>
           )}

@@ -1,4 +1,4 @@
-import { eq, sql, desc, count } from "drizzle-orm";
+import { eq, and, sql, desc, count } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { parsePagination, paginatedResponse, PaginationParams } from "../../lib/pagination";
 import crypto from "crypto";
@@ -10,6 +10,10 @@ export const adminService = {
     const [totalUsers] = await db.select({ total: count(schema.users.id) }).from(schema.users);
     const [totalProperties] = await db.select({ total: count(schema.properties.id) }).from(schema.properties);
     const [totalBookings] = await db.select({ total: count(schema.bookings.id) }).from(schema.bookings);
+    const [pendingHosts] = await db
+      .select({ total: count(schema.profiles.id) })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.verificationStatus, "UNDER_REVIEW"));
 
     // CRITICAL FIX: Query payments with status 'VERIFIED' (not 'SUCCESSFUL')
     const revenueResult = await db
@@ -23,6 +27,7 @@ export const adminService = {
       users: Number(totalUsers?.total) || 0,
       properties: Number(totalProperties?.total) || 0,
       bookings: Number(totalBookings?.total) || 0,
+      pendingHosts: Number(pendingHosts?.total) || 0,
       revenue: totalRevenue,
     };
   },
@@ -241,5 +246,277 @@ export const adminService = {
       .offset(pagination.offset);
 
     return paginatedResponse(items, total, pagination);
+  },
+
+  async getHostApplications(statusFilter?: string, pagination?: PaginationParams) {
+    const db = getDb();
+    const pag = pagination || { limit: 50, offset: 0, page: 1 };
+
+    let whereClause: any = eq(schema.users.role, "host");
+    if (statusFilter && statusFilter !== "ALL") {
+      whereClause = and(eq(schema.users.role, "host"), eq(schema.profiles.verificationStatus, statusFilter));
+    }
+
+    const [totalResult] = await db
+      .select({ total: count(schema.users.id) })
+      .from(schema.users)
+      .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+      .where(whereClause);
+
+    const total = Number(totalResult?.total) || 0;
+
+    const rows = await db
+      .select({
+        user: {
+          id: schema.users.id,
+          email: schema.users.email,
+          firstName: schema.users.firstName,
+          lastName: schema.users.lastName,
+          phone: schema.users.phone,
+          role: schema.users.role,
+          emailVerified: schema.users.emailVerified,
+          phoneVerified: schema.users.phoneVerified,
+          createdAt: schema.users.createdAt,
+        },
+        profile: schema.profiles,
+      })
+      .from(schema.users)
+      .innerJoin(schema.profiles, eq(schema.profiles.userId, schema.users.id))
+      .where(whereClause)
+      .orderBy(desc(schema.profiles.updatedAt))
+      .limit(pag.limit)
+      .offset(pag.offset);
+
+    const formatted = rows.map((r) => ({
+      ...r.user,
+      profile: r.profile,
+    }));
+
+    return paginatedResponse(formatted, total, pag);
+  },
+
+  async getHostApplication(hostId: string) {
+    const db = getDb();
+
+    const [user] = await db
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        firstName: schema.users.firstName,
+        lastName: schema.users.lastName,
+        phone: schema.users.phone,
+        role: schema.users.role,
+        emailVerified: schema.users.emailVerified,
+        phoneVerified: schema.users.phoneVerified,
+        createdAt: schema.users.createdAt,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, hostId))
+      .limit(1);
+
+    if (!user) throw new Error("Host user not found");
+
+    const [profile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, hostId))
+      .limit(1);
+
+    const logs = await db
+      .select()
+      .from(schema.verificationLogs)
+      .where(eq(schema.verificationLogs.hostId, hostId))
+      .orderBy(desc(schema.verificationLogs.createdAt));
+
+    const properties = await db
+      .select()
+      .from(schema.properties)
+      .where(eq(schema.properties.hostId, hostId));
+
+    return {
+      host: user,
+      profile: profile || null,
+      verificationLogs: logs,
+      properties,
+    };
+  },
+
+  async approveHostApplication(hostId: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+
+    const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
+    if (!host) throw new Error("Host user not found");
+
+    const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
+    const prevStatus = profile?.verificationStatus || "REGISTERED";
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        isVerified: true,
+        verificationStatus: "APPROVED",
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        reviewFeedback: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, hostId))
+      .returning();
+
+    await db.insert(schema.verificationLogs).values({
+      id: `vlog_${crypto.randomUUID()}`,
+      hostId,
+      adminId,
+      previousStatus: prevStatus,
+      newStatus: "APPROVED",
+      action: "APPROVE",
+      notes: "Host KYC, identity, and ownership documents reviewed and approved by platform admin.",
+    });
+
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "HOST_APPROVED",
+      entityType: "host",
+      entityId: hostId,
+      details: `Host ${host.firstName} ${host.lastName} (${host.email}) verified and approved.`,
+      ipAddress: ipAddress || null,
+    });
+
+    // Send congratulatory approval email
+    import("../notifications/notifications.service").then(({ sendEmail, hostApplicationApprovedEmail }) => {
+      sendEmail(
+        hostApplicationApprovedEmail({
+          hostName: host.firstName,
+          hostEmail: host.email,
+        })
+      ).catch((e) => console.warn("[Admin] Failed to send host approval email:", e));
+    });
+
+    return {
+      success: true,
+      message: `Host ${host.firstName} ${host.lastName} has been verified and approved.`,
+      profile: updatedProfile,
+    };
+  },
+
+  async rejectHostApplication(hostId: string, reason: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+
+    const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
+    if (!host) throw new Error("Host user not found");
+
+    const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
+    const prevStatus = profile?.verificationStatus || "REGISTERED";
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        isVerified: false,
+        verificationStatus: "REJECTED",
+        reviewFeedback: reason,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, hostId))
+      .returning();
+
+    await db.insert(schema.verificationLogs).values({
+      id: `vlog_${crypto.randomUUID()}`,
+      hostId,
+      adminId,
+      previousStatus: prevStatus,
+      newStatus: "REJECTED",
+      action: "REJECT",
+      reason,
+      notes: `Rejected by admin. Reason: ${reason}`,
+    });
+
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "HOST_REJECTED",
+      entityType: "host",
+      entityId: hostId,
+      details: `Host ${host.firstName} ${host.lastName} rejected. Reason: ${reason}`,
+      ipAddress: ipAddress || null,
+    });
+
+    // Send rejection email
+    import("../notifications/notifications.service").then(({ sendEmail, hostApplicationRejectedEmail }) => {
+      sendEmail(
+        hostApplicationRejectedEmail({
+          hostName: host.firstName,
+          hostEmail: host.email,
+          reason,
+        })
+      ).catch((e) => console.warn("[Admin] Failed to send host rejection email:", e));
+    });
+
+    return {
+      success: true,
+      message: `Host application marked as rejected.`,
+      profile: updatedProfile,
+    };
+  },
+
+  async requestHostInfo(hostId: string, instructions: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+
+    const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
+    if (!host) throw new Error("Host user not found");
+
+    const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
+    const prevStatus = profile?.verificationStatus || "REGISTERED";
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        verificationStatus: "ACTION_REQUIRED",
+        reviewFeedback: instructions,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, hostId))
+      .returning();
+
+    await db.insert(schema.verificationLogs).values({
+      id: `vlog_${crypto.randomUUID()}`,
+      hostId,
+      adminId,
+      previousStatus: prevStatus,
+      newStatus: "ACTION_REQUIRED",
+      action: "REQUEST_INFO",
+      notes: instructions,
+    });
+
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "HOST_INFO_REQUESTED",
+      entityType: "host",
+      entityId: hostId,
+      details: `Additional information requested from host ${host.email}: ${instructions}`,
+      ipAddress: ipAddress || null,
+    });
+
+    // Send instruction email
+    import("../notifications/notifications.service").then(({ sendEmail, hostApplicationInfoRequestedEmail }) => {
+      sendEmail(
+        hostApplicationInfoRequestedEmail({
+          hostName: host.firstName,
+          hostEmail: host.email,
+          instructions,
+        })
+      ).catch((e) => console.warn("[Admin] Failed to send info request email:", e));
+    });
+
+    return {
+      success: true,
+      message: `Host has been notified with instructions to update their documents.`,
+      profile: updatedProfile,
+    };
   },
 };

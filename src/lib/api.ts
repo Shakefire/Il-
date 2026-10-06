@@ -280,6 +280,101 @@ export const api = {
     return res.json();
   },
 
+  async getHostOnboardingStatus() {
+    const res = await fetch("/api/host/onboarding/status", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load onboarding status");
+    return res.json();
+  },
+
+  async updateHostOnboardingProfile(profileData: any) {
+    const res = await fetch("/api/host/onboarding/profile", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(profileData),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to update profile");
+    return body;
+  },
+
+  async updateHostOnboardingIdentity(identityData: any) {
+    const res = await fetch("/api/host/onboarding/identity", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(identityData),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to submit identity documents");
+    return body;
+  },
+
+  async updateHostOnboardingAuthority(authorityData: any) {
+    const res = await fetch("/api/host/onboarding/authority", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(authorityData),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to save ownership and payout details");
+    return body;
+  },
+
+  async saveHostPropertyDraft(draftData: any) {
+    const res = await fetch("/api/host/onboarding/property-draft", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(draftData),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to save property draft");
+    return body;
+  },
+
+  async submitHostOnboarding() {
+    const res = await fetch("/api/host/onboarding/submit", {
+      method: "POST",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to submit application");
+    return body;
+  },
+
+  async uploadImage(image: string, folder: string = "kyc") {
+    const res = await fetch("/api/uploads", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify({ image, folder }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to upload image");
+    return body;
+  },
+
   async updateHostProfile(profileData: any) {
     const res = await fetch("/api/host/profile", {
       method: "PUT",
@@ -403,6 +498,67 @@ export const api = {
     });
     if (!res.ok) throw new Error("Failed to load audit logs");
     return res.json();
+  },
+
+  // Host Applications / KYC Verification (Admin)
+  async getAdminHosts(status?: string) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    const res = await fetch(`/api/admin/hosts${query}`, {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load host applications");
+    return res.json();
+  },
+
+  async getAdminHost(id: string) {
+    const res = await fetch(`/api/admin/hosts/${id}`, {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load host dossier");
+    return res.json();
+  },
+
+  async approveAdminHost(id: string) {
+    const res = await fetch(`/api/admin/hosts/${id}/approve`, {
+      method: "POST",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to approve host");
+    return body;
+  },
+
+  async rejectAdminHost(id: string, reason?: string) {
+    const res = await fetch(`/api/admin/hosts/${id}/reject`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify({ reason }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to reject host");
+    return body;
+  },
+
+  async requestAdminHostInfo(id: string, instructions: string) {
+    const res = await fetch(`/api/admin/hosts/${id}/request-info`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify({ instructions }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to request additional info");
+    return body;
   },
 
   // Payments API (Paystack Integration)

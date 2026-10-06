@@ -44,18 +44,22 @@ export const hostsService = {
     const parsed = HostPropertyDraftSchema.parse(data || {});
     const db = getDb();
 
-    // Auto-upgrade user role to host if guest
-    await db
-      .update(schema.users)
-      .set({ role: "host" })
-      .where(and(eq(schema.users.id, userId), eq(schema.users.role, "guest")));
+    // Verify that the user exists and has an approved host verification
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (!user) throw new Error("User not found");
+
+    if (user.role !== "admin") {
+      const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
+      if (!profile || !profile.isVerified || profile.verificationStatus !== "APPROVED") {
+        const err: any = new Error("Only verified property partners can list properties. Please complete your host onboarding and await platform approval.");
+        err.statusCode = 403;
+        throw err;
+      }
+    }
 
     const baseTitle = parsed.title || "Untitled Property";
     const slug = `${baseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(4).toString("hex")}`;
     const propertyId = `prop_${crypto.randomUUID()}`;
-
-    // Get user info for default contact
-    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
 
     const [property] = await db
       .insert(schema.properties)
@@ -242,6 +246,17 @@ export const hostsService = {
     if (!property) throw new Error("Property not found or unauthorized");
     if (property.status === "PUBLISHED") throw new Error("This property is already published.");
     if (property.status === "SUSPENDED") throw new Error("This property is suspended.");
+
+    // Enforce that host has approved verification
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (user?.role !== "admin") {
+      const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
+      if (!profile || !profile.isVerified || profile.verificationStatus !== "APPROVED") {
+        const err: any = new Error("Your host verification must be approved before you can submit listings for review.");
+        err.statusCode = 403;
+        throw err;
+      }
+    }
 
     const [privateDetails] = await db
       .select()
@@ -563,6 +578,294 @@ export const hostsService = {
       user: updatedUser,
       profile: updatedProfile,
       isHost: updatedUser.role === "host" || updatedUser.role === "admin",
+    };
+  },
+
+  async getOnboardingStatus(userId: string) {
+    const db = getDb();
+    const [user] = await db
+      .select({
+        id: schema.users.id,
+        firstName: schema.users.firstName,
+        lastName: schema.users.lastName,
+        email: schema.users.email,
+        phone: schema.users.phone,
+        role: schema.users.role,
+        avatarUrl: schema.users.avatarUrl,
+        emailVerified: schema.users.emailVerified,
+        phoneVerified: schema.users.phoneVerified,
+        status: schema.users.status,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+
+    if (!user) throw new Error("User not found");
+
+    let [profile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    if (!profile) {
+      const [newProf] = await db
+        .insert(schema.profiles)
+        .values({
+          id: `prof_${crypto.randomUUID()}`,
+          userId,
+          onboardingStep: 1,
+          onboardingCompleted: false,
+          verificationStatus: "REGISTERED",
+        })
+        .returning();
+      profile = newProf;
+    }
+
+    const missingRequirements: string[] = [];
+    if (!user.emailVerified) missingRequirements.push("Verify your email address");
+    if (!user.phoneVerified) missingRequirements.push("Verify your mobile phone number");
+    if (!profile.dateOfBirth || !profile.residentialAddress) missingRequirements.push("Complete personal and operational profile");
+    if (!profile.idNumber || !profile.identityDocumentUrl || !profile.selfieUrl) missingRequirements.push("Upload Nigerian government ID & verified selfie");
+    if (!profile.authorityDocUrl) missingRequirements.push("Provide proof of property ownership or management mandate");
+    if (!profile.bankAccountNumber || !profile.bankName) missingRequirements.push("Add Nigerian bank payout details");
+
+    let progressPct = 15;
+    if (profile.verificationStatus === "APPROVED") {
+      progressPct = 100;
+    } else if (profile.verificationStatus === "UNDER_REVIEW") {
+      progressPct = 95;
+    } else if (profile.onboardingStep >= 6) {
+      progressPct = 90;
+    } else if (profile.onboardingStep === 5) {
+      progressPct = 75;
+    } else if (profile.onboardingStep === 4) {
+      progressPct = 60;
+    } else if (profile.onboardingStep === 3) {
+      progressPct = 40;
+    } else if (profile.onboardingStep === 2) {
+      progressPct = 25;
+    }
+
+    return {
+      user,
+      profile,
+      step: profile.onboardingStep,
+      completed: profile.onboardingCompleted,
+      verificationStatus: profile.verificationStatus,
+      isVerified: profile.isVerified || profile.verificationStatus === "APPROVED",
+      reviewFeedback: profile.reviewFeedback,
+      progressPct,
+      missingRequirements,
+    };
+  },
+
+  async updateOnboardingProfile(userId: string, data: any) {
+    const db = getDb();
+
+    const userUpdates: any = { updatedAt: new Date() };
+    if (data.firstName) userUpdates.firstName = data.firstName.trim();
+    if (data.lastName) userUpdates.lastName = data.lastName.trim();
+    if (data.phone) userUpdates.phone = data.phone.trim();
+
+    await db.update(schema.users).set(userUpdates).where(eq(schema.users.id, userId));
+
+    const [existingProfile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    const nextStep = Math.max(existingProfile?.onboardingStep || 1, 3);
+    const profUpdates: any = {
+      updatedAt: new Date(),
+      onboardingStep: nextStep,
+    };
+
+    if (data.dateOfBirth !== undefined) profUpdates.dateOfBirth = data.dateOfBirth;
+    if (data.residentialAddress !== undefined) profUpdates.residentialAddress = data.residentialAddress;
+    if (data.operatingCity !== undefined) profUpdates.operatingCity = data.operatingCity;
+    if (data.operatingAreas !== undefined) profUpdates.operatingAreas = data.operatingAreas;
+    if (data.bio !== undefined) profUpdates.bio = data.bio;
+
+    if (
+      existingProfile?.verificationStatus === "EMAIL_VERIFIED" ||
+      existingProfile?.verificationStatus === "PHONE_VERIFIED" ||
+      existingProfile?.verificationStatus === "REGISTERED"
+    ) {
+      profUpdates.verificationStatus = "PROFILE_COMPLETED";
+    }
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set(profUpdates)
+      .where(eq(schema.profiles.userId, userId))
+      .returning();
+
+    return { success: true, profile: updatedProfile };
+  },
+
+  async updateOnboardingIdentity(userId: string, data: any) {
+    const db = getDb();
+
+    const [existingProfile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    if (!existingProfile) throw new Error("Host profile not found");
+
+    const nextStep = Math.max(existingProfile.onboardingStep, 4);
+    const profUpdates: any = {
+      updatedAt: new Date(),
+      onboardingStep: nextStep,
+    };
+
+    if (data.idType) profUpdates.idType = data.idType;
+    if (data.idNumber) profUpdates.idNumber = data.idNumber.trim();
+    if (data.identityDocumentUrl) profUpdates.identityDocumentUrl = data.identityDocumentUrl;
+    if (data.idDocumentBackUrl !== undefined) profUpdates.idDocumentBackUrl = data.idDocumentBackUrl;
+    if (data.selfieUrl) profUpdates.selfieUrl = data.selfieUrl;
+
+    if (existingProfile.verificationStatus !== "APPROVED" && existingProfile.verificationStatus !== "UNDER_REVIEW") {
+      profUpdates.verificationStatus = "IDENTITY_PENDING";
+    }
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set(profUpdates)
+      .where(eq(schema.profiles.userId, userId))
+      .returning();
+
+    return { success: true, profile: updatedProfile };
+  },
+
+  async updateOnboardingAuthority(userId: string, data: any) {
+    const db = getDb();
+
+    const [existingProfile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    if (!existingProfile) throw new Error("Host profile not found");
+
+    const nextStep = Math.max(existingProfile.onboardingStep, 5);
+    const profUpdates: any = {
+      updatedAt: new Date(),
+      onboardingStep: nextStep,
+    };
+
+    if (data.hostType) profUpdates.hostType = data.hostType;
+    if (data.companyName !== undefined) profUpdates.companyName = data.companyName;
+    if (data.companyRegistrationNumber !== undefined) profUpdates.companyRegistrationNumber = data.companyRegistrationNumber;
+    if (data.authorityDocType) profUpdates.authorityDocType = data.authorityDocType;
+    if (data.authorityDocUrl) profUpdates.authorityDocUrl = data.authorityDocUrl;
+
+    // Nigerian Bank Details
+    if (data.bankName) profUpdates.bankName = data.bankName;
+    if (data.bankCode) profUpdates.bankCode = data.bankCode;
+    if (data.bankAccountNumber) profUpdates.bankAccountNumber = data.bankAccountNumber.trim();
+    if (data.bankAccountName) profUpdates.bankAccountName = data.bankAccountName.trim();
+
+    if (existingProfile.verificationStatus !== "APPROVED" && existingProfile.verificationStatus !== "UNDER_REVIEW") {
+      profUpdates.verificationStatus = "AUTHORITY_PENDING";
+    }
+
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set(profUpdates)
+      .where(eq(schema.profiles.userId, userId))
+      .returning();
+
+    return { success: true, profile: updatedProfile };
+  },
+
+  async savePropertyDraft(userId: string, draftData: any) {
+    const db = getDb();
+
+    const [existingProfile] = await db
+      .select()
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    if (!existingProfile) throw new Error("Host profile not found");
+
+    const nextStep = Math.max(existingProfile.onboardingStep, 6);
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        propertyDraftData: JSON.stringify(draftData || {}),
+        onboardingStep: nextStep,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, userId))
+      .returning();
+
+    return { success: true, profile: updatedProfile };
+  },
+
+  async submitOnboardingForReview(userId: string) {
+    const db = getDb();
+
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (!user) throw new Error("User not found");
+
+    const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
+    if (!profile) throw new Error("Host profile not found");
+
+    if (!profile.idNumber || !profile.identityDocumentUrl) {
+      throw new Error("Please submit a valid government ID document.");
+    }
+    if (!profile.selfieUrl) {
+      throw new Error("Please upload a verification selfie photo.");
+    }
+    if (!profile.authorityDocUrl) {
+      throw new Error("Please provide proof of property ownership or management authority.");
+    }
+    if (!profile.bankAccountNumber || !profile.bankName) {
+      throw new Error("Please provide your Nigerian bank account details for payout verification.");
+    }
+
+    const prevStatus = profile.verificationStatus;
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        verificationStatus: "UNDER_REVIEW",
+        onboardingCompleted: true,
+        onboardingStep: 6,
+        reviewFeedback: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, userId))
+      .returning();
+
+    // Log verification state transition
+    await db.insert(schema.verificationLogs).values({
+      id: `vlog_${crypto.randomUUID()}`,
+      hostId: userId,
+      previousStatus: prevStatus,
+      newStatus: "UNDER_REVIEW",
+      action: "SUBMIT",
+      notes: "Host submitted complete onboarding and KYC dossier for admin review.",
+    });
+
+    // Send confirmation email to host
+    const { sendEmail, hostApplicationSubmittedEmail } = await import("../notifications/notifications.service");
+    sendEmail(
+      hostApplicationSubmittedEmail({
+        hostName: user.firstName,
+        hostEmail: user.email,
+      })
+    ).catch((e) => console.warn("[Host] Failed to send onboarding submission confirmation:", e));
+
+    return {
+      success: true,
+      message: "Application submitted successfully! Your credentials are now under review.",
+      profile: updatedProfile,
     };
   },
 

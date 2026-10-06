@@ -7,6 +7,10 @@ export interface User {
   displayName?: string;
   avatar?: string;
   phone?: string;
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
+  status?: string;
+  profile?: any;
 }
 
 export interface LoginCredentials {
@@ -20,6 +24,17 @@ export interface RegisterCredentials {
   email: string;
   phone?: string;
   password: string;
+}
+
+export interface RegisterOwnerCredentials {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  password: string;
+  hostType?: "individual_owner" | "property_manager" | "company";
+  companyName?: string;
+  operatingCity?: string;
 }
 
 export interface AuthResponse {
@@ -100,6 +115,111 @@ export const authApi = {
     } catch (err: any) {
       throw new Error(err.message || "Registration failed. Please try again.");
     }
+  },
+
+  async registerOwner(credentials: RegisterOwnerCredentials): Promise<AuthResponse> {
+    if (!credentials.email || !credentials.password || !credentials.firstName || !credentials.lastName) {
+      throw new Error("Please fill in all required fields.");
+    }
+
+    if (credentials.password.length < 8) {
+      throw new Error("Password must be at least 8 characters long.");
+    }
+
+    try {
+      const res = await fetch("/api/auth/register-owner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(credentials),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Owner registration failed.");
+      }
+
+      if (typeof window !== "undefined" && data.token) {
+        localStorage.setItem("ile_token", data.token);
+        localStorage.setItem("ile_user", JSON.stringify(data.user));
+      }
+
+      return {
+        success: true,
+        user: data.user,
+        token: data.token,
+        message: data.message || "Owner account created.",
+      };
+    } catch (err: any) {
+      throw new Error(err.message || "Owner registration failed. Please try again.");
+    }
+  },
+
+  async verifyEmail(code: string): Promise<any> {
+    const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch("/api/auth/verify-email", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ code }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Email verification failed.");
+    return data;
+  },
+
+  async resendEmailOtp(): Promise<any> {
+    const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch("/api/auth/resend-email-otp", {
+      method: "POST",
+      headers,
+      credentials: "include",
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to resend code.");
+    return data;
+  },
+
+  async sendPhoneOtp(phone: string): Promise<any> {
+    const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch("/api/auth/send-phone-otp", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ phone }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to send SMS code.");
+    return data;
+  },
+
+  async verifyPhone(code: string): Promise<any> {
+    const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch("/api/auth/verify-phone", {
+      method: "POST",
+      headers,
+      credentials: "include",
+      body: JSON.stringify({ code }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Phone verification failed.");
+    return data;
   },
 
   async me(): Promise<User | null> {

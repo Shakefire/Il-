@@ -88,4 +88,84 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const result = await adminService.getAuditLogs(pagination);
     return reply.send({ success: true, ...result });
   });
+
+  // GET /api/admin/hosts — List host applications with optional status filter
+  fastify.get("/hosts", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const query = request.query as Record<string, any>;
+    const pagination = parsePagination(query);
+    const result = await adminService.getHostApplications(query.status, pagination);
+    return reply.send({ success: true, ...result });
+  });
+
+  // GET /api/admin/hosts/:id — Detailed host KYC and ownership inspection
+  fastify.get("/hosts/:id", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    try {
+      const result = await adminService.getHostApplication(id);
+      return reply.send({ success: true, ...result });
+    } catch (err: any) {
+      return reply.status(404).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/hosts/:id/approve — Approve host verification
+  fastify.post("/hosts/:id/approve", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    try {
+      const result = await adminService.approveHostApplication(id, session.userId, request.ip);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/hosts/:id/reject — Reject host application
+  fastify.post("/hosts/:id/reject", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    const { reason } = (request.body || {}) as { reason?: string };
+
+    try {
+      const result = await adminService.rejectHostApplication(
+        id,
+        reason || "Documentation submitted could not be verified.",
+        session.userId,
+        request.ip
+      );
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/hosts/:id/request-info — Request info / revised documents
+  fastify.post("/hosts/:id/request-info", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    const { instructions } = (request.body || {}) as { instructions?: string };
+
+    if (!instructions || typeof instructions !== "string" || instructions.trim().length < 5) {
+      return reply.status(400).send({ error: "Please provide clear instructions for the host." });
+    }
+
+    try {
+      const result = await adminService.requestHostInfo(id, instructions.trim(), session.userId, request.ip);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
 }

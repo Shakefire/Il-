@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { authApi, User, LoginCredentials, RegisterCredentials } from "@/lib/auth";
+import { authApi, User, LoginCredentials, RegisterCredentials, RegisterOwnerCredentials } from "@/lib/auth";
 
 interface AuthContextType {
   user: User | null;
@@ -9,6 +9,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (credentials: LoginCredentials) => Promise<User>;
   register: (credentials: RegisterCredentials) => Promise<User>;
+  registerOwner: (credentials: RegisterOwnerCredentials) => Promise<User>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<User | null>;
 }
@@ -54,6 +55,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     throw new Error("No user returned from registration.");
   };
 
+  const registerOwner = async (credentials: RegisterOwnerCredentials) => {
+    const res = await authApi.registerOwner(credentials);
+    if (res.user) {
+      setUser(res.user);
+      return res.user;
+    }
+    throw new Error("No user returned from owner registration.");
+  };
+
   const logout = async () => {
     await authApi.logout();
     setUser(null);
@@ -67,6 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: !!user,
         login,
         register,
+        registerOwner,
         logout,
         refreshUser,
       }}

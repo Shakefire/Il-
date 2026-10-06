@@ -433,6 +433,139 @@ export function propertyReviewStatusEmail(data: {
   };
 }
 
+// ─── 7. Property Owner Email OTP Verification ───
+
+export function ownerEmailOtpEmail(data: {
+  name: string;
+  email: string;
+  code: string;
+}): EmailPayload {
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Verify your email address</h2>
+    <p>Hello ${data.name},</p>
+    <p>Thank you for partnering with Ilé as a property owner. Please enter the following 6-digit verification code to confirm your email and continue your onboarding:</p>
+    <div style="margin: 28px 0; text-align: center;">
+      <span style="display: inline-block; background-color: #FAFAF8; border: 2px dashed #0B5D45; border-radius: 12px; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #0B5D45; padding: 16px 32px; font-family: monospace;">
+        ${data.code}
+      </span>
+    </div>
+    <p style="font-size: 13.5px; color: #6B6B67;">This code is valid for 15 minutes. If you did not initiate this request, you can safely ignore this email.</p>
+  `;
+
+  return {
+    to: data.email,
+    subject: `${data.code} is your Ilé owner verification code`,
+    html: emailShell("Email Verification", "Owner account setup", content),
+    text: `Your Ilé verification code is: ${data.code}. It is valid for 15 minutes.`,
+  };
+}
+
+// ─── 8. Host Onboarding Application Submitted ───
+
+export function hostApplicationSubmittedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+}): EmailPayload {
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Verification Application Submitted</h2>
+    <p>Hello ${data.hostName},</p>
+    <p>Thank you for completing your Ilé host onboarding and identity verification submission.</p>
+    <p>Our compliance and trust team is reviewing your identification documents, ownership credentials, and Nigerian payout details. We verify every partner to ensure a trusted, secure marketplace for both hosts and tenants.</p>
+    <div style="background-color: #F8F9FA; border-left: 4px solid #0B5D45; padding: 14px 18px; margin: 20px 0; border-radius: 4px;">
+      <p style="margin: 0; font-size: 14px; color: #374151;"><strong>Standard Review Window:</strong> 24 to 48 hours. You will receive an immediate notification once reviewed.</p>
+    </div>
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/host/dashboard" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Track Application Status</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `Host Application Received — Under Review by Ilé`,
+    html: emailShell("Application Received", "Identity & Authority Verification", content),
+    text: `Hello ${data.hostName}, your host application has been received and is under review. Track status at ${env.FRONTEND_URL}/host/dashboard`,
+  };
+}
+
+// ─── 9. Host Application Approved ───
+
+export function hostApplicationApprovedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+}): EmailPayload {
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #0B5D45;">Congratulations! You are now a Verified Host</h2>
+    <p>Hello ${data.hostName},</p>
+    <p>Your property owner verification has been approved by the Ilé moderation team. Your identity and ownership credentials have met our verified marketplace standards.</p>
+    <p>You can now publish your property listings, manage guest bookings, and receive automated payouts to your registered Nigerian bank account.</p>
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/host/dashboard" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Go to Host Dashboard →</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `🎉 Host Verification Approved — Welcome to Ilé`,
+    html: emailShell("Account Approved", "Verified Property Partner", content),
+    text: `Congratulations ${data.hostName}! Your host verification is approved. Manage your properties at ${env.FRONTEND_URL}/host/dashboard`,
+  };
+}
+
+// ─── 10. Host Application Rejected ───
+
+export function hostApplicationRejectedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  reason?: string;
+}): EmailPayload {
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #B91C1C;">Host Application Update</h2>
+    <p>Hello ${data.hostName},</p>
+    <p>Thank you for your interest in partnering with Ilé. Unfortunately, after inspecting the submitted credentials, your host application could not be approved at this time:</p>
+    <div style="background-color: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 10px; padding: 16px; margin: 20px 0; color: #991B1B;">
+      <p style="margin: 0; font-size: 14px;"><strong>Feedback from Verification Team:</strong><br/>${data.reason || "The submitted identification or property authority documents could not be validated."}</p>
+    </div>
+    <p style="font-size: 14px; color: #4B5563;">You can sign in to update your credentials or contact Ilé partner support for assistance.</p>
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/signup" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Review Onboarding Application</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `Host Application Update — Action Required`,
+    html: emailShell("Verification Update", "Application Status", content),
+    text: `Hello ${data.hostName}, your host application status update: ${data.reason || "Action required"}. Check ${env.FRONTEND_URL}/signup`,
+  };
+}
+
+// ─── 11. Host Application Info Requested ───
+
+export function hostApplicationInfoRequestedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  instructions: string;
+}): EmailPayload {
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #D97706;">Information Requested for Verification</h2>
+    <p>Hello ${data.hostName},</p>
+    <p>Our verification team needs additional details to complete your host onboarding:</p>
+    <div style="background-color: #FFFBEB; border: 1px solid #FCD34D; border-radius: 10px; padding: 16px; margin: 20px 0; color: #92400E;">
+      <p style="margin: 0; font-size: 14px;"><strong>Instructions:</strong><br/>${data.instructions}</p>
+    </div>
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/signup" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Update Your Documents →</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `Action Required: Additional info requested for Ilé host onboarding`,
+    html: emailShell("Document Request", "Action Required", content),
+    text: `Additional information requested: ${data.instructions}. Update at ${env.FRONTEND_URL}/signup`,
+  };
+}
+
 // ─── Dispatch Function ───
 
 export async function sendEmail(payload: EmailPayload): Promise<boolean> {

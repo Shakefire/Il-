@@ -29,6 +29,84 @@ export async function hostsRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // GET /api/host/onboarding/status — Get current onboarding step, completion %, and missing requirements
+  fastify.get("/onboarding/status", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await hostsService.getOnboardingStatus(session.userId);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  });
+
+  // PUT /api/host/onboarding/profile — Step 2: Update personal profile & contact details
+  fastify.put("/onboarding/profile", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await hostsService.updateOnboardingProfile(session.userId, request.body || {});
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  });
+
+  // PUT /api/host/onboarding/identity — Step 3: KYC Government ID and Selfie
+  fastify.put("/onboarding/identity", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await hostsService.updateOnboardingIdentity(session.userId, request.body || {});
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  });
+
+  // PUT /api/host/onboarding/authority — Step 4: Ownership / Authority Proof & Bank Payout Details
+  fastify.put("/onboarding/authority", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await hostsService.updateOnboardingAuthority(session.userId, request.body || {});
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  });
+
+  // PUT /api/host/onboarding/property-draft — Step 5: Preliminary Property Details
+  fastify.put("/onboarding/property-draft", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await hostsService.savePropertyDraft(session.userId, request.body || {});
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  });
+
+  // POST /api/host/onboarding/submit — Step 6: Submit application for admin review
+  fastify.post("/onboarding/submit", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await hostsService.submitOnboardingForReview(session.userId);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(400).send({ error: error.message });
+    }
+  });
+
   // POST /api/host/properties — Create new listing
   fastify.post("/properties", async (request, reply) => {
     const session = await authenticateRequest(request, reply);
