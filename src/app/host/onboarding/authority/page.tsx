@@ -4,8 +4,21 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useOnboarding } from "@/context/OnboardingContext";
-import { ArrowRight, ArrowLeft, Upload, CheckCircle2, CreditCard, FileCheck, Loader2 } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowLeft,
+  Upload,
+  CheckCircle2,
+  CreditCard,
+  FileCheck,
+  Loader2,
+  Eye,
+  Trash2,
+  FileText,
+} from "lucide-react";
 import { api } from "@/lib/api";
+import { compressFile } from "@/lib/imageCompression";
+import DocumentPreviewModal from "@/components/onboarding/DocumentPreviewModal";
 
 const NIGERIAN_BANKS = [
   "Access Bank",
@@ -43,6 +56,13 @@ export default function AuthorityStepPage() {
   const [error, setError] = useState<string | null>(null);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
+  // Document preview modal
+  const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; title: string; url: string }>({
+    isOpen: false,
+    title: "",
+    url: "",
+  });
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleTriggerUpload = () => {
@@ -57,24 +77,37 @@ export default function AuthorityStepPage() {
     setError(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        try {
-          const res = await api.uploadImage(base64, "authority");
-          const url = res.url || base64;
-          updateData({ authorityDocUrl: url });
-        } catch {
-          updateData({ authorityDocUrl: base64 });
-        } finally {
-          setUploadingDoc(false);
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch {
-      setError("Failed to read document file. Please choose another file.");
+      // Compress image/pdf to prevent 413 Entity Too Large
+      const compressedDataUrl = await compressFile(file);
+
+      try {
+        const res = await api.uploadImage(compressedDataUrl, "authority");
+        const url = res.url || compressedDataUrl;
+        updateData({ authorityDocUrl: url });
+      } catch {
+        // Fall back to compressed data URL
+        updateData({ authorityDocUrl: compressedDataUrl });
+      }
+    } catch (err: any) {
+      setError("Failed to process document file. Please choose another file.");
+    } finally {
       setUploadingDoc(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  const handleRemoveDoc = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateData({ authorityDocUrl: "" });
+  };
+
+  const handleOpenPreview = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPreviewModal({
+      isOpen: true,
+      title: getDocTypeLabel(),
+      url: data.authorityDocUrl,
+    });
   };
 
   const handleContinue = async (e: React.FormEvent) => {
@@ -98,7 +131,8 @@ export default function AuthorityStepPage() {
 
     // Background save to backend
     saveStepData(4).catch(() => null);
-    router.push("/host/onboarding/property-draft");
+    // Proceed directly to Review & Submit KYC! (No initial draft listing!)
+    router.push("/host/onboarding/review");
   };
 
   const getDocTypeLabel = () => {
@@ -106,6 +140,8 @@ export default function AuthorityStepPage() {
     if (data.hostType === "property_manager") return "Management Agreement or Signed Mandate";
     return "Deed of Assignment, C of O, or Electricity Utility Bill";
   };
+
+  const isPdf = data.authorityDocUrl?.includes("application/pdf") || data.authorityDocUrl?.endsWith(".pdf");
 
   return (
     <div className="bg-white border border-[#E7E5E0] rounded-2xl sm:rounded-3xl p-6 sm:p-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02),0_12px_24px_-4px_rgba(0,0,0,0.05),0_24px_48px_-12px_rgba(0,0,0,0.07)]">
@@ -118,15 +154,23 @@ export default function AuthorityStepPage() {
         className="hidden"
       />
 
+      {/* Document Preview Modal */}
+      <DocumentPreviewModal
+        isOpen={previewModal.isOpen}
+        onClose={() => setPreviewModal({ isOpen: false, title: "", url: "" })}
+        title={previewModal.title}
+        url={previewModal.url}
+      />
+
       <div className="mb-8">
         <span className="text-[11px] font-bold text-[#0B5D45] uppercase tracking-widest bg-[#EDF5F2] px-3 py-1 rounded-full border border-[#0B5D45]/15">
-          Stage 4 of 6 • Authority &amp; Bank Payouts
+          Stage 4 of 4 • Authority &amp; Bank Payouts
         </span>
         <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mt-3 mb-2">
           Ownership authority &amp; Nigerian bank
         </h1>
         <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">
-          Provide your documentation proving right to host, and your Nigerian bank account for automated reservation disbursements.
+          Provide documentation proving your right to host, and your Nigerian bank account for automated reservation disbursements.
         </p>
       </div>
 
@@ -151,25 +195,61 @@ export default function AuthorityStepPage() {
 
           <div
             onClick={handleTriggerUpload}
-            className={`h-36 rounded-xl border-2 border-dashed flex flex-col items-center justify-center p-4 text-center transition-all cursor-pointer ${
+            className={`h-40 rounded-xl border-2 border-dashed relative flex flex-col items-center justify-center p-4 text-center transition-all cursor-pointer overflow-hidden ${
               data.authorityDocUrl
                 ? "border-[#0B5D45] bg-[#F4F7F5]"
                 : "border-[#E7E5E0] bg-white hover:border-[#0B5D45]"
             }`}
           >
             {uploadingDoc ? (
-              <Loader2 size={24} className="animate-spin text-[#0B5D45]" />
+              <div className="flex flex-col items-center justify-center">
+                <Loader2 size={24} className="animate-spin text-[#0B5D45] mb-2" />
+                <span className="text-xs text-[#0B5D45] font-medium">Compressing &amp; uploading...</span>
+              </div>
             ) : data.authorityDocUrl ? (
-              <>
-                <CheckCircle2 size={26} className="text-[#0B5D45] mb-1.5" />
-                <span className="text-xs font-semibold text-[#0B5D45]">Authority Document Attached</span>
-                <span className="text-[11px] text-[#6B6B67] mt-0.5">Click to replace file</span>
-              </>
+              <div className="w-full h-full flex flex-col items-center justify-between p-1">
+                {/* Thumbnail / PDF indicator */}
+                <div className="relative w-full h-24 rounded-lg overflow-hidden bg-black/5 flex items-center justify-center">
+                  {isPdf ? (
+                    <div className="flex items-center gap-2 text-xs font-semibold text-[#0B5D45]">
+                      <FileText size={24} />
+                      <span>PDF Document Attached</span>
+                    </div>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={data.authorityDocUrl}
+                      alt="Authority Document"
+                      className="w-full h-full object-cover rounded-lg"
+                    />
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="w-full flex items-center justify-between pt-2">
+                  <button
+                    type="button"
+                    onClick={handleOpenPreview}
+                    className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
+                  >
+                    <Eye size={13} />
+                    <span>Preview Document</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRemoveDoc}
+                    className="text-xs text-rose-600 hover:text-rose-700 flex items-center gap-1"
+                  >
+                    <Trash2 size={13} />
+                    <span>Remove</span>
+                  </button>
+                </div>
+              </div>
             ) : (
               <>
-                <Upload size={22} className="text-[#8B8B86] mb-1.5" />
+                <Upload size={24} className="text-[#8B8B86] mb-2" />
                 <span className="text-xs font-semibold text-[#171717]">Upload Authority Document</span>
-                <span className="text-[11px] text-[#8B8B86]">Deed, C of O, Management Agreement, or Utility Bill</span>
+                <span className="text-[11px] text-[#8B8B86] mt-0.5">Deed, C of O, Management Agreement, or Utility Bill</span>
               </>
             )}
           </div>
@@ -252,7 +332,7 @@ export default function AuthorityStepPage() {
             type="submit"
             className="h-[50px] px-7 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center gap-2 transition-all shadow-sm hover:shadow cursor-pointer"
           >
-            <span>Continue to Property Draft</span>
+            <span>Review &amp; Submit KYC</span>
             <ArrowRight size={16} />
           </button>
         </div>

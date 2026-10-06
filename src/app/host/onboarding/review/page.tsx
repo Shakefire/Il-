@@ -14,15 +14,33 @@ import {
   User,
   ShieldCheck,
   CreditCard,
-  Home,
   Loader2,
+  Eye,
+  FileText,
 } from "lucide-react";
+import DocumentPreviewModal from "@/components/onboarding/DocumentPreviewModal";
 
 export default function ReviewStepPage() {
   const router = useRouter();
   const { data, submitApplication, isSubmitting } = useOnboarding();
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Document preview modal state
+  const [previewModal, setPreviewModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    url: string;
+  }>({
+    isOpen: false,
+    title: "",
+    url: "",
+  });
+
+  const handleOpenPreview = (title: string, url: string) => {
+    if (!url) return;
+    setPreviewModal({ isOpen: true, title, url });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,15 +67,23 @@ export default function ReviewStepPage() {
 
   return (
     <div className="bg-white border border-[#E7E5E0] rounded-2xl sm:rounded-3xl p-6 sm:p-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02),0_12px_24px_-4px_rgba(0,0,0,0.05),0_24px_48px_-12px_rgba(0,0,0,0.07)]">
+      {/* Document Preview Modal */}
+      <DocumentPreviewModal
+        isOpen={previewModal.isOpen}
+        onClose={() => setPreviewModal({ isOpen: false, title: "", url: "" })}
+        title={previewModal.title}
+        url={previewModal.url}
+      />
+
       <div className="mb-8">
         <span className="text-[11px] font-bold text-[#0B5D45] uppercase tracking-widest bg-[#EDF5F2] px-3 py-1 rounded-full border border-[#0B5D45]/15">
-          Stage 6 of 6 • Review &amp; Submit
+          Stage 5 of 5 • Review &amp; Submit Dossier
         </span>
         <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mt-3 mb-2">
-          Review your partner application
+          Review your verification dossier
         </h1>
         <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">
-          Confirm your details before submitting for physical verification and account approval.
+          Confirm your details before submitting for compliance verification and account approval. You can create and publish listings once verified.
         </p>
       </div>
 
@@ -97,7 +123,7 @@ export default function ReviewStepPage() {
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-xs font-bold text-[#0B5D45] uppercase tracking-wider">
                 <User size={15} />
-                <span>2. Profile &amp; Operating City</span>
+                <span>2. Profile &amp; Operating Location</span>
               </div>
               <h4 className="text-[15px] font-semibold text-[#171717] mt-1">
                 {data.firstName} {data.lastName}
@@ -118,77 +144,87 @@ export default function ReviewStepPage() {
             </Link>
           </div>
 
-          {/* 3. Identity Verification */}
+          {/* 3. Identity Verification & Previews */}
           <div className="p-5 rounded-2xl bg-[#FAFAF8] border border-[#E7E5E0] flex items-start justify-between gap-4">
-            <div className="space-y-1">
+            <div className="space-y-2 flex-1">
               <div className="flex items-center gap-2 text-xs font-bold text-[#0B5D45] uppercase tracking-wider">
                 <ShieldCheck size={15} />
                 <span>3. Identity KYC</span>
               </div>
-              <h4 className="text-[15px] font-semibold text-[#171717] mt-1">
+              <h4 className="text-[15px] font-semibold text-[#171717]">
                 {data.idType.toUpperCase()} • {data.idNumber}
               </h4>
-              <div className="flex items-center gap-3 text-xs text-[#0B5D45] font-medium pt-1">
-                <span className="flex items-center gap-1">
-                  <CheckCircle2 size={13} /> Front Attached
-                </span>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                {data.idFrontUrl && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPreview("Government ID (Front)", data.idFrontUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-[#E7E5E0] text-xs font-medium text-[#0B5D45] hover:border-[#0B5D45] transition-colors cursor-pointer"
+                  >
+                    <Eye size={13} />
+                    <span>View ID Front</span>
+                  </button>
+                )}
+                {data.idBackUrl && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPreview("Government ID (Back)", data.idBackUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-[#E7E5E0] text-xs font-medium text-[#0B5D45] hover:border-[#0B5D45] transition-colors cursor-pointer"
+                  >
+                    <Eye size={13} />
+                    <span>View ID Back</span>
+                  </button>
+                )}
                 {data.selfieUrl && (
-                  <span className="flex items-center gap-1">
-                    <CheckCircle2 size={13} /> Selfie Attached
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPreview("Verification Selfie", data.selfieUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-[#E7E5E0] text-xs font-medium text-[#0B5D45] hover:border-[#0B5D45] transition-colors cursor-pointer"
+                  >
+                    <Eye size={13} />
+                    <span>View Selfie</span>
+                  </button>
                 )}
               </div>
             </div>
             <Link
               href="/host/onboarding/identity"
-              className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
+              className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1 shrink-0"
             >
               <Edit2 size={13} />
               <span>Edit</span>
             </Link>
           </div>
 
-          {/* 4. Authority & Payouts */}
+          {/* 4. Authority & Payouts with Document Preview */}
           <div className="p-5 rounded-2xl bg-[#FAFAF8] border border-[#E7E5E0] flex items-start justify-between gap-4">
-            <div className="space-y-1">
+            <div className="space-y-2 flex-1">
               <div className="flex items-center gap-2 text-xs font-bold text-[#0B5D45] uppercase tracking-wider">
                 <CreditCard size={15} />
                 <span>4. Authority &amp; Bank Account</span>
               </div>
-              <h4 className="text-[15px] font-semibold text-[#171717] mt-1">
+              <h4 className="text-[15px] font-semibold text-[#171717]">
                 {data.bankName} • {data.bankAccountNumber}
               </h4>
               <p className="text-[13px] text-[#6B6B67]">Account Name: {data.bankAccountName}</p>
-              <span className="inline-flex items-center gap-1 text-xs text-[#0B5D45] font-medium pt-1">
-                <CheckCircle2 size={13} /> Authority Proof Uploaded
-              </span>
+              <div className="pt-1">
+                {data.authorityDocUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPreview("Authority Verification Document", data.authorityDocUrl)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white border border-[#E7E5E0] text-xs font-medium text-[#0B5D45] hover:border-[#0B5D45] transition-colors cursor-pointer"
+                  >
+                    <Eye size={13} />
+                    <span>View Authority Document</span>
+                  </button>
+                ) : (
+                  <span className="text-xs text-amber-600 font-medium">Authority document missing</span>
+                )}
+              </div>
             </div>
             <Link
               href="/host/onboarding/authority"
-              className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
-            >
-              <Edit2 size={13} />
-              <span>Edit</span>
-            </Link>
-          </div>
-
-          {/* 5. Property Draft */}
-          <div className="p-5 rounded-2xl bg-[#FAFAF8] border border-[#E7E5E0] flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-xs font-bold text-[#0B5D45] uppercase tracking-wider">
-                <Home size={15} />
-                <span>5. Property Listing Draft</span>
-              </div>
-              <h4 className="text-[15px] font-semibold text-[#171717] mt-1">{data.propertyTitle}</h4>
-              <p className="text-[13px] text-[#6B6B67]">
-                {data.propertyType} in {data.neighborhood}, {data.operatingCity} • ₦
-                {data.nightlyRate?.toLocaleString()} / night
-              </p>
-              <p className="text-[12.5px] text-[#0B5D45] font-medium">Power: {data.powerType}</p>
-            </div>
-            <Link
-              href="/host/onboarding/property-draft"
-              className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
+              className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1 shrink-0"
             >
               <Edit2 size={13} />
               <span>Edit</span>
@@ -214,11 +250,11 @@ export default function ReviewStepPage() {
         {/* Action Row */}
         <div className="pt-4 border-t border-[#E7E5E0] flex flex-col sm:flex-row items-center justify-between gap-4">
           <Link
-            href="/host/onboarding/property-draft"
+            href="/host/onboarding/authority"
             className="inline-flex items-center gap-2 text-[13.5px] font-medium text-[#6B6B67] hover:text-[#171717] transition-colors order-2 sm:order-1"
           >
             <ArrowLeft size={16} />
-            <span>Back to Property Draft</span>
+            <span>Back to Authority &amp; Payout</span>
           </Link>
 
           <button

@@ -1,29 +1,28 @@
 "use client";
 
-import React, { Suspense } from "react";
+import React from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { OnboardingProvider, useOnboarding } from "@/context/OnboardingContext";
 import { useAuth } from "@/context/AuthContext";
-import { ShieldCheck, ArrowRight, Home, CheckCircle2, Loader2, ArrowLeft } from "lucide-react";
+import { ShieldCheck, ArrowRight } from "lucide-react";
 
 const ONBOARDING_STEPS = [
   { path: "/host/onboarding/business-type", stepNum: 1, label: "Business Type", slug: "business-type" },
   { path: "/host/onboarding/profile", stepNum: 2, label: "Profile", slug: "profile" },
   { path: "/host/onboarding/identity", stepNum: 3, label: "Identity KYC", slug: "identity" },
   { path: "/host/onboarding/authority", stepNum: 4, label: "Authority & Payout", slug: "authority" },
-  { path: "/host/onboarding/property-draft", stepNum: 5, label: "Property Draft", slug: "property-draft" },
-  { path: "/host/onboarding/review", stepNum: 6, label: "Review & Submit", slug: "review" },
 ];
 
 function OnboardingNavigation() {
   const pathname = usePathname();
   const { data } = useOnboarding();
-  const currentStep = ONBOARDING_STEPS.find((s) => pathname.includes(s.slug)) || ONBOARDING_STEPS[0];
-  const progressPercent = Math.round((currentStep.stepNum / ONBOARDING_STEPS.length) * 100);
+  const currentStep = ONBOARDING_STEPS.find((s) => pathname.includes(s.slug));
+  const isReview = pathname.includes("/review");
+  const isStatus = pathname.includes("/status");
 
   // If on status page, render simple status bar
-  if (pathname.includes("/status")) {
+  if (isStatus) {
     return (
       <header className="w-full max-w-4xl mx-auto px-6 py-6 flex items-center justify-between z-10">
         <Link href="/" className="flex items-center gap-2 group">
@@ -56,16 +55,16 @@ function OnboardingNavigation() {
         <span className="text-gray-300">|</span>
         <div className="flex items-center gap-1.5 text-[12px] font-semibold text-[#0B5D45] uppercase tracking-wider">
           <ShieldCheck size={15} />
-          <span>Partner Onboarding</span>
+          <span>Partner Verification</span>
         </div>
       </div>
 
-      {/* Center/Progress Counter: Step X of 6 */}
+      {/* Center/Progress Counter: Step X of 4 or Final Review */}
       <div className="flex items-center gap-2 text-xs text-[#6B6B67]">
         <div className="flex items-center gap-1">
           {ONBOARDING_STEPS.map((s) => {
-            const isActive = s.stepNum === currentStep.stepNum;
-            const isCompleted = s.stepNum < currentStep.stepNum;
+            const isActive = currentStep?.stepNum === s.stepNum;
+            const isCompleted = isReview || (currentStep && s.stepNum < currentStep.stepNum);
 
             return (
               <Link
@@ -84,7 +83,7 @@ function OnboardingNavigation() {
           })}
         </div>
         <span className="font-medium ml-1">
-          Step {currentStep.stepNum} of {ONBOARDING_STEPS.length}
+          {isReview ? "Final Review" : `Step ${currentStep?.stepNum || 1} of 4`}
         </span>
       </div>
 

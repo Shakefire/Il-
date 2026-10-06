@@ -4,8 +4,21 @@ import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useOnboarding } from "@/context/OnboardingContext";
-import { ArrowRight, ArrowLeft, Upload, CheckCircle2, Camera, FileText, Loader2, X } from "lucide-react";
+import {
+  ArrowRight,
+  ArrowLeft,
+  Upload,
+  CheckCircle2,
+  Camera,
+  FileText,
+  Loader2,
+  Eye,
+  Trash2,
+  RotateCw,
+} from "lucide-react";
 import { api } from "@/lib/api";
+import { compressFile } from "@/lib/imageCompression";
+import DocumentPreviewModal from "@/components/onboarding/DocumentPreviewModal";
 
 const ID_TYPES = [
   { id: "nin", label: "National Identification Number (NIN)", desc: "NIN Slip or Digital NIN Card" },
@@ -19,6 +32,13 @@ export default function IdentityStepPage() {
   const { data, updateData, saveStepData } = useOnboarding();
   const [error, setError] = useState<string | null>(null);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
+
+  // Modal preview state
+  const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; title: string; url: string }>({
+    isOpen: false,
+    title: "",
+    url: "",
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [targetField, setTargetField] = useState<"idFrontUrl" | "idBackUrl" | "selfieUrl">("idFrontUrl");
@@ -36,25 +56,35 @@ export default function IdentityStepPage() {
     setError(null);
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        try {
-          const res = await api.uploadImage(base64, "kyc");
-          const url = res.url || base64;
-          updateData({ [targetField]: url });
-        } catch {
-          // If upload API fails, fall back to base64 so draft is preserved
-          updateData({ [targetField]: base64 });
-        } finally {
-          setUploadingField(null);
-        }
-      };
-      reader.readAsDataURL(file);
+      // 1. Compress image to max 1280px / 0.75 JPEG to prevent 413 Payload Too Large
+      const compressedDataUrl = await compressFile(file);
+
+      // 2. Upload to storage API (with graceful fallback to compressed data URL)
+      try {
+        const res = await api.uploadImage(compressedDataUrl, "kyc");
+        const url = res.url || compressedDataUrl;
+        updateData({ [targetField]: url });
+      } catch (err: any) {
+        // Fall back to compressed data URL if remote storage has temporary issue
+        updateData({ [targetField]: compressedDataUrl });
+      }
     } catch (err: any) {
       setError("Failed to read image file. Please choose another image.");
+    } finally {
       setUploadingField(null);
+      // Reset input value so re-uploading same file triggers change
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  const handleRemoveField = (field: "idFrontUrl" | "idBackUrl" | "selfieUrl", e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateData({ [field]: "" });
+  };
+
+  const handleOpenPreview = (title: string, url: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPreviewModal({ isOpen: true, title, url });
   };
 
   const handleContinue = async (e: React.FormEvent) => {
@@ -92,15 +122,23 @@ export default function IdentityStepPage() {
         className="hidden"
       />
 
+      {/* Document Preview Modal */}
+      <DocumentPreviewModal
+        isOpen={previewModal.isOpen}
+        onClose={() => setPreviewModal({ isOpen: false, title: "", url: "" })}
+        title={previewModal.title}
+        url={previewModal.url}
+      />
+
       <div className="mb-8">
         <span className="text-[11px] font-bold text-[#0B5D45] uppercase tracking-widest bg-[#EDF5F2] px-3 py-1 rounded-full border border-[#0B5D45]/15">
-          Stage 3 of 6 • Identity Verification
+          Stage 3 of 4 • Identity Verification
         </span>
         <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mt-3 mb-2">
           Verify your identity
         </h1>
         <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">
-          To maintain guest confidence and marketplace trust, all property partners verify their identity with a Nigerian government ID and face photo.
+          Upload your government-issued ID and a clear headshot photo. You can preview your uploads to ensure text is sharp and legible.
         </p>
       </div>
 
@@ -158,90 +196,180 @@ export default function IdentityStepPage() {
           />
         </div>
 
-        {/* Document Uploads: Front, Back, and Selfie */}
+        {/* Document Uploads with Visual Previews */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-          {/* Front of ID */}
+          {/* 1. Front of ID */}
           <div className="space-y-1.5">
             <span className="text-[12.5px] font-semibold text-[#171717] block">Front of ID *</span>
             <div
               onClick={() => handleTriggerUpload("idFrontUrl")}
-              className={`h-36 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center p-3 text-center transition-all cursor-pointer ${
+              className={`h-44 rounded-2xl border-2 border-dashed relative flex flex-col items-center justify-center p-3 text-center transition-all cursor-pointer overflow-hidden ${
                 data.idFrontUrl
                   ? "border-[#0B5D45] bg-[#F4F7F5]"
                   : "border-[#E7E5E0] hover:border-[#0B5D45] hover:bg-[#FAFAF8]"
               }`}
             >
               {uploadingField === "idFrontUrl" ? (
-                <Loader2 size={24} className="animate-spin text-[#0B5D45]" />
+                <div className="flex flex-col items-center justify-center">
+                  <Loader2 size={24} className="animate-spin text-[#0B5D45] mb-2" />
+                  <span className="text-xs text-[#0B5D45] font-medium">Compressing &amp; uploading...</span>
+                </div>
               ) : data.idFrontUrl ? (
-                <>
-                  <CheckCircle2 size={26} className="text-[#0B5D45] mb-1.5" />
-                  <span className="text-xs font-semibold text-[#0B5D45]">ID Front Attached</span>
-                  <span className="text-[10.5px] text-[#6B6B67] mt-0.5">Click to replace</span>
-                </>
+                <div className="w-full h-full flex flex-col items-center justify-between p-1">
+                  {/* Thumbnail */}
+                  <div className="relative w-full h-24 rounded-lg overflow-hidden bg-black/5 flex items-center justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={data.idFrontUrl}
+                      alt="Front of ID"
+                      className="w-full h-full object-cover rounded-lg"
+                    />
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div className="w-full flex items-center justify-between pt-2">
+                    <button
+                      type="button"
+                      onClick={(e) => handleOpenPreview("Front of ID", data.idFrontUrl, e)}
+                      className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
+                    >
+                      <Eye size={13} />
+                      <span>Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleRemoveField("idFrontUrl", e)}
+                      className="text-xs text-rose-600 hover:text-rose-700 flex items-center gap-1"
+                      title="Remove"
+                    >
+                      <Trash2 size={13} />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
-                  <Upload size={22} className="text-[#8B8B86] mb-1.5" />
-                  <span className="text-xs font-medium text-[#171717]">Upload Front</span>
-                  <span className="text-[10.5px] text-[#8B8B86]">JPG, PNG or PDF</span>
+                  <Upload size={24} className="text-[#8B8B86] mb-2" />
+                  <span className="text-xs font-semibold text-[#171717]">Upload ID Front</span>
+                  <span className="text-[11px] text-[#8B8B86] mt-0.5">JPG, PNG or PDF</span>
                 </>
               )}
             </div>
           </div>
 
-          {/* Back of ID */}
+          {/* 2. Back of ID */}
           <div className="space-y-1.5">
             <span className="text-[12.5px] font-semibold text-[#171717] block">Back of ID (Optional)</span>
             <div
               onClick={() => handleTriggerUpload("idBackUrl")}
-              className={`h-36 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center p-3 text-center transition-all cursor-pointer ${
+              className={`h-44 rounded-2xl border-2 border-dashed relative flex flex-col items-center justify-center p-3 text-center transition-all cursor-pointer overflow-hidden ${
                 data.idBackUrl
                   ? "border-[#0B5D45] bg-[#F4F7F5]"
                   : "border-[#E7E5E0] hover:border-[#0B5D45] hover:bg-[#FAFAF8]"
               }`}
             >
               {uploadingField === "idBackUrl" ? (
-                <Loader2 size={24} className="animate-spin text-[#0B5D45]" />
+                <div className="flex flex-col items-center justify-center">
+                  <Loader2 size={24} className="animate-spin text-[#0B5D45] mb-2" />
+                  <span className="text-xs text-[#0B5D45] font-medium">Compressing &amp; uploading...</span>
+                </div>
               ) : data.idBackUrl ? (
-                <>
-                  <CheckCircle2 size={26} className="text-[#0B5D45] mb-1.5" />
-                  <span className="text-xs font-semibold text-[#0B5D45]">ID Back Attached</span>
-                  <span className="text-[10.5px] text-[#6B6B67] mt-0.5">Click to replace</span>
-                </>
+                <div className="w-full h-full flex flex-col items-center justify-between p-1">
+                  {/* Thumbnail */}
+                  <div className="relative w-full h-24 rounded-lg overflow-hidden bg-black/5 flex items-center justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={data.idBackUrl}
+                      alt="Back of ID"
+                      className="w-full h-full object-cover rounded-lg"
+                    />
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div className="w-full flex items-center justify-between pt-2">
+                    <button
+                      type="button"
+                      onClick={(e) => handleOpenPreview("Back of ID", data.idBackUrl, e)}
+                      className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
+                    >
+                      <Eye size={13} />
+                      <span>Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleRemoveField("idBackUrl", e)}
+                      className="text-xs text-rose-600 hover:text-rose-700 flex items-center gap-1"
+                      title="Remove"
+                    >
+                      <Trash2 size={13} />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
-                  <Upload size={22} className="text-[#8B8B86] mb-1.5" />
-                  <span className="text-xs font-medium text-[#171717]">Upload Back</span>
-                  <span className="text-[10.5px] text-[#8B8B86]">If applicable</span>
+                  <Upload size={24} className="text-[#8B8B86] mb-2" />
+                  <span className="text-xs font-semibold text-[#171717]">Upload ID Back</span>
+                  <span className="text-[11px] text-[#8B8B86] mt-0.5">If applicable</span>
                 </>
               )}
             </div>
           </div>
 
-          {/* Live Headshot Selfie */}
+          {/* 3. Live Headshot Selfie */}
           <div className="space-y-1.5">
             <span className="text-[12.5px] font-semibold text-[#171717] block">Headshot Selfie *</span>
             <div
               onClick={() => handleTriggerUpload("selfieUrl")}
-              className={`h-36 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center p-3 text-center transition-all cursor-pointer ${
+              className={`h-44 rounded-2xl border-2 border-dashed relative flex flex-col items-center justify-center p-3 text-center transition-all cursor-pointer overflow-hidden ${
                 data.selfieUrl
                   ? "border-[#0B5D45] bg-[#F4F7F5]"
                   : "border-[#E7E5E0] hover:border-[#0B5D45] hover:bg-[#FAFAF8]"
               }`}
             >
               {uploadingField === "selfieUrl" ? (
-                <Loader2 size={24} className="animate-spin text-[#0B5D45]" />
+                <div className="flex flex-col items-center justify-center">
+                  <Loader2 size={24} className="animate-spin text-[#0B5D45] mb-2" />
+                  <span className="text-xs text-[#0B5D45] font-medium">Compressing &amp; uploading...</span>
+                </div>
               ) : data.selfieUrl ? (
-                <>
-                  <CheckCircle2 size={26} className="text-[#0B5D45] mb-1.5" />
-                  <span className="text-xs font-semibold text-[#0B5D45]">Selfie Attached</span>
-                  <span className="text-[10.5px] text-[#6B6B67] mt-0.5">Click to replace</span>
-                </>
+                <div className="w-full h-full flex flex-col items-center justify-between p-1">
+                  {/* Thumbnail */}
+                  <div className="relative w-full h-24 rounded-lg overflow-hidden bg-black/5 flex items-center justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={data.selfieUrl}
+                      alt="Selfie"
+                      className="w-full h-full object-cover rounded-lg"
+                    />
+                  </div>
+
+                  {/* Actions Bar */}
+                  <div className="w-full flex items-center justify-between pt-2">
+                    <button
+                      type="button"
+                      onClick={(e) => handleOpenPreview("Headshot Selfie", data.selfieUrl, e)}
+                      className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1"
+                    >
+                      <Eye size={13} />
+                      <span>Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleRemoveField("selfieUrl", e)}
+                      className="text-xs text-rose-600 hover:text-rose-700 flex items-center gap-1"
+                      title="Remove"
+                    >
+                      <Trash2 size={13} />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <>
-                  <Camera size={22} className="text-[#8B8B86] mb-1.5" />
-                  <span className="text-xs font-medium text-[#171717]">Upload Selfie</span>
-                  <span className="text-[10.5px] text-[#8B8B86]">Clear face photo</span>
+                  <Camera size={24} className="text-[#8B8B86] mb-2" />
+                  <span className="text-xs font-semibold text-[#171717]">Upload Selfie</span>
+                  <span className="text-[11px] text-[#8B8B86] mt-0.5">Clear face photo</span>
                 </>
               )}
             </div>
