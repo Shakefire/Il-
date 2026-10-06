@@ -120,16 +120,12 @@ export default function OwnerOnboardingWizard() {
   const [verifyingEmail, setVerifyingEmail] = useState(false);
   const [resendingEmailOtp, setResendingEmailOtp] = useState(false);
 
-  // Stage 2 State: Personal & Operational Profile & Phone OTP
+  // Stage 2 State: Personal & Operational Profile
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [residentialAddress, setResidentialAddress] = useState("");
   const [operatingCity, setOperatingCity] = useState("Abuja");
   const [operatingAreas, setOperatingAreas] = useState("");
   const [bio, setBio] = useState("");
-  const [phoneOtp, setPhoneOtp] = useState("");
-  const [phoneVerified, setPhoneVerified] = useState(false);
-  const [sendingPhoneOtp, setSendingPhoneOtp] = useState(false);
-  const [verifyingPhoneOtp, setVerifyingPhoneOtp] = useState(false);
 
   // Stage 3 State: Identity & KYC
   const [idType, setIdType] = useState("nin");
@@ -187,7 +183,6 @@ export default function OwnerOnboardingWizard() {
           setEmail(res.user.email || "");
           setPhone(res.user.phone || "");
           setEmailVerified(!!res.user.emailVerified);
-          setPhoneVerified(!!res.user.phoneVerified);
 
           if (res.profile) {
             setHostType(res.profile.hostType || "individual_owner");
@@ -357,42 +352,7 @@ export default function OwnerOnboardingWizard() {
     }
   };
 
-  // ── Stage 2: Send Phone OTP ──
-  const handleSendPhoneOtp = async () => {
-    if (!phone || phone.trim().length < 10) {
-      setErrorMsg("Please provide a valid 11-digit Nigerian phone number.");
-      return;
-    }
-    setSendingPhoneOtp(true);
-    setErrorMsg(null);
-    try {
-      await authApi.sendPhoneOtp(phone.trim());
-      setSuccessMsg("Verification code dispatched to your phone (Use '123456' in preview test mode).");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to send SMS code.");
-    } finally {
-      setSendingPhoneOtp(false);
-    }
-  };
 
-  // ── Stage 2: Verify Phone OTP ──
-  const handleVerifyPhoneOtp = async () => {
-    if (!phoneOtp || phoneOtp.trim().length !== 6) {
-      setErrorMsg("Please enter the 6-digit SMS verification code.");
-      return;
-    }
-    setVerifyingPhoneOtp(true);
-    setErrorMsg(null);
-    try {
-      await authApi.verifyPhone(phoneOtp.trim());
-      setPhoneVerified(true);
-      setSuccessMsg("Phone number verified successfully!");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Invalid SMS verification code.");
-    } finally {
-      setVerifyingPhoneOtp(false);
-    }
-  };
 
   // ── Stage 2: Save Profile & Move to Step 3 ──
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -869,7 +829,7 @@ export default function OwnerOnboardingWizard() {
           </div>
         )}
 
-        {/* ─── STAGE 2: TELL US ABOUT YOURSELF & PHONE OTP ─── */}
+        {/* ─── STAGE 2: TELL US ABOUT YOURSELF & CONTACT DETAILS ─── */}
         {currentStage === 2 && (
           <div>
             <div className="border-b border-gray-100 pb-5 mb-6">
@@ -883,63 +843,27 @@ export default function OwnerOnboardingWizard() {
             </div>
 
             <form onSubmit={handleSaveProfile} className="space-y-6">
-              {/* Phone Verification Section */}
-              <div className="bg-[#FAFAF8] p-5 rounded-xl border border-gray-200">
-                <div className="flex items-center justify-between mb-3">
-                  <label className="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-[#0B5D45]" /> Verified Phone Number
-                  </label>
-                  {phoneVerified ? (
-                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 flex items-center gap-1">
-                      <Check className="w-3.5 h-3.5" /> Verified
-                    </span>
-                  ) : (
-                    <span className="text-xs text-amber-700 font-medium">Verification Pending</span>
-                  )}
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-3">
+              {/* Phone Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Contact Phone Number (Calls / WhatsApp)
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                    <Phone className="w-4 h-4 text-gray-400" />
+                  </div>
                   <input
                     type="tel"
                     required
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     placeholder="0803 123 4567"
-                    className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
                   />
-                  {!phoneVerified && (
-                    <button
-                      type="button"
-                      disabled={sendingPhoneOtp || !phone}
-                      onClick={handleSendPhoneOtp}
-                      className="px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-black text-white text-xs font-medium whitespace-nowrap disabled:opacity-50"
-                    >
-                      {sendingPhoneOtp ? <Loader2 className="w-4 h-4 animate-spin" /> : "Send SMS Code"}
-                    </button>
-                  )}
                 </div>
-
-                {!phoneVerified && (
-                  <div className="mt-3 flex items-center gap-3">
-                    <input
-                      type="text"
-                      maxLength={6}
-                      value={phoneOtp}
-                      onChange={(e) => setPhoneOtp(e.target.value)}
-                      placeholder="Enter 6-digit SMS OTP"
-                      className="w-44 px-3 py-2 border border-gray-300 rounded-xl text-sm font-mono tracking-wider focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      disabled={verifyingPhoneOtp || phoneOtp.length !== 6}
-                      onClick={handleVerifyPhoneOtp}
-                      className="px-4 py-2 rounded-xl bg-[#0B5D45] text-white text-xs font-medium disabled:opacity-50"
-                    >
-                      {verifyingPhoneOtp ? <Loader2 className="w-4 h-4 animate-spin" /> : "Confirm OTP"}
-                    </button>
-                    <span className="text-xs text-gray-500 italic">(Mock test code: 123456)</span>
-                  </div>
-                )}
+                <p className="text-xs text-gray-400 mt-1">
+                  Used for guest check-in coordination after a reservation is confirmed.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1598,7 +1522,7 @@ export default function OwnerOnboardingWizard() {
                     </h4>
                     <p className="text-sm font-semibold text-gray-900">{firstName} {lastName}</p>
                     <p className="text-xs text-gray-600">{email} (Verified: {emailVerified ? "Yes" : "No"})</p>
-                    <p className="text-xs text-gray-600">{phone} (Verified: {phoneVerified ? "Yes" : "No"})</p>
+                    <p className="text-xs text-gray-600">Phone: {phone || "Not specified"}</p>
                     <p className="text-xs text-gray-600 mt-1">{operatingCity} • {residentialAddress}</p>
                   </div>
 

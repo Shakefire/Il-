@@ -716,7 +716,7 @@ export default function AdminPortalPage() {
                                     )}
                                   </div>
                                   <div className="text-xs text-[#8B8B86]">
-                                    {h.phone || "No phone"} {h.phoneVerified && "✓"}
+                                    {h.phone || "No phone"}
                                   </div>
                                 </td>
 
@@ -1805,13 +1805,8 @@ export default function AdminPortalPage() {
                     </div>
                     <div>
                       <span className="text-[#8B8B86] block">Phone Number:</span>
-                      <span className="font-medium text-[#171717] flex items-center gap-1">
+                      <span className="font-medium text-[#171717]">
                         {selectedHost.phone || "Not specified"}
-                        {selectedHost.phoneVerified ? (
-                          <span className="text-[10px] text-emerald-700 bg-emerald-100 px-1 rounded">Verified</span>
-                        ) : (
-                          <span className="text-[10px] text-amber-700 bg-amber-100 px-1 rounded">Pending</span>
-                        )}
                       </span>
                     </div>
                     <div>

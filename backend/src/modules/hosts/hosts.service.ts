@@ -624,7 +624,7 @@ export const hostsService = {
 
     const missingRequirements: string[] = [];
     if (!user.emailVerified) missingRequirements.push("Verify your email address");
-    if (!user.phoneVerified) missingRequirements.push("Verify your mobile phone number");
+    if (!user.phone) missingRequirements.push("Provide your contact phone number");
     if (!profile.dateOfBirth || !profile.residentialAddress) missingRequirements.push("Complete personal and operational profile");
     if (!profile.idNumber || !profile.identityDocumentUrl || !profile.selfieUrl) missingRequirements.push("Upload Nigerian government ID & verified selfie");
     if (!profile.authorityDocUrl) missingRequirements.push("Provide proof of property ownership or management mandate");
