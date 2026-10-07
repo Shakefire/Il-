@@ -21,10 +21,13 @@ import {
   Home,
   Check,
   Sparkles,
+  ScanFace,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { authApi } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { compressFile } from "@/lib/imageCompression";
+import FintechLivenessModal from "@/components/FintechLivenessModal";
 
 const NIGERIAN_BANKS = [
   "Access Bank",
@@ -143,6 +146,7 @@ export default function OwnerOnboardingWizard() {
   const [idFrontUrl, setIdFrontUrl] = useState("");
   const [idBackUrl, setIdBackUrl] = useState("");
   const [selfieUrl, setSelfieUrl] = useState("");
+  const [isLivenessModalOpen, setIsLivenessModalOpen] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState<string | null>(null);
 
   // Stage 4 State: Authority Proof & Nigerian Bank Details
@@ -252,7 +256,7 @@ export default function OwnerOnboardingWizard() {
     loadStatus();
   }, [isAuthenticated, user, authLoading]);
 
-  // Handle Image / Document Upload
+  // Handle Image / Document Upload (Enforces 15MB limit for pdf, docs, and images)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     const targetField = activeUploadField;
@@ -260,16 +264,16 @@ export default function OwnerOnboardingWizard() {
 
     if (!file || !targetField) return;
 
+    if (file.size > 15 * 1024 * 1024) {
+      setErrorMsg(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 15MB limit. Please upload a file smaller than 15MB.`);
+      return;
+    }
+
     setUploadingDoc(targetField);
     setErrorMsg(null);
 
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("Failed to read file from disk."));
-        reader.readAsDataURL(file);
-      });
+      const base64 = await compressFile(file);
 
       const uploadRes = await api.uploadImage(base64, "kyc");
       if (uploadRes && uploadRes.url) {
@@ -291,7 +295,15 @@ export default function OwnerOnboardingWizard() {
 
   const triggerUpload = (field: string) => {
     setActiveUploadField(field);
-    fileInputRef.current?.click();
+    if (fileInputRef.current) {
+      if (field === "selfie") {
+        fileInputRef.current.accept = "image/*";
+      } else {
+        fileInputRef.current.accept =
+          "image/*,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      }
+      fileInputRef.current.click();
+    }
   };
 
   // ── Email Verification Sub-step (If unverified) ──
@@ -550,8 +562,17 @@ export default function OwnerOnboardingWizard() {
         type="file"
         ref={fileInputRef}
         onChange={handleFileUpload}
-        accept="image/*,application/pdf"
+        accept="image/*,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         className="hidden"
+      />
+
+      {/* Fintech Biometric Liveness Modal */}
+      <FintechLivenessModal
+        isOpen={isLivenessModalOpen}
+        onClose={() => setIsLivenessModalOpen(false)}
+        onComplete={(result) => {
+          setSelfieUrl(result.snapshotUrl);
+        }}
       />
 
       {/* Top Banner Header */}
@@ -1048,28 +1069,52 @@ export default function OwnerOnboardingWizard() {
                       Take a clear photo of your face looking straight at the camera. Ensure good lighting with no hats or sunglasses.
                     </p>
 
-                    <div className="mt-4 flex items-center gap-4">
+                    <div className="mt-4 flex flex-wrap items-center gap-4">
                       {selfieUrl ? (
                         <div className="flex items-center gap-3">
                           <img src={selfieUrl} alt="Selfie" className="w-16 h-16 rounded-full object-cover border-2 border-[#0B5D45]" />
-                          <button
-                            type="button"
-                            onClick={() => triggerUpload("selfie")}
-                            className="text-xs text-[#0B5D45] font-semibold underline"
-                          >
-                            Retake / Change Selfie
-                          </button>
+                          <div className="flex flex-col gap-1">
+                            <span className="text-xs font-semibold text-[#0B5D45] flex items-center gap-1">
+                              <ShieldCheck className="w-3.5 h-3.5" /> Biometrically Verified
+                            </span>
+                            <div className="flex items-center gap-3 text-xs">
+                              <button
+                                type="button"
+                                onClick={() => setIsLivenessModalOpen(true)}
+                                className="text-[#0B5D45] font-semibold underline cursor-pointer"
+                              >
+                                Re-scan Face
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => triggerUpload("selfie")}
+                                className="text-gray-500 hover:text-gray-700 underline cursor-pointer"
+                              >
+                                Upload Photo
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          disabled={uploadingDoc === "selfie"}
-                          onClick={() => triggerUpload("selfie")}
-                          className="px-4 py-2 bg-[#0B5D45] text-white rounded-lg text-xs font-medium hover:bg-[#084936] flex items-center gap-1.5 shadow-sm"
-                        >
-                          <Camera className="w-4 h-4" />
-                          {uploadingDoc === "selfie" ? "Uploading..." : "Take or Upload Selfie"}
-                        </button>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setIsLivenessModalOpen(true)}
+                            className="px-4 py-2 bg-[#0B5D45] text-white rounded-lg text-xs font-semibold hover:bg-[#084936] flex items-center gap-1.5 shadow-sm cursor-pointer"
+                          >
+                            <ScanFace className="w-4 h-4" />
+                            <span>Scan Face (Biometric Liveness)</span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={uploadingDoc === "selfie"}
+                            onClick={() => triggerUpload("selfie")}
+                            className="px-3 py-2 border border-gray-300 text-gray-700 rounded-lg text-xs font-medium hover:bg-gray-50 flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            {uploadingDoc === "selfie" ? "Uploading..." : "Upload from Device (Max 15MB)"}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>

@@ -230,6 +230,12 @@ export default function BecomeAHostPage() {
     setSaveError(null);
 
     const file = files[0];
+    if (file.size > 15 * 1024 * 1024) {
+      setSaveError(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 15MB limit.`);
+      setUploadingImage(false);
+      return;
+    }
+
     const reader = new FileReader();
 
     reader.onloadend = async () => {
@@ -929,7 +935,7 @@ export default function BecomeAHostPage() {
                   <p className="text-sm font-semibold text-[#171717]">
                     {uploadingImage ? "Uploading to Cloudflare R2..." : "Click to upload an image"}
                   </p>
-                  <p className="text-xs text-[#8B8B86]">PNG, JPG, WEBP up to 10MB</p>
+                  <p className="text-xs text-[#8B8B86]">PNG, JPG, WEBP up to 15MB</p>
                 </label>
               </div>
 

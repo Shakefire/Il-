@@ -22,7 +22,7 @@ import { healthRoutes } from "./modules/health/health.routes";
  */
 export async function buildApp(): Promise<FastifyInstance> {
   const fastify = Fastify({
-    bodyLimit: 15 * 1024 * 1024, // 15 MB for image uploads
+    bodyLimit: 25 * 1024 * 1024, // 25 MB to accommodate 15MB binary files encoded in base64
     logger: {
       level: env.LOG_LEVEL,
     },

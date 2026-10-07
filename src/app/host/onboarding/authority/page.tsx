@@ -73,11 +73,17 @@ export default function AuthorityStepPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 15 * 1024 * 1024) {
+      setError(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 15MB maximum limit. Please upload a file up to 15MB.`);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     setUploadingDoc(true);
     setError(null);
 
     try {
-      // Compress image/pdf to prevent 413 Entity Too Large
+      // Process & compress file (validates 15MB limit)
       const compressedDataUrl = await compressFile(file);
 
       try {
@@ -85,11 +91,11 @@ export default function AuthorityStepPage() {
         const url = res.url || compressedDataUrl;
         updateData({ authorityDocUrl: url });
       } catch {
-        // Fall back to compressed data URL
+        // Fall back to processed data URL
         updateData({ authorityDocUrl: compressedDataUrl });
       }
     } catch (err: any) {
-      setError("Failed to process document file. Please choose another file.");
+      setError(err.message || "Failed to process document file. Please choose another file.");
     } finally {
       setUploadingDoc(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -141,7 +147,13 @@ export default function AuthorityStepPage() {
     return "Deed of Assignment, C of O, or Electricity Utility Bill";
   };
 
-  const isPdf = data.authorityDocUrl?.includes("application/pdf") || data.authorityDocUrl?.endsWith(".pdf");
+  const urlLower = (data.authorityDocUrl || "").toLowerCase();
+  const isDocOrPdf =
+    urlLower.includes("application/pdf") ||
+    urlLower.includes("word") ||
+    urlLower.endsWith(".pdf") ||
+    urlLower.endsWith(".doc") ||
+    urlLower.endsWith(".docx");
 
   return (
     <div className="bg-white border border-[#E7E5E0] rounded-2xl sm:rounded-3xl p-6 sm:p-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02),0_12px_24px_-4px_rgba(0,0,0,0.05),0_24px_48px_-12px_rgba(0,0,0,0.07)]">
@@ -150,7 +162,7 @@ export default function AuthorityStepPage() {
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}
-        accept="image/*,application/pdf"
+        accept="image/*,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         className="hidden"
       />
 
@@ -208,12 +220,12 @@ export default function AuthorityStepPage() {
               </div>
             ) : data.authorityDocUrl ? (
               <div className="w-full h-full flex flex-col items-center justify-between p-1">
-                {/* Thumbnail / PDF indicator */}
+                {/* Thumbnail / Document indicator */}
                 <div className="relative w-full h-24 rounded-lg overflow-hidden bg-black/5 flex items-center justify-center">
-                  {isPdf ? (
+                  {isDocOrPdf ? (
                     <div className="flex items-center gap-2 text-xs font-semibold text-[#0B5D45]">
                       <FileText size={24} />
-                      <span>PDF Document Attached</span>
+                      <span>{urlLower.endsWith(".doc") || urlLower.endsWith(".docx") ? "Word Document Attached" : "Document Attached (PDF)"}</span>
                     </div>
                   ) : (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -248,8 +260,8 @@ export default function AuthorityStepPage() {
             ) : (
               <>
                 <Upload size={24} className="text-[#8B8B86] mb-2" />
-                <span className="text-xs font-semibold text-[#171717]">Upload Authority Document</span>
-                <span className="text-[11px] text-[#8B8B86] mt-0.5">Deed, C of O, Management Agreement, or Utility Bill</span>
+                <span className="text-xs font-semibold text-[#171717]">Upload Authority Document (Max 15MB)</span>
+                <span className="text-[11px] text-[#8B8B86] mt-0.5">Deed, C of O, Management Agreement, or Utility Bill (PDF, DOC/DOCX, Images up to 15MB)</span>
               </>
             )}
           </div>

@@ -39,15 +39,23 @@ export const BCRYPT_SALT_ROUNDS = 10;
 export const COORDINATE_OFFSET_RANGE = 0.003;
 
 // ─── Uploads ───
-/** Max image upload size in bytes (10 MB) */
-export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
-/** Allowed image MIME types */
+/** Max upload size in bytes (15 MB) for pdf, docs, and images */
+export const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
+export const MAX_IMAGE_SIZE_BYTES = 15 * 1024 * 1024;
+/** Allowed MIME types for images, PDFs, and documents */
 export const ALLOWED_IMAGE_TYPES = [
   "image/jpeg",
   "image/png",
   "image/webp",
   "image/avif",
+  "image/heic",
+  "image/heif",
   "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/octet-stream",
+  "video/webm",
+  "video/mp4",
 ] as const;
 /** Max images per property */
 export const MAX_IMAGES_PER_PROPERTY = 20;

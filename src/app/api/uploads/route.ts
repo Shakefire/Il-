@@ -26,6 +26,13 @@ export async function POST(req: NextRequest) {
     const base64Data = matches[2];
     const buffer = Buffer.from(base64Data, "base64");
 
+    if (buffer.length > 15 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: `File exceeds maximum allowed size of 15MB (${(buffer.length / (1024 * 1024)).toFixed(1)}MB)` },
+        { status: 400 }
+      );
+    }
+
     const result = await uploadImage(buffer, mimeType, { folder });
     if (result.success && result.url) {
       return NextResponse.json({ success: true, url: result.url });

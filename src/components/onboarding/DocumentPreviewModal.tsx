@@ -1,6 +1,6 @@
 "use client";
 
-import { X, ExternalLink, Download, FileText } from "lucide-react";
+import { X, Download, FileText } from "lucide-react";
 
 interface DocumentPreviewModalProps {
   isOpen: boolean;
@@ -17,7 +17,26 @@ export default function DocumentPreviewModal({
 }: DocumentPreviewModalProps) {
   if (!isOpen || !url) return null;
 
-  const isPdf = url.includes("application/pdf") || url.endsWith(".pdf");
+  const urlLower = url.toLowerCase();
+  const isPdf = urlLower.includes("application/pdf") || urlLower.endsWith(".pdf");
+  const isWordDoc =
+    urlLower.includes("msword") ||
+    urlLower.includes("wordprocessing") ||
+    urlLower.endsWith(".doc") ||
+    urlLower.endsWith(".docx");
+  const isGenericDoc = isPdf || isWordDoc;
+
+  const getDocTypeBadge = () => {
+    if (isPdf) return "PDF Document";
+    if (isWordDoc) return "Word Document";
+    return "Image Preview";
+  };
+
+  const getDownloadFilename = () => {
+    if (isWordDoc) return urlLower.endsWith(".docx") ? "document.docx" : "document.doc";
+    if (isPdf) return "document.pdf";
+    return "document.jpg";
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150">
@@ -27,7 +46,7 @@ export default function DocumentPreviewModal({
           <div className="flex items-center gap-2">
             <span className="font-semibold text-sm text-[#171717]">{title}</span>
             <span className="text-xs text-[#8B8B86] bg-[#F0EFEA] px-2 py-0.5 rounded">
-              {isPdf ? "PDF Document" : "Image Preview"}
+              {getDocTypeBadge()}
             </span>
           </div>
 
@@ -44,20 +63,22 @@ export default function DocumentPreviewModal({
 
         {/* Preview Content */}
         <div className="flex-1 overflow-auto p-4 sm:p-6 flex items-center justify-center bg-[#F4F4F2] min-h-[350px]">
-          {isPdf ? (
+          {isGenericDoc ? (
             <div className="w-full h-[60vh] flex flex-col items-center justify-center bg-white rounded-xl p-6 border border-[#E7E5E0] text-center">
               <FileText size={48} className="text-[#0B5D45] mb-3" />
               <p className="font-semibold text-sm text-[#171717] mb-1">{title}</p>
-              <p className="text-xs text-[#6B6B67] mb-4">PDF document attached and secured.</p>
+              <p className="text-xs text-[#6B6B67] mb-4">
+                {isWordDoc ? "Document attached and secured (up to 15MB)." : "PDF document attached and secured (up to 15MB)."}
+              </p>
               <a
                 href={url}
                 target="_blank"
                 rel="noreferrer"
-                download="document.pdf"
+                download={getDownloadFilename()}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white text-xs font-semibold hover:bg-[#084936] transition-colors"
               >
                 <Download size={14} />
-                <span>Open or Download PDF</span>
+                <span>Open or Download Document</span>
               </a>
             </div>
           ) : (

@@ -61,13 +61,13 @@ export async function uploadImage(
   mimeType: string,
   options: { folder?: string; propertyId?: string } = {}
 ): Promise<UploadResult> {
-  // Validate size (10MB limit)
+  // Validate size (15MB limit)
   if (buffer.length > MAX_IMAGE_SIZE_BYTES) {
     return {
       success: false,
       url: "",
       storageKey: "",
-      error: `Image exceeds maximum size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB`,
+      error: `File exceeds maximum size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)}MB`,
     };
   }
 
@@ -81,7 +81,22 @@ export async function uploadImage(
     };
   }
 
-  const ext = mimeType === "application/pdf" ? "pdf" : mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1];
+  let ext = "jpg";
+  if (mimeType === "application/pdf") {
+    ext = "pdf";
+  } else if (mimeType === "application/msword") {
+    ext = "doc";
+  } else if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    ext = "docx";
+  } else if (mimeType.includes("webm")) {
+    ext = "webm";
+  } else if (mimeType.includes("mp4")) {
+    ext = "mp4";
+  } else if (mimeType.startsWith("image/")) {
+    const sub = mimeType.split("/")[1];
+    ext = sub === "jpeg" ? "jpg" : sub;
+  }
+
   const filename = `${crypto.randomUUID()}.${ext}`;
   const prefix = getNormalizedPrefix();
   
@@ -150,8 +165,16 @@ export async function getImageObject(
         ? "image/webp"
         : ext === ".pdf"
         ? "application/pdf"
+        : ext === ".doc"
+        ? "application/msword"
+        : ext === ".docx"
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         : ext === ".avif"
         ? "image/avif"
+        : ext === ".webm"
+        ? "video/webm"
+        : ext === ".mp4"
+        ? "video/mp4"
         : "image/jpeg";
 
     return {

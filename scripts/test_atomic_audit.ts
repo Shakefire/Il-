@@ -140,6 +140,18 @@ async function runAudit() {
   const jpgUpload = await uploadImage(dummyJpgBuffer, "image/jpeg", { folder: "kyc" });
   assert(jpgUpload.success === true, "UPL-002", "JPEG document upload succeeds");
 
+  // UPL-003: Upload Word DOCX document
+  const dummyDocxBuffer = Buffer.from("dummy-docx-content-for-testing");
+  const docxUpload = await uploadImage(dummyDocxBuffer, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", { folder: "kyc" });
+  assert(docxUpload.success === true, "UPL-003a", "DOCX document upload succeeds");
+  assert(docxUpload.storageKey.endsWith(".docx"), "UPL-003b", "Storage key preserves .docx extension");
+
+  // UPL-004: File exceeding 15MB limit is rejected
+  const oversizedBuffer = Buffer.alloc(16 * 1024 * 1024); // 16 MB
+  const oversizedUpload = await uploadImage(oversizedBuffer, "application/pdf", { folder: "kyc" });
+  assert(oversizedUpload.success === false, "UPL-004a", "Oversized file >15MB is rejected");
+  assert(oversizedUpload.error?.includes("15MB") === true, "UPL-004b", "Rejection error mentions 15MB limit");
+
   // ─────────────────────────────────────────────────────────────
   // 3. OWNER ONBOARDING JOURNEY
   // ─────────────────────────────────────────────────────────────
