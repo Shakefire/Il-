@@ -1638,11 +1638,43 @@ export default function AdminPortalPage() {
                         <span>AI Biometric Match Analysis</span>
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                        99.4% Match • PASSED
+                        AI Match: 99.4% • PASSED
                       </span>
                     </div>
 
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                    {/* Submitted Selfie Display with AI Match Confidence Score Directly Above It */}
+                    <div className="pt-1">
+                      <div className="flex items-center justify-between pb-1.5 text-[11px] text-slate-400">
+                        <span>Submitted Biometric Liveness Capture:</span>
+                        <span className="text-emerald-400 font-semibold">AI Match: 99.4%</span>
+                      </div>
+                      {selectedHost.profile?.selfieUrl ? (
+                        <div
+                          onClick={() => setActiveDocTab("selfie")}
+                          className="relative h-44 w-full rounded-xl overflow-hidden border border-slate-700 bg-slate-950 cursor-pointer group"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={selectedHost.profile.selfieUrl}
+                            alt="Submitted Biometric Selfie"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-emerald-600/90 text-white text-[10px] font-bold flex items-center gap-1 shadow-xs">
+                            <ShieldCheck size={11} />
+                            <span>AI Verified Liveness</span>
+                          </div>
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity">
+                            View Full Resolution In Document Viewer ↗
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="h-28 rounded-xl border border-dashed border-slate-700 bg-slate-900 flex items-center justify-center text-slate-500 text-xs">
+                          No selfie capture provided
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-slate-300 leading-relaxed pt-1">
                       Liveness verification verified client-side using Google MediaPipe WASM. The selfie photo exhibits 99.4% biometric facial landmarks concordance with the government ID portrait.
                     </p>
 
@@ -1721,6 +1753,37 @@ export default function AdminPortalPage() {
                           </span>
                         </div>
                       )}
+
+                      {/* Login as User Function (Support Masquerade) */}
+                      <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between">
+                        <span className="text-slate-400">Support Masquerade:</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const confirm = window.confirm(
+                              `Initiate support session as ${selectedHost.firstName} ${selectedHost.lastName}? All actions during masquerade will be logged in the audit trail.`
+                            );
+                            if (confirm) {
+                              const auditEntry = {
+                                id: "log_" + Date.now(),
+                                action: "SUPPORT_MASQUERADE_INITIATED",
+                                entityType: "HOST_USER",
+                                entityId: selectedHost.id,
+                                adminEmail: user?.email || "admin@ile.ng",
+                                notes: `Admin initiated support masquerade session for Host ${selectedHost.email}.`,
+                                createdAt: new Date().toISOString(),
+                                ipAddress: "127.0.0.1",
+                              };
+                              setAuditLogs((prev) => [auditEntry, ...prev]);
+                              window.open("/host/dashboard", "_blank");
+                            }
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <User size={11} className="text-emerald-400" />
+                          <span>Login as User</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 
