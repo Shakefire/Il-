@@ -33,8 +33,8 @@ export default function ProfileStepPage() {
       return;
     }
 
-    // Background save to backend
-    saveStepData(2).catch(() => null);
+    // Ensure data is saved to backend before navigating
+    await saveStepData(2);
     router.push("/host/onboarding/identity");
   };
 

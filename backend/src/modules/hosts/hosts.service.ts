@@ -808,7 +808,7 @@ export const hostsService = {
     return { success: true, profile: updatedProfile };
   },
 
-  async submitOnboardingForReview(userId: string) {
+  async submitOnboardingForReview(userId: string, data?: any) {
     const db = getDb();
 
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
@@ -817,16 +817,56 @@ export const hostsService = {
     const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
     if (!profile) throw new Error("Host profile not found");
 
-    if (!profile.idNumber || !profile.identityDocumentUrl) {
+    // If client supplied supplemental data with submission, save to profile first
+    if (data && typeof data === "object") {
+      const updates: any = { updatedAt: new Date() };
+      if (data.idNumber) updates.idNumber = String(data.idNumber).trim();
+      if (data.idType) updates.idType = data.idType;
+      if (data.identityDocumentUrl || data.idFrontUrl) {
+        updates.identityDocumentUrl = data.identityDocumentUrl || data.idFrontUrl;
+      }
+      if (data.idDocumentBackUrl || data.idBackUrl) {
+        updates.idDocumentBackUrl = data.idDocumentBackUrl || data.idBackUrl;
+      }
+      if (data.selfieUrl) updates.selfieUrl = data.selfieUrl;
+      if (data.authorityDocType) updates.authorityDocType = data.authorityDocType;
+      if (data.authorityDocUrl) updates.authorityDocUrl = data.authorityDocUrl;
+      if (data.bankName) updates.bankName = data.bankName;
+      if (data.bankCode) updates.bankCode = data.bankCode;
+      if (data.bankAccountNumber) updates.bankAccountNumber = String(data.bankAccountNumber).trim();
+      if (data.bankAccountName) updates.bankAccountName = String(data.bankAccountName).trim();
+      if (data.hostType) updates.hostType = data.hostType;
+      if (data.companyName) updates.companyName = data.companyName;
+      if (data.companyRegistrationNumber || data.companyRegNumber) {
+        updates.companyRegistrationNumber = data.companyRegistrationNumber || data.companyRegNumber;
+      }
+      if (data.residentialAddress) updates.residentialAddress = data.residentialAddress;
+      if (data.dateOfBirth) updates.dateOfBirth = data.dateOfBirth;
+      if (data.operatingCity) updates.operatingCity = data.operatingCity;
+
+      if (Object.keys(updates).length > 1) {
+        await db.update(schema.profiles).set(updates).where(eq(schema.profiles.userId, userId));
+        Object.assign(profile, updates);
+      }
+    }
+
+    const effectiveIdNumber = profile.idNumber || data?.idNumber;
+    const effectiveIdDocUrl = profile.identityDocumentUrl || data?.identityDocumentUrl || data?.idFrontUrl;
+    const effectiveSelfieUrl = profile.selfieUrl || data?.selfieUrl;
+    const effectiveAuthorityDocUrl = profile.authorityDocUrl || data?.authorityDocUrl;
+    const effectiveBankAccountNumber = profile.bankAccountNumber || data?.bankAccountNumber;
+    const effectiveBankName = profile.bankName || data?.bankName;
+
+    if (!effectiveIdNumber || !effectiveIdDocUrl) {
       throw new Error("Please submit a valid government ID document.");
     }
-    if (!profile.selfieUrl) {
+    if (!effectiveSelfieUrl) {
       throw new Error("Please upload a verification selfie photo.");
     }
-    if (!profile.authorityDocUrl) {
+    if (!effectiveAuthorityDocUrl) {
       throw new Error("Please provide proof of property ownership or management authority.");
     }
-    if (!profile.bankAccountNumber || !profile.bankName) {
+    if (!effectiveBankAccountNumber || !effectiveBankName) {
       throw new Error("Please provide your Nigerian bank account details for payout verification.");
     }
 

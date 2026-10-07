@@ -135,8 +135,8 @@ export default function AuthorityStepPage() {
       return;
     }
 
-    // Background save to backend
-    saveStepData(4).catch(() => null);
+    // Ensure data is saved to backend before navigating
+    await saveStepData(4);
     // Proceed directly to Review & Submit KYC! (No initial draft listing!)
     router.push("/host/onboarding/review");
   };

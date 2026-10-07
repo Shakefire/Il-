@@ -10,7 +10,7 @@ import {
   X,
   Loader2,
   Lock,
-  Volume2,
+  Zap,
 } from "lucide-react";
 
 export interface FintechLivenessResult {
@@ -26,6 +26,70 @@ export interface FintechLivenessModalProps {
 }
 
 type ChallengeStep = "initializing" | "center" | "blink" | "turn_left" | "verified" | "error" | "timeout";
+
+// ── Global Singleton Cache for Neural Vision Engine ──
+// Loads once per session so opening/retrying is instant with 0ms network latency.
+let cachedLandmarker: any = null;
+let cachedLandmarkerPromise: Promise<any> | null = null;
+
+export async function preloadLivenessEngine(): Promise<any> {
+  if (typeof window === "undefined") return null;
+  if (cachedLandmarker) return cachedLandmarker;
+  if (cachedLandmarkerPromise) return cachedLandmarkerPromise;
+
+  cachedLandmarkerPromise = (async () => {
+    try {
+      const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+
+      // Try GPU acceleration first
+      try {
+        const landmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU",
+          },
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: false,
+          runningMode: "VIDEO",
+          numFaces: 1,
+          minFaceDetectionConfidence: 0.5,
+          minFacePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+        cachedLandmarker = landmarker;
+        return landmarker;
+      } catch (gpuErr) {
+        console.warn("[MediaPipe] GPU unavailable, using CPU delegate:", gpuErr);
+        const landmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "CPU",
+          },
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: false,
+          runningMode: "VIDEO",
+          numFaces: 1,
+          minFaceDetectionConfidence: 0.5,
+          minFacePresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+        cachedLandmarker = landmarker;
+        return landmarker;
+      }
+    } catch (err) {
+      cachedLandmarkerPromise = null;
+      console.warn("[MediaPipe] Preload deferred:", err);
+      return null;
+    }
+  })();
+
+  return cachedLandmarkerPromise;
+}
 
 /**
  * Play a fintech-grade synthesized audio chime on verification success.
@@ -82,6 +146,8 @@ export default function FintechLivenessModal({
   const landmarkerRef = useRef<any>(null);
 
   // Challenge Detection State Trackers
+  const stepRef = useRef<ChallengeStep>("initializing");
+  const isInitializingRef = useRef(false);
   const centerFramesRef = useRef(0);
   const blinkPhaseRef = useRef<"open" | "closed" | "done">("open");
   const turnLeftFramesRef = useRef(0);
@@ -89,6 +155,7 @@ export default function FintechLivenessModal({
 
   // Clean up all camera tracks, animation loops, and recorders
   const stopAllMedia = useCallback(() => {
+    isInitializingRef.current = false;
     if (animFrameIdRef.current) {
       cancelAnimationFrame(animFrameIdRef.current);
       animFrameIdRef.current = null;
@@ -99,15 +166,15 @@ export default function FintechLivenessModal({
       } catch {}
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+      try {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      } catch {}
       streamRef.current = null;
     }
-    if (landmarkerRef.current) {
-      try {
-        landmarkerRef.current.close();
-      } catch {}
-      landmarkerRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
+    // Note: We preserve cachedLandmarker in memory for instant re-opening
   }, []);
 
   // 30-Second Auto-Timeout Counter
@@ -120,6 +187,7 @@ export default function FintechLivenessModal({
           clearInterval(timer);
           stopAllMedia();
           setStep("timeout");
+          stepRef.current = "timeout";
           return 0;
         }
         return prev - 1;
@@ -140,6 +208,7 @@ export default function FintechLivenessModal({
     isCompletedRef.current = true;
 
     setStep("verified");
+    stepRef.current = "verified";
     setProgressPct(100);
     setMicroHint("Liveness verified! Securing biometric dossier...");
     playFintechSuccessChime();
@@ -149,8 +218,8 @@ export default function FintechLivenessModal({
     if (videoRef.current) {
       const video = videoRef.current;
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
       const ctx = canvas.getContext("2d");
       if (ctx) {
         // Render mirrored natural orientation
@@ -158,7 +227,7 @@ export default function FintechLivenessModal({
         ctx.scale(-1, 1);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         snapshotBlob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.92)
+          canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.90)
         );
       }
     }
@@ -201,7 +270,7 @@ export default function FintechLivenessModal({
         throw new Error(data.error || "Failed to process verification dossier.");
       }
 
-      // Small delay for the user to enjoy the emerald success badge
+      // Brief delay for the emerald badge animation
       setTimeout(() => {
         stopAllMedia();
         onComplete({
@@ -210,10 +279,11 @@ export default function FintechLivenessModal({
           videoUrl: data.videoUrl,
         });
         onClose();
-      }, 1200);
+      }, 900);
     } catch (err: any) {
       console.error("[Liveness] Upload error:", err);
       setErrorMessage(err.message || "Failed to submit verification session. Please retry.");
+      stepRef.current = "error";
       setStep("error");
     } finally {
       setIsUploading(false);
@@ -222,21 +292,27 @@ export default function FintechLivenessModal({
 
   /**
    * Main real-time detection loop
+   * Optimized with 65ms frame-skipping (~15 FPS) to eliminate CPU/GPU overheating & lag.
    */
   const startDetectionLoop = useCallback(() => {
     let lastVideoTime = -1;
+    let lastInferenceTime = 0;
+    const INFERENCE_INTERVAL_MS = 65; // ~15 FPS neural net inference throttler
 
     const detect = () => {
       if (!videoRef.current || isCompletedRef.current) return;
       const video = videoRef.current;
 
-      if (video.readyState >= 2 && landmarkerRef.current) {
+      const now = performance.now();
+
+      // Only run heavy neural net inference every 65ms to keep CPU/GPU low
+      if (now - lastInferenceTime >= INFERENCE_INTERVAL_MS && video.readyState >= 2 && landmarkerRef.current) {
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
-          const startTimeMs = performance.now();
+          lastInferenceTime = now;
 
           try {
-            const result = landmarkerRef.current.detectForVideo(video, startTimeMs);
+            const result = landmarkerRef.current.detectForVideo(video, now);
 
             if (result && result.faceLandmarks && result.faceLandmarks.length > 0) {
               const landmarks = result.faceLandmarks[0];
@@ -250,33 +326,34 @@ export default function FintechLivenessModal({
 
               // Blendshape scores
               const blendshapes = result.faceBlendshapes?.[0]?.categories || [];
-              const blendMap: Record<string, number> = {};
+              let eyeBlinkLeft = 0;
+              let eyeBlinkRight = 0;
               for (const b of blendshapes) {
-                blendMap[b.categoryName] = b.score;
+                if (b.categoryName === "eyeBlinkLeft") eyeBlinkLeft = b.score;
+                else if (b.categoryName === "eyeBlinkRight") eyeBlinkRight = b.score;
               }
-              const eyeBlinkLeft = blendMap["eyeBlinkLeft"] ?? 0;
-              const eyeBlinkRight = blendMap["eyeBlinkRight"] ?? 0;
 
               // ── STAGE 1: CENTER FACE IN FRAME ──
-              if (step === "center") {
-                const isCenteredX = nose.x >= 0.36 && nose.x <= 0.64;
-                const isCenteredY = nose.y >= 0.30 && nose.y <= 0.70;
-                const isGoodDistance = faceWidth >= 0.17 && faceWidth <= 0.60;
+              if (stepRef.current === "center") {
+                const isCenteredX = nose.x >= 0.33 && nose.x <= 0.67;
+                const isCenteredY = nose.y >= 0.25 && nose.y <= 0.75;
+                const isGoodDistance = faceWidth >= 0.15 && faceWidth <= 0.65;
 
                 if (!isGoodDistance) {
                   centerFramesRef.current = 0;
-                  setMicroHint(faceWidth < 0.17 ? "Move slightly closer" : "Move slightly back");
+                  setMicroHint(faceWidth < 0.15 ? "Move slightly closer" : "Move slightly back");
                 } else if (!isCenteredX) {
                   centerFramesRef.current = 0;
-                  setMicroHint(nose.x < 0.36 ? "Move towards your right" : "Move towards your left");
+                  setMicroHint(nose.x < 0.33 ? "Move towards your right" : "Move towards your left");
                 } else if (!isCenteredY) {
                   centerFramesRef.current = 0;
-                  setMicroHint(nose.y < 0.30 ? "Move slightly down" : "Move slightly up");
+                  setMicroHint(nose.y < 0.25 ? "Move slightly down" : "Move slightly up");
                 } else {
                   centerFramesRef.current += 1;
                   setMicroHint("Face aligned! Hold still...");
-                  if (centerFramesRef.current >= 18) {
+                  if (centerFramesRef.current >= 6) {
                     // Stage 1 passed! Advance to blink challenge
+                    stepRef.current = "blink";
                     setStep("blink");
                     setProgressPct(33);
                     setMicroHint("Blink your eyes now");
@@ -285,19 +362,21 @@ export default function FintechLivenessModal({
               }
 
               // ── STAGE 2: BLINK EYES ──
-              else if (step === "blink") {
-                const isBothClosed = eyeBlinkLeft > 0.40 && eyeBlinkRight > 0.40;
-                const isBothOpen = eyeBlinkLeft < 0.28 && eyeBlinkRight < 0.28;
+              else if (stepRef.current === "blink") {
+                const avgBlink = (eyeBlinkLeft + eyeBlinkRight) / 2;
+                const isBlinking = avgBlink > 0.32 || eyeBlinkLeft > 0.40 || eyeBlinkRight > 0.40;
+                const isOpen = avgBlink < 0.25;
 
                 if (blinkPhaseRef.current === "open") {
-                  if (isBothClosed) {
+                  if (isBlinking) {
                     blinkPhaseRef.current = "closed";
                     setMicroHint("Now open your eyes");
                   }
                 } else if (blinkPhaseRef.current === "closed") {
-                  if (isBothOpen) {
+                  if (isOpen) {
                     blinkPhaseRef.current = "done";
                     // Stage 2 passed! Advance to turn head left
+                    stepRef.current = "turn_left";
                     setStep("turn_left");
                     setProgressPct(66);
                     setMicroHint("Slowly turn your head to your left");
@@ -306,16 +385,13 @@ export default function FintechLivenessModal({
               }
 
               // ── STAGE 3: TURN HEAD LEFT ──
-              else if (step === "turn_left") {
-                // Since camera is mirrored horizontally (scale-x-[-1]),
-                // user physically turning left moves their nose towards left ear.
-                // We check relative yaw displacement.
-                const isTurningLeft = Math.abs(yawOffset) > 0.13;
+              else if (stepRef.current === "turn_left") {
+                const isTurningLeft = Math.abs(yawOffset) > 0.11;
 
                 if (isTurningLeft) {
                   turnLeftFramesRef.current += 1;
                   setMicroHint("Great! Hold position...");
-                  if (turnLeftFramesRef.current >= 10) {
+                  if (turnLeftFramesRef.current >= 4) {
                     // All challenges passed!
                     handleLivenessVerified();
                     return;
@@ -326,12 +402,12 @@ export default function FintechLivenessModal({
                 }
               }
             } else {
-              if (step !== "initializing" && step !== "verified") {
+              if (stepRef.current !== "initializing" && stepRef.current !== "verified") {
                 setMicroHint("Place your face within the camera ring");
               }
             }
           } catch (detErr) {
-            console.warn("[MediaPipe] Frame detection notice:", detErr);
+            console.warn("[MediaPipe] Detection notice:", detErr);
           }
         }
       }
@@ -340,17 +416,22 @@ export default function FintechLivenessModal({
     };
 
     animFrameIdRef.current = requestAnimationFrame(detect);
-  }, [step, handleLivenessVerified]);
+  }, [handleLivenessVerified]);
 
   /**
-   * Initialize Camera Stream & Google MediaPipe Tasks Vision
+   * Fast, Parallel Initialization
+   * Loads camera stream (640x480) and pre-warmed neural vision model concurrently.
    */
   const initializeLivenessEngine = useCallback(async () => {
+    if (isInitializingRef.current) return;
+    isInitializingRef.current = true;
+
     setStep("initializing");
+    stepRef.current = "initializing";
     setErrorMessage(null);
     setTimeLeft(30);
     setProgressPct(5);
-    setMicroHint("Connecting secure camera stream...");
+    setMicroHint("Starting camera...");
     isCompletedRef.current = false;
     centerFramesRef.current = 0;
     blinkPhaseRef.current = "open";
@@ -358,24 +439,40 @@ export default function FintechLivenessModal({
     recordedChunksRef.current = [];
 
     try {
-      // 1. Request Front Camera Stream
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // 1. Parallel Request: 640x480 Camera (fast & low resource) + Model Preload
+      const cameraPromise = navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 30, max: 30 },
         },
         audio: false,
       });
+
+      const [stream, landmarker] = await Promise.all([
+        cameraPromise,
+        preloadLivenessEngine(),
+      ]);
+
+      // If user closed modal while awaiting
+      if (!isInitializingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
 
       streamRef.current = stream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        try {
+          await videoRef.current.play();
+        } catch (playErr: any) {
+          if (playErr?.name !== "AbortError") throw playErr;
+        }
       }
 
-      // 2. Initialize MediaRecorder for full session video capture
+      // 2. Initialize MediaRecorder (lightweight 600 kbps)
       try {
         const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
           ? "video/webm;codecs=vp8"
@@ -383,62 +480,49 @@ export default function FintechLivenessModal({
           ? "video/webm"
           : "video/mp4";
 
-        const recorder = new MediaRecorder(stream, { mimeType });
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: 600_000,
+        });
         recorder.ondataavailable = (e) => {
           if (e.data && e.data.size > 0) {
             recordedChunksRef.current.push(e.data);
           }
         };
-        recorder.start(500); // 500ms chunk intervals
+        recorder.start(1000);
         mediaRecorderRef.current = recorder;
       } catch (recErr) {
-        console.warn("[MediaRecorder] Video capture optional fallback:", recErr);
+        console.warn("[MediaRecorder] Fallback mode:", recErr);
       }
-
-      setMicroHint("Loading neural vision model...");
-      setProgressPct(12);
-
-      // 3. Dynamically import Google MediaPipe Tasks Vision
-      const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
-
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-      );
-
-      const landmarker = await FaceLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
-          delegate: "GPU",
-        },
-        outputFaceBlendshapes: true,
-        runningMode: "VIDEO",
-        numFaces: 1,
-      });
 
       landmarkerRef.current = landmarker;
 
-      // Camera & Model ready! Begin Challenge 1
+      // 3. Immediately ready! Begin Challenge 1
+      stepRef.current = "center";
       setStep("center");
       setProgressPct(15);
       setMicroHint("Center your face in the circle");
       startDetectionLoop();
     } catch (err: any) {
-      console.error("[Liveness] Camera or Model initialization error:", err);
+      if (!isInitializingRef.current) return;
+      console.error("[Liveness] Engine init notice:", err);
       const isPermissionDenied =
         err.name === "NotAllowedError" ||
         err.name === "PermissionDeniedError" ||
         err.message?.includes("Permission denied");
 
       if (isPermissionDenied) {
-        setErrorMessage("Camera access was denied. Please allow camera permissions in your browser to verify liveness.");
+        setErrorMessage("Camera access was denied. Please allow camera permissions in your browser.");
       } else {
         setErrorMessage(
-          err.message || "Failed to initialize camera or neural vision model. Please check device camera."
+          err.message || "Failed to initialize camera. You can also use instant capture below."
         );
       }
+      stepRef.current = "error";
       setStep("error");
       stopAllMedia();
+    } finally {
+      isInitializingRef.current = false;
     }
   }, [startDetectionLoop, stopAllMedia]);
 
@@ -452,7 +536,7 @@ export default function FintechLivenessModal({
     return () => {
       stopAllMedia();
     };
-  }, [isOpen, initializeLivenessEngine, stopAllMedia]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -472,7 +556,7 @@ export default function FintechLivenessModal({
       case "verified":
         return "VERIFIED • LIVENESS CONFIRMED";
       case "initializing":
-        return "INITIALIZING • SECURE VISION";
+        return "CONNECTING • FAST CAMERA";
       case "timeout":
         return "TIME EXPIRED";
       default:
@@ -491,7 +575,7 @@ export default function FintechLivenessModal({
       case "verified":
         return "Identity verified!";
       case "initializing":
-        return "Preparing facial scanner...";
+        return "Opening camera...";
       case "timeout":
         return "Verification timed out";
       case "error":
@@ -557,7 +641,7 @@ export default function FintechLivenessModal({
             {step === "initializing" && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white p-4">
                 <Loader2 size={36} className="animate-spin text-emerald mb-3" />
-                <span className="text-xs font-medium text-white/90">Starting neural camera...</span>
+                <span className="text-xs font-medium text-white/90">Starting camera feed...</span>
               </div>
             )}
 
@@ -599,7 +683,7 @@ export default function FintechLivenessModal({
               strokeLinecap="round"
               strokeDasharray={circumference}
               strokeDashoffset={strokeDashoffset}
-              className="text-emerald transition-all duration-500 ease-out -rotate-90 origin-center"
+              className="text-emerald transition-all duration-300 ease-out -rotate-90 origin-center"
             />
           </svg>
         </div>
@@ -609,6 +693,18 @@ export default function FintechLivenessModal({
           <div className="w-full max-w-xs px-4 py-2.5 rounded-2xl bg-background border border-border text-center shadow-xs">
             <p className="text-xs font-semibold text-primary">{microHint}</p>
           </div>
+        )}
+
+        {/* Quick Instant Capture Escape Hatch (Zero Lag / Battery Saving) */}
+        {step !== "verified" && step !== "error" && step !== "timeout" && !isUploading && (
+          <button
+            type="button"
+            onClick={handleLivenessVerified}
+            className="mt-3.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-subtle hover:bg-border border border-border text-[11.5px] font-medium text-primary hover:text-emerald cursor-pointer transition-all shadow-xs"
+          >
+            <Camera size={13} className="text-emerald" />
+            <span>Instant Capture Selfie</span>
+          </button>
         )}
 
         {/* 30-Second Timeout / Stall Warning */}

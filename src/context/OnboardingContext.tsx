@@ -145,23 +145,23 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
             lastName: userObj.lastName || "",
             phone: userObj.phone || "",
             hostType: profile.hostType || "individual_owner",
-            companyName: profile.companyName || "",
-            companyRegNumber: profile.companyRegNumber || "",
-            operatingCity: profile.operatingCity || "Abuja",
-            operatingAreas: profile.operatingAreas || "",
-            bio: profile.bio || "",
-            residentialAddress: profile.residentialAddress || "",
-            dateOfBirth: profile.dateOfBirth || "",
-            idType: profile.idType || "nin",
-            idNumber: profile.idNumber || "",
-            idFrontUrl: profile.idFrontUrl || "",
-            idBackUrl: profile.idBackUrl || "",
-            selfieUrl: profile.selfieUrl || "",
-            authorityDocType: profile.authorityDocType || "deed_of_ownership",
-            authorityDocUrl: profile.authorityDocUrl || "",
-            bankName: profile.bankName || "Guaranty Trust Bank (GTBank)",
-            bankAccountNumber: profile.bankAccountNumber || "",
-            bankAccountName: profile.bankAccountName || "",
+            companyName: profile.companyName || localDraft.companyName || "",
+            companyRegNumber: profile.companyRegistrationNumber || profile.companyRegNumber || localDraft.companyRegNumber || "",
+            operatingCity: profile.operatingCity || localDraft.operatingCity || "Abuja",
+            operatingAreas: profile.operatingAreas || localDraft.operatingAreas || "",
+            bio: profile.bio || localDraft.bio || "",
+            residentialAddress: profile.residentialAddress || localDraft.residentialAddress || "",
+            dateOfBirth: profile.dateOfBirth || localDraft.dateOfBirth || "",
+            idType: profile.idType || localDraft.idType || "nin",
+            idNumber: profile.idNumber || localDraft.idNumber || "",
+            idFrontUrl: profile.identityDocumentUrl || profile.idFrontUrl || localDraft.idFrontUrl || "",
+            idBackUrl: profile.idDocumentBackUrl || profile.idBackUrl || localDraft.idBackUrl || "",
+            selfieUrl: profile.selfieUrl || localDraft.selfieUrl || "",
+            authorityDocType: profile.authorityDocType || localDraft.authorityDocType || "deed_of_ownership",
+            authorityDocUrl: profile.authorityDocUrl || localDraft.authorityDocUrl || "",
+            bankName: profile.bankName || localDraft.bankName || "Guaranty Trust Bank (GTBank)",
+            bankAccountNumber: profile.bankAccountNumber || localDraft.bankAccountNumber || "",
+            bankAccountName: profile.bankAccountName || localDraft.bankAccountName || "",
             verificationStatus: res.verificationStatus || "REGISTERED",
             reviewFeedback: res.reviewFeedback || null,
             onboardingStep: res.onboardingStep || 1,
@@ -256,7 +256,9 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
           idType: data.idType,
           idNumber: data.idNumber,
           idFrontUrl: data.idFrontUrl,
+          identityDocumentUrl: data.idFrontUrl,
           idBackUrl: data.idBackUrl,
+          idDocumentBackUrl: data.idBackUrl,
           selfieUrl: data.selfieUrl,
         });
       } else if (stepNumber === 4) {
@@ -290,11 +292,20 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const submitApplication = useCallback(async (): Promise<boolean> => {
     setIsSubmitting(true);
     try {
-      // Ensure latest step data is pushed first
+      // Ensure all step data is pushed and persisted first
+      await saveStepData(1);
+      await saveStepData(2);
+      await saveStepData(3);
       await saveStepData(4);
       if (data.propertyTitle) await saveStepData(5);
 
-      await api.submitHostOnboarding();
+      await api.submitHostOnboarding({
+        ...data,
+        identityDocumentUrl: data.idFrontUrl,
+        idDocumentBackUrl: data.idBackUrl,
+        companyRegistrationNumber: data.companyRegNumber,
+      });
+
       setData((prev) => ({
         ...prev,
         verificationStatus: "UNDER_REVIEW",

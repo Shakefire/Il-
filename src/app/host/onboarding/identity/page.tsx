@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useOnboarding } from "@/context/OnboardingContext";
@@ -21,7 +21,7 @@ import {
 import { api } from "@/lib/api";
 import { compressFile } from "@/lib/imageCompression";
 import DocumentPreviewModal from "@/components/onboarding/DocumentPreviewModal";
-import FintechLivenessModal from "@/components/FintechLivenessModal";
+import FintechLivenessModal, { preloadLivenessEngine } from "@/components/FintechLivenessModal";
 
 const ID_TYPES = [
   { id: "nin", label: "National Identification Number (NIN)", desc: "NIN Slip or Digital NIN Card" },
@@ -35,6 +35,11 @@ export default function IdentityStepPage() {
   const { data, updateData, saveStepData } = useOnboarding();
   const [error, setError] = useState<string | null>(null);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
+
+  // Preload neural vision engine in background for instant camera startup
+  useEffect(() => {
+    preloadLivenessEngine().catch(() => null);
+  }, []);
 
   // Modal preview state
   const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; title: string; url: string }>({
@@ -126,8 +131,8 @@ export default function IdentityStepPage() {
       return;
     }
 
-    // Background save to backend
-    saveStepData(3).catch(() => null);
+    // Ensure data is saved to backend before navigating
+    await saveStepData(3);
     router.push("/host/onboarding/authority");
   };
 

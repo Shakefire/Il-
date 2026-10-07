@@ -349,11 +349,15 @@ export const api = {
     return body;
   },
 
-  async submitHostOnboarding() {
+  async submitHostOnboarding(payload?: any) {
     const res = await fetch("/api/host/onboarding/submit", {
       method: "POST",
-      headers: getAuthHeader(),
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
       credentials: "include",
+      body: payload ? JSON.stringify(payload) : undefined,
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "Failed to submit application");

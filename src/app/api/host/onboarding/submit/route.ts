@@ -11,7 +11,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await hostsService.submitOnboardingForReview(session.userId);
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch {
+      // body is optional
+    }
+    const result = await hostsService.submitOnboardingForReview(session.userId, body);
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Failed to submit onboarding application" }, { status: 400 });
