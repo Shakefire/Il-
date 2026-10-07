@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ShieldCheck,
   Check,
@@ -538,12 +539,9 @@ export default function FintechLivenessModal({
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
-  // SVG Progress Ring calculations (radius 138, circumference ~867)
+  // SVG Progress Ring radius (138)
   const radius = 138;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (progressPct / 100) * circumference;
 
   const getStepBadge = () => {
     switch (step) {
@@ -584,182 +582,217 @@ export default function FintechLivenessModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-md bg-surface border border-border rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden">
-        {/* Ambient Top Glow */}
-        <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-32 bg-emerald/10 rounded-full blur-2xl pointer-events-none" />
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Heavy Blur Backdrop Overlay */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={() => {
+              stopAllMedia();
+              onClose();
+            }}
+            className="fixed inset-0 bg-black/75 backdrop-blur-xl"
+          />
 
-        {/* Close Modal Button */}
-        <button
-          onClick={() => {
-            stopAllMedia();
-            onClose();
-          }}
-          className="absolute top-4 right-4 p-2 rounded-full text-primary-muted hover:text-primary hover:bg-black/5 transition-colors cursor-pointer"
-          aria-label="Close liveness verification"
-        >
-          <X size={20} />
-        </button>
+          {/* Modal Card with Spring Physics */}
+          <motion.div
+            initial={{ scale: 0.95, y: 20, opacity: 0 }}
+            animate={{ scale: 1, y: 0, opacity: 1 }}
+            exit={{ scale: 0.95, y: 20, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            className="relative w-full max-w-md bg-white border border-[#E7E5E0] rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden z-10"
+          >
+            {/* Ambient Top Glow */}
+            <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-32 bg-[#0B5D45]/10 rounded-full blur-2xl pointer-events-none" />
 
-        {/* Header Eyebrow & Brand Trust Badge */}
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-light text-emerald text-[11px] font-bold uppercase tracking-wider mb-2">
-          <ShieldCheck size={14} />
-          <span>Biometric Liveness Verification</span>
-        </div>
+            {/* Close Modal Button */}
+            <button
+              onClick={() => {
+                stopAllMedia();
+                onClose();
+              }}
+              className="absolute top-4 right-4 p-2 rounded-full text-[#6B6B67] hover:text-[#171717] hover:bg-black/5 transition-colors cursor-pointer"
+              aria-label="Close liveness verification"
+            >
+              <X size={20} />
+            </button>
 
-        {/* Sub-headline */}
-        <h2 className="text-xl sm:text-2xl font-bold text-primary tracking-tight">
-          {getInstructionHeadline()}
-        </h2>
+            {/* Header Eyebrow & Brand Trust Badge */}
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EDF5F2] text-[#0B5D45] text-[11px] font-bold uppercase tracking-wider mb-2 border border-[#0B5D45]/15">
+              <ShieldCheck size={14} />
+              <span>Biometric Liveness Verification</span>
+            </div>
 
-        {/* Challenge Step Badge */}
-        <div className="mt-1 text-xs font-semibold text-emerald uppercase tracking-wider">
-          {getStepBadge()}
-        </div>
+            {/* Sub-headline */}
+            <h2 className="text-xl sm:text-2xl font-bold text-[#171717] tracking-tight">
+              {getInstructionHeadline()}
+            </h2>
 
-        {/* Viewfinder Frame with SVG Animated Progress Ring */}
-        <div className="relative my-6 flex items-center justify-center">
-          {/* Circular Viewport */}
-          <div className="relative w-64 h-64 sm:w-72 sm:h-72 rounded-full overflow-hidden border-4 border-surface shadow-inner bg-charcoal">
-            {/* Live Video Feed (Mirrored Horizontally) */}
-            <video
-              ref={videoRef}
-              playsInline
-              muted
-              autoPlay
-              className={`w-full h-full object-cover scale-x-[-1] transition-opacity duration-300 ${
-                step === "initializing" ? "opacity-30" : "opacity-100"
-              }`}
-            />
+            {/* Challenge Step Badge */}
+            <div className="mt-1 text-xs font-semibold text-[#0B5D45] uppercase tracking-wider">
+              {getStepBadge()}
+            </div>
 
-            {/* Subtle Alignment Oval Guide (Dotted) */}
+            {/* Viewfinder Frame with SVG Animated Progress Ring */}
+            <div className="relative my-6 flex items-center justify-center">
+              {/* Circular Viewport */}
+              <div className="relative w-64 h-64 sm:w-72 sm:h-72 rounded-full overflow-hidden border-4 border-white shadow-inner bg-[#1A1A1A]">
+                {/* Live Video Feed (Mirrored Horizontally) */}
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  autoPlay
+                  className={`w-full h-full object-cover scale-x-[-1] transition-opacity duration-300 ${
+                    step === "initializing" ? "opacity-30" : "opacity-100"
+                  }`}
+                />
+
+                {/* Subtle Alignment Oval Guide (Dotted) */}
+                {step !== "verified" && step !== "error" && step !== "timeout" && (
+                  <div className="absolute inset-8 rounded-full border-2 border-dashed border-white/35 pointer-events-none animate-pulse" />
+                )}
+
+                {/* Initializing Spinner Overlay */}
+                {step === "initializing" && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white p-4">
+                    <Loader2 size={36} className="animate-spin text-[#0B5D45] mb-3" />
+                    <span className="text-xs font-medium text-white/90">Starting camera feed...</span>
+                  </div>
+                )}
+
+                {/* Live Instruction Ticker (Inside Bottom Edge of Camera Circle) */}
+                {step !== "verified" && step !== "error" && step !== "timeout" && (
+                  <div className="absolute inset-x-0 bottom-0 pt-8 pb-3.5 bg-gradient-to-t from-black/90 via-black/55 to-transparent flex flex-col items-center justify-end pointer-events-none z-10">
+                    <AnimatePresence mode="wait">
+                      <motion.p
+                        key={microHint}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                        className="text-xs sm:text-[13px] font-semibold text-white tracking-wide text-center px-4 drop-shadow-sm"
+                      >
+                        {microHint}
+                      </motion.p>
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {/* Instant Green Success Overlay Checkmark */}
+                {step === "verified" && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0B5D45]/90 text-white animate-in zoom-in-95 duration-200 z-20">
+                    <div className="w-16 h-16 rounded-full bg-white text-[#0B5D45] flex items-center justify-center shadow-lg mb-2 animate-bounce">
+                      <Check size={36} strokeWidth={3} />
+                    </div>
+                    <span className="text-sm font-bold tracking-tight">Verified</span>
+                    <span className="text-[11px] text-white/80 mt-0.5">Capturing biometric profile</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic SVG Animated Progress Ring with Framer Motion pathLength */}
+              <svg
+                className="absolute -inset-2.5 w-[calc(100%+20px)] h-[calc(100%+20px)] pointer-events-none"
+                viewBox="0 0 300 300"
+              >
+                {/* Background Ring Track */}
+                <circle
+                  cx="150"
+                  cy="150"
+                  r={radius}
+                  fill="none"
+                  stroke="#E7E5E0"
+                  strokeWidth="5"
+                />
+                {/* Animated Progress Stroke */}
+                <motion.circle
+                  cx="150"
+                  cy="150"
+                  r={radius}
+                  fill="none"
+                  stroke="#0B5D45"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                  className="-rotate-90 origin-center"
+                  initial={{ pathLength: 0 }}
+                  animate={{ pathLength: progressPct / 100 }}
+                  transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                />
+              </svg>
+            </div>
+
+            {/* Quick Liveness Action Trigger / Escape Hatch */}
+            {step !== "verified" && step !== "error" && step !== "timeout" && !isUploading && (
+              <button
+                type="button"
+                onClick={handleLivenessVerified}
+                className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#FAFAF8] hover:bg-[#F0EFEA] border border-[#E7E5E0] text-[11.5px] font-medium text-[#171717] hover:text-[#0B5D45] cursor-pointer transition-all shadow-xs"
+              >
+                <Zap size={13} className="text-[#0B5D45]" />
+                <span>Start Liveness Scan</span>
+              </button>
+            )}
+
+            {/* 30-Second Timeout / Stall Warning */}
             {step !== "verified" && step !== "error" && step !== "timeout" && (
-              <div className="absolute inset-8 rounded-full border-2 border-dashed border-white/35 pointer-events-none animate-pulse" />
-            )}
-
-            {/* Initializing Spinner Overlay */}
-            {step === "initializing" && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white p-4">
-                <Loader2 size={36} className="animate-spin text-emerald mb-3" />
-                <span className="text-xs font-medium text-white/90">Starting camera feed...</span>
+              <div className="mt-3 flex items-center justify-between w-full max-w-xs text-[11px] text-[#8B8B86] px-1">
+                <span className="flex items-center gap-1">
+                  <Lock size={12} />
+                  <span>Encrypted on device</span>
+                </span>
+                <span className="font-mono font-medium">{timeLeft}s remaining</span>
               </div>
             )}
 
-            {/* Instant Green Success Overlay Checkmark */}
-            {step === "verified" && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-emerald/90 text-white animate-in zoom-in-95 duration-200">
-                <div className="w-16 h-16 rounded-full bg-white text-emerald flex items-center justify-center shadow-lg mb-2 animate-bounce">
-                  <Check size={36} strokeWidth={3} />
-                </div>
-                <span className="text-sm font-bold tracking-tight">Verified</span>
-                <span className="text-[11px] text-white/80 mt-0.5">Capturing biometric profile</span>
+            {/* Edge Case 1: Camera Permission Denied / Error Screen */}
+            {step === "error" && (
+              <div className="w-full max-w-xs p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-center space-y-3 mt-2">
+                <AlertTriangle size={24} className="mx-auto text-rose-600" />
+                <p className="text-xs leading-relaxed font-medium">
+                  {errorMessage || "Unable to access front camera. Please check your browser permissions."}
+                </p>
+                <button
+                  onClick={initializeLivenessEngine}
+                  className="w-full h-10 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow cursor-pointer"
+                >
+                  <RotateCcw size={14} />
+                  <span>Enable Camera &amp; Retry</span>
+                </button>
               </div>
             )}
-          </div>
 
-          {/* Dynamic SVG Animated Progress Ring */}
-          <svg
-            className="absolute -inset-2.5 w-[calc(100%+20px)] h-[calc(100%+20px)] pointer-events-none"
-            viewBox="0 0 300 300"
-          >
-            {/* Background Ring Track */}
-            <circle
-              cx="150"
-              cy="150"
-              r={radius}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="5"
-              className="text-border-subtle"
-            />
-            {/* Animated Progress Stroke */}
-            <circle
-              cx="150"
-              cy="150"
-              r={radius}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="6"
-              strokeLinecap="round"
-              strokeDasharray={circumference}
-              strokeDashoffset={strokeDashoffset}
-              className="text-emerald transition-all duration-300 ease-out -rotate-90 origin-center"
-            />
-          </svg>
+            {/* Edge Case 2: 30-Second Timeout Screen */}
+            {step === "timeout" && (
+              <div className="w-full max-w-xs p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-center space-y-3 mt-2">
+                <AlertTriangle size={24} className="mx-auto text-amber-600" />
+                <p className="text-xs leading-relaxed font-medium">
+                  Verification session timed out. For security, active liveness challenges must be completed within 30 seconds.
+                </p>
+                <button
+                  onClick={initializeLivenessEngine}
+                  className="w-full h-10 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow cursor-pointer"
+                >
+                  <RotateCcw size={14} />
+                  <span>Restart Verification</span>
+                </button>
+              </div>
+            )}
+
+            {/* Uploading State Indicator */}
+            {isUploading && (
+              <div className="mt-4 flex items-center gap-2 text-xs font-semibold text-[#0B5D45]">
+                <Loader2 size={16} className="animate-spin" />
+                <span>Encrypting &amp; uploading biometric proof...</span>
+              </div>
+            )}
+          </motion.div>
         </div>
-
-        {/* Real-time Guidance Micro-Prompt Box */}
-        {step !== "error" && step !== "timeout" && (
-          <div className="w-full max-w-xs px-4 py-2.5 rounded-2xl bg-background border border-border text-center shadow-xs">
-            <p className="text-xs font-semibold text-primary">{microHint}</p>
-          </div>
-        )}
-
-        {/* Quick Instant Capture Escape Hatch (Zero Lag / Battery Saving) */}
-        {step !== "verified" && step !== "error" && step !== "timeout" && !isUploading && (
-          <button
-            type="button"
-            onClick={handleLivenessVerified}
-            className="mt-3.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-subtle hover:bg-border border border-border text-[11.5px] font-medium text-primary hover:text-emerald cursor-pointer transition-all shadow-xs"
-          >
-            <Camera size={13} className="text-emerald" />
-            <span>Instant Capture Selfie</span>
-          </button>
-        )}
-
-        {/* 30-Second Timeout / Stall Warning */}
-        {step !== "verified" && step !== "error" && step !== "timeout" && (
-          <div className="mt-3 flex items-center justify-between w-full max-w-xs text-[11px] text-primary-muted px-1">
-            <span className="flex items-center gap-1">
-              <Lock size={12} />
-              <span>Encrypted on device</span>
-            </span>
-            <span className="font-mono font-medium">{timeLeft}s remaining</span>
-          </div>
-        )}
-
-        {/* Edge Case 1: Camera Permission Denied / Error Screen */}
-        {step === "error" && (
-          <div className="w-full max-w-xs p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-center space-y-3 mt-2">
-            <AlertTriangle size={24} className="mx-auto text-rose-600" />
-            <p className="text-xs leading-relaxed font-medium">
-              {errorMessage || "Unable to access front camera. Please check your browser permissions."}
-            </p>
-            <button
-              onClick={initializeLivenessEngine}
-              className="w-full h-10 rounded-xl bg-emerald hover:bg-emerald-hover text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow cursor-pointer"
-            >
-              <RotateCcw size={14} />
-              <span>Enable Camera &amp; Retry</span>
-            </button>
-          </div>
-        )}
-
-        {/* Edge Case 2: 30-Second Timeout Screen */}
-        {step === "timeout" && (
-          <div className="w-full max-w-xs p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-center space-y-3 mt-2">
-            <AlertTriangle size={24} className="mx-auto text-amber-600" />
-            <p className="text-xs leading-relaxed font-medium">
-              Verification session timed out. For security, active liveness challenges must be completed within 30 seconds.
-            </p>
-            <button
-              onClick={initializeLivenessEngine}
-              className="w-full h-10 rounded-xl bg-emerald hover:bg-emerald-hover text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow cursor-pointer"
-            >
-              <RotateCcw size={14} />
-              <span>Restart Verification</span>
-            </button>
-          </div>
-        )}
-
-        {/* Uploading State Indicator */}
-        {isUploading && (
-          <div className="mt-4 flex items-center gap-2 text-xs font-semibold text-emerald">
-            <Loader2 size={16} className="animate-spin" />
-            <span>Encrypting &amp; uploading biometric proof...</span>
-          </div>
-        )}
-      </div>
-    </div>
+      )}
+    </AnimatePresence>
   );
 }
