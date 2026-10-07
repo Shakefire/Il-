@@ -59,7 +59,9 @@ export default function Navbar() {
       "/signup",
       "/forgot-password",
       "/reset-password",
-    ].includes(pathname) || pathname?.startsWith("/host/onboarding");
+    ].includes(pathname) ||
+    pathname?.startsWith("/host/onboarding") ||
+    pathname?.startsWith("/admin");
 
   if (isAuthPage) return null;
 
@@ -90,50 +92,17 @@ export default function Navbar() {
         <nav className="hidden md:flex items-center space-x-10 text-[15px] font-medium text-[#DCDCDA]">
           {isHostMode ? (
             <>
-              {/* Host Specific Navigation */}
+              {/* Host Specific Navigation: Centralized, singular Host Dashboard */}
               <Link
                 href="/host/dashboard"
                 className={`transition-colors py-2 relative hover:text-white ${
                   pathname === "/host/dashboard" ? "text-white font-semibold" : ""
                 }`}
               >
-                <span>Dashboard</span>
+                <span>Host Dashboard</span>
                 {pathname === "/host/dashboard" && (
                   <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45] rounded-full" />
                 )}
-              </Link>
-
-              <Link
-                href="/host/dashboard"
-                className="transition-colors py-2 relative hover:text-white"
-              >
-                <span>Listings</span>
-              </Link>
-
-              <Link
-                href="/messages"
-                className={`transition-colors py-2 relative hover:text-white ${
-                  pathname === "/messages" ? "text-white font-semibold" : ""
-                }`}
-              >
-                <span>Inbox</span>
-                {pathname === "/messages" && (
-                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45] rounded-full" />
-                )}
-              </Link>
-
-              <Link
-                href="/host/dashboard"
-                className="transition-colors py-2 relative hover:text-white"
-              >
-                <span>Calendar</span>
-              </Link>
-
-              <Link
-                href="/host/dashboard"
-                className="transition-colors py-2 relative hover:text-white"
-              >
-                <span>Insights</span>
               </Link>
             </>
           ) : (
@@ -164,17 +133,31 @@ export default function Navbar() {
               </Link>
 
               {isAuthenticated && (
-                <Link
-                  href="/trips"
-                  className={`transition-colors py-2 relative hover:text-white ${
-                    isTripsActive ? "text-white font-semibold" : ""
-                  }`}
-                >
-                  <span>Trips</span>
-                  {isTripsActive && (
-                    <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-                  )}
-                </Link>
+                <>
+                  <Link
+                    href="/trips"
+                    className={`transition-colors py-2 relative hover:text-white ${
+                      isTripsActive ? "text-white font-semibold" : ""
+                    }`}
+                  >
+                    <span>Trips</span>
+                    {isTripsActive && (
+                      <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+                    )}
+                  </Link>
+
+                  <Link
+                    href="/messages"
+                    className={`transition-colors py-2 relative hover:text-white ${
+                      pathname === "/messages" ? "text-white font-semibold" : ""
+                    }`}
+                  >
+                    <span>Messages</span>
+                    {pathname === "/messages" && (
+                      <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+                    )}
+                  </Link>
+                </>
               )}
 
               {isHost ? (
@@ -457,13 +440,22 @@ export default function Navbar() {
           </Link>
 
           {isAuthenticated && (
-            <Link
-              href="/trips"
-              onClick={() => setMobileMenuOpen(false)}
-              className="block py-2 text-white font-medium"
-            >
-              My Trips
-            </Link>
+            <>
+              <Link
+                href="/trips"
+                onClick={() => setMobileMenuOpen(false)}
+                className="block py-2 text-white font-medium"
+              >
+                My Trips
+              </Link>
+              <Link
+                href="/messages"
+                onClick={() => setMobileMenuOpen(false)}
+                className="block py-2 text-white font-medium"
+              >
+                Messages
+              </Link>
+            </>
           )}
 
           {isHost ? (

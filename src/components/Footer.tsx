@@ -13,7 +13,9 @@ export default function Footer() {
       "/register",
       "/forgot-password",
       "/reset-password",
-    ].includes(pathname) || pathname?.startsWith("/host/onboarding");
+    ].includes(pathname) ||
+    pathname?.startsWith("/host/onboarding") ||
+    pathname?.startsWith("/admin");
 
   if (isAuthPage) return null;
 

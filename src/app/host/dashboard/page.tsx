@@ -549,22 +549,38 @@ export default function HostDashboardPage() {
               transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
               className="w-full"
             >
-              <div className="w-full bg-white border border-amber-200/90 rounded-xl p-4 sm:p-5 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4 relative overflow-hidden">
-                {/* Subtle amber accent bar */}
-                <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-amber-500" />
+              <div className={`w-full ${
+                onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                  ? "bg-[#F4F8FC] border border-[#CDE1F3]"
+                  : "bg-white border border-amber-200/90"
+              } rounded-xl p-4 sm:p-5 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4 relative overflow-hidden`}>
+                {/* Accent bar */}
+                <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
+                  onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                    ? "bg-[#2A75C9]"
+                    : "bg-amber-500"
+                }`} />
 
                 <div className="space-y-1 pl-2">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200">
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                        ? "bg-blue-100 text-blue-800 border border-blue-200"
+                        : onboardingStatus.verificationStatus === "ACTION_REQUIRED"
+                        ? "bg-amber-100 text-amber-800 border border-amber-200"
+                        : "bg-amber-100 text-amber-800 border border-amber-200"
+                    }`}>
                       {onboardingStatus.verificationStatus === "UNDER_REVIEW"
-                        ? "Under Review"
+                        ? "Review in Progress"
                         : onboardingStatus.verificationStatus === "ACTION_REQUIRED"
                         ? "Action Required"
                         : "Verification Needed"}
                     </span>
-                    <span className="text-xs font-semibold text-[#171717]">
-                      Complete Your Host Profile
-                    </span>
+                    {onboardingStatus.verificationStatus !== "UNDER_REVIEW" && (
+                      <span className="text-xs font-semibold text-[#171717]">
+                        Complete Your Host Profile
+                      </span>
+                    )}
                   </div>
                   <h3 className="text-sm sm:text-base font-semibold text-[#171717] mt-0.5">
                     {onboardingStatus.verificationStatus === "UNDER_REVIEW"
@@ -583,12 +599,19 @@ export default function HostDashboardPage() {
                 </div>
 
                 <div className="flex items-center gap-3 pl-2 md:pl-0 shrink-0">
-                  <div className="text-right mr-1 hidden sm:block">
-                    <span className="text-[10px] text-[#8B8B86] uppercase font-semibold block">Progress</span>
-                    <span className="text-sm font-bold text-[#0B5D45]">
-                      {onboardingStatus.progressPct || 25}%
-                    </span>
-                  </div>
+                  {onboardingStatus.verificationStatus === "UNDER_REVIEW" ? (
+                    <div className="flex items-center gap-2 mr-2 text-blue-700 bg-blue-100/70 border border-blue-200/80 px-3 py-1.5 rounded-xl">
+                      <Loader2 size={14} className="animate-spin text-blue-600" />
+                      <span className="text-xs font-semibold whitespace-nowrap">Pending Admin Approval</span>
+                    </div>
+                  ) : (
+                    <div className="text-right mr-1 hidden sm:block">
+                      <span className="text-[10px] text-[#8B8B86] uppercase font-semibold block">Progress</span>
+                      <span className="text-sm font-bold text-[#0B5D45]">
+                        {onboardingStatus.progressPct || 25}%
+                      </span>
+                    </div>
+                  )}
 
                   <button
                     type="button"
@@ -602,7 +625,7 @@ export default function HostDashboardPage() {
                     className="px-4 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
                   >
                     <ShieldCheck size={14} />
-                    <span>Verify Identity</span>
+                    <span>{onboardingStatus.verificationStatus === "UNDER_REVIEW" ? "Review & Edit Submission" : "Verify Identity"}</span>
                   </button>
 
                   <button
