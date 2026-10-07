@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { motion, AnimatePresence } from "framer-motion";
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -57,12 +58,21 @@ export default function Navbar() {
   const isHost = user?.role === "host";
   const isAdmin = user?.role === "admin";
 
+  const isHostUrl = pathname?.startsWith("/host") || pathname === "/become-a-host";
+  const [activeMode, setActiveMode] = useState<"guest" | "host">(isHostUrl ? "host" : "guest");
+
+  useEffect(() => {
+    setActiveMode(isHostUrl ? "host" : "guest");
+  }, [isHostUrl]);
+
   const handleLogout = async () => {
     setProfileDropdownOpen(false);
     setMobileMenuOpen(false);
     await logout();
     router.push("/");
   };
+
+  const isHostMode = activeMode === "host";
 
   return (
     <header className="sticky top-0 z-50 bg-[#1A1A1A] border-b border-[#2A2A2A] text-white">
@@ -75,72 +85,123 @@ export default function Navbar() {
           <span className="w-2 h-2 rounded-full bg-[#0B5D45] mt-1 group-hover:scale-125 transition-transform" />
         </Link>
 
-        {/* Main Nav (Center) - Dynamic based on Auth Role */}
+        {/* Main Nav (Center) - Dynamic based on Mode */}
         <nav className="hidden md:flex items-center space-x-10 text-[15px] font-medium text-[#DCDCDA]">
-          <Link
-            href="/"
-            className={`transition-colors py-2 relative hover:text-white ${
-              isHomeActive ? "text-white font-semibold" : ""
-            }`}
-          >
-            <span>Home</span>
-            {isHomeActive && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-            )}
-          </Link>
+          {isHostMode ? (
+            <>
+              {/* Host Specific Navigation */}
+              <Link
+                href="/host/dashboard"
+                className={`transition-colors py-2 relative hover:text-white ${
+                  pathname === "/host/dashboard" ? "text-white font-semibold" : ""
+                }`}
+              >
+                <span>Dashboard</span>
+                {pathname === "/host/dashboard" && (
+                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45] rounded-full" />
+                )}
+              </Link>
 
-          <Link
-            href="/search"
-            className={`transition-colors py-2 relative hover:text-white ${
-              isSearchActive ? "text-white font-semibold" : ""
-            }`}
-          >
-            <span>Explore</span>
-            {isSearchActive && (
-              <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-            )}
-          </Link>
+              <Link
+                href="/host/dashboard"
+                className="transition-colors py-2 relative hover:text-white"
+              >
+                <span>Listings</span>
+              </Link>
 
-          {/* Trips - Only for authenticated users */}
-          {isAuthenticated && (
-            <Link
-              href="/trips"
-              className={`transition-colors py-2 relative hover:text-white ${
-                isTripsActive ? "text-white font-semibold" : ""
-              }`}
-            >
-              <span>Trips</span>
-              {isTripsActive && (
-                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-              )}
-            </Link>
-          )}
+              <Link
+                href="/messages"
+                className={`transition-colors py-2 relative hover:text-white ${
+                  pathname === "/messages" ? "text-white font-semibold" : ""
+                }`}
+              >
+                <span>Inbox</span>
+                {pathname === "/messages" && (
+                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0B5D45] rounded-full" />
+                )}
+              </Link>
 
-          {/* Host Portal / Become a host */}
-          {isHost ? (
-            <Link
-              href="/host/dashboard"
-              className={`transition-colors py-2 relative hover:text-white ${
-                isHostActive ? "text-white font-semibold" : ""
-              }`}
-            >
-              <span>Host Dashboard</span>
-              {isHostActive && (
-                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
-              )}
-            </Link>
+              <Link
+                href="/host/dashboard"
+                className="transition-colors py-2 relative hover:text-white"
+              >
+                <span>Calendar</span>
+              </Link>
+
+              <Link
+                href="/host/dashboard"
+                className="transition-colors py-2 relative hover:text-white"
+              >
+                <span>Insights</span>
+              </Link>
+            </>
           ) : (
-            <Link
-              href={isAuthenticated ? "/signup" : "/signup"}
-              className={`transition-colors py-2 relative hover:text-white ${
-                isHostActive ? "text-white font-semibold" : ""
-              }`}
-            >
-              <span>Partner as Host</span>
-              {isHostActive && (
-                <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+            <>
+              {/* Guest / Public Navigation */}
+              <Link
+                href="/"
+                className={`transition-colors py-2 relative hover:text-white ${
+                  isHomeActive ? "text-white font-semibold" : ""
+                }`}
+              >
+                <span>Home</span>
+                {isHomeActive && (
+                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+                )}
+              </Link>
+
+              <Link
+                href="/search"
+                className={`transition-colors py-2 relative hover:text-white ${
+                  isSearchActive ? "text-white font-semibold" : ""
+                }`}
+              >
+                <span>Explore</span>
+                {isSearchActive && (
+                  <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+                )}
+              </Link>
+
+              {isAuthenticated && (
+                <Link
+                  href="/trips"
+                  className={`transition-colors py-2 relative hover:text-white ${
+                    isTripsActive ? "text-white font-semibold" : ""
+                  }`}
+                >
+                  <span>Trips</span>
+                  {isTripsActive && (
+                    <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+                  )}
+                </Link>
               )}
-            </Link>
+
+              {isHost ? (
+                <Link
+                  href="/host/dashboard"
+                  className={`transition-colors py-2 relative hover:text-white ${
+                    isHostActive ? "text-white font-semibold" : ""
+                  }`}
+                >
+                  <span>Host Portal</span>
+                  {isHostActive && (
+                    <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+                  )}
+                </Link>
+              ) : (
+                <Link
+                  href="/become-a-host"
+                  className={`transition-colors py-2 relative hover:text-white ${
+                    isHostActive ? "text-white font-semibold" : ""
+                  }`}
+                >
+                  <span>Partner as Host</span>
+                  {isHostActive && (
+                    <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-white rounded-full" />
+                  )}
+                </Link>
+              )}
+            </>
           )}
 
           {/* Admin link - STRICTLY ONLY for verified admin users */}
@@ -161,15 +222,49 @@ export default function Navbar() {
         </nav>
 
         {/* Top Right Utilities & Auth Actions */}
-        <div className="hidden lg:flex items-center space-x-6 text-[14px]">
+        <div className="hidden lg:flex items-center space-x-5 text-[14px]">
+          {/* Segmented Mode Toggle (Switch to Guest / Switch to Host) */}
+          {(isHost || isAdmin || isHostUrl) && (
+            <div className="flex items-center bg-[#252525] p-1 rounded-xl border border-[#333333] text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveMode("guest");
+                  router.push("/");
+                }}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  !isHostMode
+                    ? "bg-[#383838] text-white shadow-xs"
+                    : "text-white/60 hover:text-white"
+                }`}
+              >
+                Guest
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveMode("host");
+                  router.push("/host/dashboard");
+                }}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  isHostMode
+                    ? "bg-[#0B5D45] text-white shadow-xs font-bold"
+                    : "text-white/60 hover:text-white"
+                }`}
+              >
+                Host
+              </button>
+            </div>
+          )}
+
           {/* Utility Icons (Bell & Heart) */}
-          <div className="flex items-center space-x-2 text-white/85 border-r border-[#333333] pr-5">
+          <div className="flex items-center space-x-2 text-white/85 border-r border-[#333333] pr-4">
             <button
               type="button"
               className="p-2 rounded-lg hover:text-white hover:bg-white/10 transition-colors relative"
               aria-label="Notifications"
             >
-              <Bell size={19} className="text-white/90 hover:text-white" />
+              <Bell size={18} className="text-white/90 hover:text-white" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#0B5D45]" />
             </button>
 
@@ -180,7 +275,7 @@ export default function Navbar() {
               aria-label="Saved favorites"
             >
               <Heart
-                size={19}
+                size={18}
                 className={favCount > 0 ? "fill-[#0B5D45] text-[#0B5D45]" : "text-white/90 hover:text-white"}
               />
             </button>
@@ -203,80 +298,91 @@ export default function Navbar() {
                 <ChevronDown size={14} className="text-white/70" />
               </button>
 
-              {/* Profile Dropdown */}
-              {profileDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-56 bg-[#222222] border border-[#333333] rounded-xl shadow-xl py-2 z-50 text-sm">
-                  <div className="px-4 py-2 border-b border-[#333333]">
-                    <p className="font-semibold text-white">
-                      {user.firstName} {user.lastName}
-                    </p>
-                    <p className="text-xs text-[#8B8B86] truncate">{user.email}</p>
-                    <span className="inline-block mt-1 text-[11px] font-medium px-2 py-0.5 rounded bg-[#0B5D45]/30 text-[#8CE3C3] uppercase tracking-wider">
-                      {user.role}
-                    </span>
-                  </div>
-
-                  <Link
-                    href="/profile"
-                    onClick={() => setProfileDropdownOpen(false)}
-                    className="flex items-center gap-2.5 px-4 py-2.5 text-white/90 hover:text-white hover:bg-white/5 transition-colors"
+              {/* Profile Dropdown with Framer Motion Animation */}
+              <AnimatePresence>
+                {profileDropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ type: "spring", stiffness: 450, damping: 35 }}
+                    style={{ transformOrigin: "top right" }}
+                    className="absolute right-0 mt-2 w-60 bg-[#222222] border border-[#333333] rounded-2xl shadow-2xl py-2 z-50 text-sm overflow-hidden"
                   >
-                    <UserIcon size={16} />
-                    <span>My Profile</span>
-                  </Link>
+                    <div className="px-4 py-3 border-b border-[#333333]">
+                      <p className="font-semibold text-white">
+                        {user.firstName} {user.lastName}
+                      </p>
+                      <p className="text-xs text-[#8B8B86] truncate max-w-[200px] whitespace-nowrap overflow-hidden text-ellipsis block mt-0.5">
+                        {user.email}
+                      </p>
+                      <span className="inline-block mt-1.5 text-[10px] font-bold px-2 py-0.5 rounded bg-[#0B5D45]/30 text-[#8CE3C3] uppercase tracking-wider">
+                        {user.role}
+                      </span>
+                    </div>
 
-                  <Link
-                    href="/trips"
-                    onClick={() => setProfileDropdownOpen(false)}
-                    className="flex items-center gap-2.5 px-4 py-2.5 text-white/90 hover:text-white hover:bg-white/5 transition-colors"
-                  >
-                    <Calendar size={16} />
-                    <span>My Trips</span>
-                  </Link>
-
-                  {isHost ? (
                     <Link
-                      href="/host/dashboard"
+                      href="/profile"
                       onClick={() => setProfileDropdownOpen(false)}
                       className="flex items-center gap-2.5 px-4 py-2.5 text-white/90 hover:text-white hover:bg-white/5 transition-colors"
                     >
-                      <Building2 size={16} />
-                      <span>Host Dashboard</span>
+                      <UserIcon size={16} />
+                      <span>My Profile</span>
                     </Link>
-                  ) : (
+
                     <Link
-                      href="/become-a-host"
+                      href="/trips"
                       onClick={() => setProfileDropdownOpen(false)}
                       className="flex items-center gap-2.5 px-4 py-2.5 text-white/90 hover:text-white hover:bg-white/5 transition-colors"
                     >
-                      <Building2 size={16} />
-                      <span>Become a Host</span>
+                      <Calendar size={16} />
+                      <span>My Trips</span>
                     </Link>
-                  )}
 
-                  {isAdmin && (
-                    <Link
-                      href="/admin"
-                      onClick={() => setProfileDropdownOpen(false)}
-                      className="flex items-center gap-2.5 px-4 py-2.5 text-amber-400 hover:text-amber-300 hover:bg-white/5 transition-colors border-t border-[#333333]"
-                    >
-                      <ShieldCheck size={16} />
-                      <span>Admin Management</span>
-                    </Link>
-                  )}
+                    {isHost ? (
+                      <Link
+                        href="/host/dashboard"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-white/90 hover:text-white hover:bg-white/5 transition-colors"
+                      >
+                        <Building2 size={16} />
+                        <span>Host Dashboard</span>
+                      </Link>
+                    ) : (
+                      <Link
+                        href="/become-a-host"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-white/90 hover:text-white hover:bg-white/5 transition-colors"
+                      >
+                        <Building2 size={16} />
+                        <span>Become a Host</span>
+                      </Link>
+                    )}
 
-                  <div className="border-t border-[#333333] pt-1 mt-1">
-                    <button
-                      type="button"
-                      onClick={handleLogout}
-                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-left"
-                    >
-                      <LogOut size={16} />
-                      <span>Log Out</span>
-                    </button>
-                  </div>
-                </div>
-              )}
+                    {isAdmin && (
+                      <Link
+                        href="/admin"
+                        onClick={() => setProfileDropdownOpen(false)}
+                        className="flex items-center gap-2.5 px-4 py-2.5 text-amber-400 hover:text-amber-300 hover:bg-white/5 transition-colors border-t border-[#333333]"
+                      >
+                        <ShieldCheck size={16} />
+                        <span>Admin Management</span>
+                      </Link>
+                    )}
+
+                    <div className="border-t border-[#333333] pt-1 mt-1">
+                      <button
+                        type="button"
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors text-left cursor-pointer"
+                      >
+                        <LogOut size={16} />
+                        <span>Log Out</span>
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           ) : (
             <div className="flex items-center space-x-3">

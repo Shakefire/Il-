@@ -770,10 +770,6 @@ export const hostsService = {
     if (data.bankAccountNumber) profUpdates.bankAccountNumber = data.bankAccountNumber.trim();
     if (data.bankAccountName) profUpdates.bankAccountName = data.bankAccountName.trim();
 
-    if (existingProfile.verificationStatus !== "APPROVED" && existingProfile.verificationStatus !== "UNDER_REVIEW") {
-      profUpdates.verificationStatus = "AUTHORITY_PENDING";
-    }
-
     const [updatedProfile] = await db
       .update(schema.profiles)
       .set(profUpdates)

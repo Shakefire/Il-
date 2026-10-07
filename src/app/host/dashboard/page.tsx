@@ -32,6 +32,79 @@ import {
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
+
+// ── Physics-Grade Springs (Precision Tool: High Damping, High Stiffness, Zero Bounce) ──
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.08,
+      delayChildren: 0.04,
+    },
+  },
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 14, filter: "blur(4px)" },
+  show: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: {
+      type: "spring",
+      stiffness: 400,
+      damping: 32,
+    },
+  },
+};
+
+function AnimatedNumber({
+  value,
+  prefix = "",
+  suffix = "",
+}: {
+  value: number;
+  prefix?: string;
+  suffix?: string;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const spring = useSpring(0, { stiffness: 350, damping: 32 });
+  const display = useTransform(spring, (latest) => {
+    return `${prefix}${Math.round(latest).toLocaleString("en-NG")}${suffix}`;
+  });
+
+  useEffect(() => {
+    setMounted(true);
+    spring.set(value);
+  }, [spring, value]);
+
+  if (!mounted) {
+    return <span>{prefix}{value.toLocaleString("en-NG")}{suffix}</span>;
+  }
+
+  return <motion.span>{display}</motion.span>;
+}
+
+function AnimatedCurrency({ value }: { value: number }) {
+  const [mounted, setMounted] = useState(false);
+  const spring = useSpring(0, { stiffness: 350, damping: 32 });
+  const display = useTransform(spring, (latest) => {
+    return formatNaira(Math.round(latest));
+  });
+
+  useEffect(() => {
+    setMounted(true);
+    spring.set(value);
+  }, [spring, value]);
+
+  if (!mounted) {
+    return <span>{formatNaira(value)}</span>;
+  }
+
+  return <motion.span>{display}</motion.span>;
+}
 
 interface HostProperty {
   id: string;
@@ -107,6 +180,8 @@ export default function HostDashboardPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [onboardingStatus, setOnboardingStatus] = useState<any>(null);
+  const [isBannerDismissed, setIsBannerDismissed] = useState(false);
+  const [showRemainingStepsModal, setShowRemainingStepsModal] = useState(false);
 
   // New Property Form State
   const [title, setTitle] = useState("");
@@ -415,21 +490,30 @@ export default function HostDashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#FAFAF8] py-12 px-6 sm:px-8 lg:px-12">
-      <div className="max-w-6xl mx-auto space-y-8">
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="show"
+        className="max-w-6xl mx-auto space-y-8"
+      >
         {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E7E5E0] pb-6">
+        <motion.div
+          variants={itemVariants}
+          className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E7E5E0] pb-6"
+        >
           <div>
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#0B5D45]">
-              <Home size={15} />
-              <span>Host Management Portal</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[#0B5D45]">
+                Overview
+              </span>
               {onboardingStatus?.verificationStatus === "APPROVED" && (
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
                   <ShieldCheck size={13} /> Verified Partner
                 </span>
               )}
             </div>
-            <h1 className="font-display text-3xl sm:text-4xl text-[#171717] font-normal mt-1">
-              Your Properties &amp; Listings
+            <h1 className="font-display text-3xl sm:text-4xl text-[#171717] font-normal tracking-tight mt-1">
+              {user?.firstName ? `Welcome back, ${user.firstName}` : "Overview"}
             </h1>
           </div>
 
@@ -442,7 +526,7 @@ export default function HostDashboardPage() {
                 Go to Admin Portal →
               </Link>
             )}
-            {onboardingStatus?.verificationStatus === "APPROVED" || user?.role === "admin" ? (
+            {(onboardingStatus?.verificationStatus === "APPROVED" || user?.role === "admin") && (
               <Link
                 href="/become-a-host"
                 className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B5D45] text-white text-[14px] font-medium hover:bg-[#084936] transition-colors shadow-sm"
@@ -450,129 +534,158 @@ export default function HostDashboardPage() {
                 <Plus size={16} />
                 <span>List New Property</span>
               </Link>
-            ) : (
-              <Link
-                href="/host/onboarding"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[14px] font-medium transition-colors shadow-sm"
-              >
-                <Lock size={15} />
-                <span>Submit Documents to List Houses</span>
-              </Link>
             )}
           </div>
-        </div>
+        </motion.div>
 
-        {/* Verification Status Banner (If not yet approved) */}
-        {onboardingStatus && onboardingStatus.verificationStatus !== "APPROVED" && (
-          <div className="bg-white border-2 border-amber-300 rounded-2xl p-6 shadow-sm">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-800">
-                    {onboardingStatus.verificationStatus}
-                  </span>
-                  <span className="text-xs font-semibold text-gray-500">
-                    Host Verification Incomplete
-                  </span>
+        {/* Verification Status Banner (Sleek full-width alert bar with AnimatePresence) */}
+        <AnimatePresence>
+          {!isBannerDismissed && onboardingStatus && onboardingStatus.verificationStatus !== "APPROVED" && (
+            <motion.div
+              variants={itemVariants}
+              initial={{ opacity: 0, height: 0, overflow: "hidden" }}
+              animate={{ opacity: 1, height: "auto", overflow: "visible" }}
+              exit={{ opacity: 0, height: 0, overflow: "hidden" }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="w-full"
+            >
+              <div className="w-full bg-white border border-amber-200/90 rounded-xl p-4 sm:p-5 shadow-[0_2px_8px_-2px_rgba(0,0,0,0.03)] flex flex-col md:flex-row md:items-center justify-between gap-4 relative overflow-hidden">
+                {/* Subtle amber accent bar */}
+                <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-amber-500" />
+
+                <div className="space-y-1 pl-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200">
+                      {onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                        ? "Under Review"
+                        : onboardingStatus.verificationStatus === "ACTION_REQUIRED"
+                        ? "Action Required"
+                        : "Verification Needed"}
+                    </span>
+                    <span className="text-xs font-semibold text-[#171717]">
+                      Complete Your Host Profile
+                    </span>
+                  </div>
+                  <h3 className="text-sm sm:text-base font-semibold text-[#171717] mt-0.5">
+                    {onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                      ? "Your host dossier is under priority compliance review"
+                      : onboardingStatus.verificationStatus === "ACTION_REQUIRED"
+                      ? "Action Required: Update Verification Documents"
+                      : "Account verification required to publish listings"}
+                  </h3>
+                  <p className="text-xs text-[#6B6B67] max-w-2xl leading-relaxed">
+                    {onboardingStatus.verificationStatus === "UNDER_REVIEW"
+                      ? "Our compliance team is verifying your Nigerian government ID and ownership authority. Review typically completes within 1-2 hours."
+                      : onboardingStatus.reviewFeedback
+                      ? onboardingStatus.reviewFeedback
+                      : "To guarantee guest safety and quality standards across Nigeria, your identity and property ownership documents must be submitted and approved before your listings can be published or booked."}
+                  </p>
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 mt-1">
-                  {onboardingStatus.verificationStatus === "UNDER_REVIEW"
-                    ? "Your host dossier is under priority review"
-                    : onboardingStatus.verificationStatus === "ACTION_REQUIRED"
-                    ? "Action Required: Update Verification Documents"
-                    : "Account Verification Required to List Houses"}
-                </h3>
-                <p className="text-sm text-gray-600 max-w-2xl">
-                  {onboardingStatus.verificationStatus === "UNDER_REVIEW"
-                    ? "Our compliance team is verifying your Nigerian government ID and ownership authority. Review typically completes within 1-2 hours."
-                    : onboardingStatus.reviewFeedback
-                    ? onboardingStatus.reviewFeedback
-                    : "To guarantee guest safety and quality standards across Nigeria, your identity and property ownership documents must be submitted and approved before your listings can be published or booked."}
-                </p>
-              </div>
 
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                <div className="text-left sm:text-right mr-2">
-                  <span className="text-xs text-gray-500 block">Progress</span>
-                  <span className="text-lg font-bold text-[#0B5D45]">{onboardingStatus.progressPct || 25}%</span>
+                <div className="flex items-center gap-3 pl-2 md:pl-0 shrink-0">
+                  <div className="text-right mr-1 hidden sm:block">
+                    <span className="text-[10px] text-[#8B8B86] uppercase font-semibold block">Progress</span>
+                    <span className="text-sm font-bold text-[#0B5D45]">
+                      {onboardingStatus.progressPct || 25}%
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onboardingStatus.verificationStatus === "UNDER_REVIEW") {
+                        router.push("/host/onboarding/status");
+                      } else {
+                        setShowRemainingStepsModal(true);
+                      }
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  >
+                    <ShieldCheck size={14} />
+                    <span>Verify Identity</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsBannerDismissed(true)}
+                    className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+                    title="Dismiss alert"
+                  >
+                    <span className="sr-only">Dismiss</span>
+                    ✕
+                  </button>
                 </div>
-                <Link
-                  href={onboardingStatus.verificationStatus === "UNDER_REVIEW" ? "/host/onboarding/status" : "/host/onboarding"}
-                  className="px-5 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-semibold shadow-sm transition-all whitespace-nowrap"
-                >
-                  {onboardingStatus.verificationStatus === "UNDER_REVIEW" ? "View Application Status →" : "Submit Documents for Verification →"}
-                </Link>
               </div>
-            </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-            {/* Missing Requirements List */}
-            {onboardingStatus.missingRequirements && onboardingStatus.missingRequirements.length > 0 && onboardingStatus.verificationStatus !== "UNDER_REVIEW" && (
-              <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-2 items-center text-xs text-gray-600">
-                <span className="font-semibold text-gray-700">Remaining Steps:</span>
-                {onboardingStatus.missingRequirements.map((req: string, idx: number) => (
-                  <span key={idx} className="px-2.5 py-1 rounded-md bg-stone-100 text-stone-700 font-medium">
-                    • {req}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Operational Performance Summary */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm">
+        {/* Operational Performance Summary (Modern elevated stat cards with tactile feedback) */}
+        <motion.div variants={itemVariants} className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <motion.div
+            whileHover={{ y: -4, transition: { type: "spring", stiffness: 450, damping: 32 } }}
+            className="p-5 bg-white rounded-xl border border-[#E7E5E0] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_20px_-4px_rgba(0,0,0,0.08)] transition-shadow cursor-default"
+          >
             <div className="text-xs font-semibold uppercase tracking-wider text-[#6B6B67] flex items-center justify-between">
               <span>Published Listings</span>
               <Building size={16} className="text-[#0B5D45]" />
             </div>
             <div className="text-3xl font-display font-medium text-[#171717] mt-2">
-              {stats?.published ?? properties.filter((p) => p.status === "PUBLISHED").length}
+              <AnimatedNumber value={stats?.published ?? properties.filter((p) => p.status === "PUBLISHED").length} />
             </div>
             <div className="text-xs text-[#8B8B86] mt-1">
               Active in public search
             </div>
-          </div>
+          </motion.div>
 
-          <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm">
+          <motion.div
+            whileHover={{ y: -4, transition: { type: "spring", stiffness: 450, damping: 32 } }}
+            className="p-5 bg-white rounded-xl border border-[#E7E5E0] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_20px_-4px_rgba(0,0,0,0.08)] transition-shadow cursor-default"
+          >
             <div className="text-xs font-semibold uppercase tracking-wider text-[#6B6B67] flex items-center justify-between">
               <span>Under Review</span>
               <Clock size={16} className="text-amber-600" />
             </div>
             <div className="text-3xl font-display font-medium text-[#171717] mt-2">
-              {stats?.pending ?? properties.filter((p) => p.status === "PENDING_REVIEW").length}
+              <AnimatedNumber value={stats?.pending ?? properties.filter((p) => p.status === "PENDING_REVIEW").length} />
             </div>
             <div className="text-xs text-amber-700 mt-1">
               Pending admin verification
             </div>
-          </div>
+          </motion.div>
 
-          <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm">
+          <motion.div
+            whileHover={{ y: -4, transition: { type: "spring", stiffness: 450, damping: 32 } }}
+            className="p-5 bg-white rounded-xl border border-[#E7E5E0] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_20px_-4px_rgba(0,0,0,0.08)] transition-shadow cursor-default"
+          >
             <div className="text-xs font-semibold uppercase tracking-wider text-[#6B6B67] flex items-center justify-between">
               <span>Total Reservations</span>
               <Calendar size={16} className="text-[#0B5D45]" />
             </div>
             <div className="text-3xl font-display font-medium text-[#171717] mt-2">
-              {bookings.length}
+              <AnimatedNumber value={bookings.length} />
             </div>
             <div className="text-xs text-[#8B8B86] mt-1">
               Confirmed &amp; pending stays
             </div>
-          </div>
+          </motion.div>
 
-          <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm">
+          <motion.div
+            whileHover={{ y: -4, transition: { type: "spring", stiffness: 450, damping: 32 } }}
+            className="p-5 bg-white rounded-xl border border-[#E7E5E0] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_20px_-4px_rgba(0,0,0,0.08)] transition-shadow cursor-default"
+          >
             <div className="text-xs font-semibold uppercase tracking-wider text-[#6B6B67] flex items-center justify-between">
               <span>Net Host Earnings</span>
               <TrendingUp size={16} className="text-emerald-600" />
             </div>
             <div className="text-3xl font-display font-medium text-emerald-800 mt-2">
-              {formatNaira(stats?.earnings?.totalNet || 0)}
+              <AnimatedCurrency value={stats?.earnings?.totalNet || 0} />
             </div>
             <div className="text-xs text-[#8B8B86] mt-1">
               Gross: {formatNaira(stats?.earnings?.totalGross || 0)}
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
 
         {/* Action alert message */}
         {actionMessage && (
@@ -587,8 +700,9 @@ export default function HostDashboardPage() {
           </div>
         )}
 
-        {/* Navigation Tabs */}
-        <div className="flex border-b border-[#E7E5E0] gap-8">
+        {/* Navigation Tabs & Content (Cascaded with Framer Motion) */}
+        <motion.div variants={itemVariants} className="space-y-6">
+          <div className="flex border-b border-[#E7E5E0] gap-8">
           <button
             type="button"
             onClick={() => setActiveTab("properties")}
@@ -881,6 +995,7 @@ export default function HostDashboardPage() {
             )}
           </>
         )}
+        </motion.div>
 
         {/* Modal: Create Property Listing */}
         {showCreateModal && (
@@ -1358,7 +1473,146 @@ export default function HostDashboardPage() {
             </div>
           </div>
         )}
-      </div>
+
+        {/* Remaining Steps Modal (Triggered by Verify Identity CTA) */}
+        <AnimatePresence>
+          {showRemainingStepsModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                transition={{ type: "spring", stiffness: 450, damping: 32 }}
+                className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-[#E7E5E0] space-y-6"
+              >
+                <div className="flex items-start justify-between border-b border-[#E7E5E0] pb-4">
+                  <div>
+                    <span className="text-[11px] font-bold text-[#0B5D45] uppercase tracking-wider bg-[#EDF5F2] px-2.5 py-0.5 rounded-full border border-[#0B5D45]/15">
+                      Host Verification
+                    </span>
+                    <h3 className="font-display text-2xl text-[#171717] mt-2">
+                      Complete Your Host Profile
+                    </h3>
+                    <p className="text-xs text-[#6B6B67] mt-1">
+                      Complete these stages to activate public bookings and publish listings.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowRemainingStepsModal(false)}
+                    className="p-1 rounded-full text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors cursor-pointer"
+                  >
+                    <XCircle size={22} />
+                  </button>
+                </div>
+
+                {/* Progress bar */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-[#171717]">Application Progress</span>
+                    <span className="text-[#0B5D45]">{onboardingStatus?.progressPct || 25}%</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-[#E7E5E0] overflow-hidden">
+                    <motion.div
+                      className="h-full bg-[#0B5D45] rounded-full"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${onboardingStatus?.progressPct || 25}%` }}
+                      transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                    />
+                  </div>
+                </div>
+
+                {/* Step Checklist */}
+                <div className="space-y-3">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-[#6B6B67]">
+                    Verification Stages
+                  </h4>
+                  <div className="space-y-2">
+                    {[
+                      {
+                        title: "Business & Host Category",
+                        desc: "Owner, manager, or corporate entity",
+                        done: (onboardingStatus?.step || 1) > 1,
+                      },
+                      {
+                        title: "Residential Profile & Address",
+                        desc: "Verified Nigerian contact details",
+                        done: (onboardingStatus?.step || 1) > 2,
+                      },
+                      {
+                        title: "Government ID & Biometric Liveness",
+                        desc: "NIN/Passport with real-time facial check",
+                        done: (onboardingStatus?.step || 1) > 3,
+                      },
+                      {
+                        title: "Authority Documents & Payout Bank",
+                        desc: "Ownership deed/contract and settlement account",
+                        done: (onboardingStatus?.step || 1) > 4,
+                      },
+                    ].map((stepItem, idx) => (
+                      <div
+                        key={idx}
+                        className={`p-3 rounded-xl border flex items-center justify-between text-xs ${
+                          stepItem.done
+                            ? "bg-[#EDF5F2] border-[#0B5D45]/20 text-[#0B5D45]"
+                            : "bg-[#FAFAF8] border-[#E7E5E0] text-[#171717]"
+                        }`}
+                      >
+                        <div>
+                          <p className="font-semibold">{stepItem.title}</p>
+                          <p className="text-[11px] text-[#6B6B67] mt-0.5">{stepItem.desc}</p>
+                        </div>
+                        {stepItem.done ? (
+                          <CheckCircle2 size={18} className="text-[#0B5D45] shrink-0" />
+                        ) : (
+                          <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full shrink-0">
+                            Pending
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Missing requirements pills if present */}
+                {onboardingStatus?.missingRequirements && onboardingStatus.missingRequirements.length > 0 && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 text-xs">
+                    <span className="font-semibold text-amber-900 block">Specific items needed:</span>
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {onboardingStatus.missingRequirements.map((req: string, idx: number) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded bg-white border border-amber-300 text-amber-800 text-[11px] font-medium"
+                        >
+                          {req}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowRemainingStepsModal(false)}
+                    className="px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-xs font-semibold text-[#6B6B67] hover:bg-stone-50 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <Link
+                    href="/host/onboarding"
+                    onClick={() => setShowRemainingStepsModal(false)}
+                    className="px-5 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <span>Continue Verification</span>
+                    <ArrowRight size={14} />
+                  </Link>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     </div>
   );
 }
