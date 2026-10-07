@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
 import { useOnboarding } from "@/context/OnboardingContext";
 import { Home, Building2, ArrowRight, Phone, Check } from "lucide-react";
 
@@ -57,12 +58,9 @@ export default function BusinessTypeStepPage() {
   };
 
   return (
-    <div className="bg-white border border-[#E7E5E0] rounded-2xl sm:rounded-3xl p-6 sm:p-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02),0_12px_24px_-4px_rgba(0,0,0,0.05),0_24px_48px_-12px_rgba(0,0,0,0.07)]">
+    <div className="max-w-2xl mx-auto bg-white border border-[#E7E5E0] rounded-2xl sm:rounded-3xl p-6 sm:p-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02),0_12px_24px_-4px_rgba(0,0,0,0.05),0_24px_48px_-12px_rgba(0,0,0,0.07)]">
       <div className="mb-8">
-        <span className="text-[11px] font-bold text-[#0B5D45] uppercase tracking-widest bg-[#EDF5F2] px-3 py-1 rounded-full border border-[#0B5D45]/15">
-          Stage 1 of 6 • Qualification
-        </span>
-        <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mt-3 mb-2">
+        <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mb-2">
           How will you list on Ilé?
         </h1>
         <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">
@@ -84,10 +82,13 @@ export default function BusinessTypeStepPage() {
             const Icon = opt.icon;
 
             return (
-              <div
+              <motion.div
                 key={opt.id}
                 onClick={() => handleSelectHostType(opt.id as any)}
-                className={`relative p-4 sm:p-5 rounded-2xl border transition-all cursor-pointer flex items-start gap-4 ${
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                transition={{ duration: 0.15 }}
+                className={`relative p-5 sm:p-6 rounded-2xl border cursor-pointer flex items-start gap-4 sm:gap-5 transition-colors ${
                   isSelected
                     ? "border-[#0B5D45] bg-[#F4F7F5] shadow-xs ring-1 ring-[#0B5D45]"
                     : "border-[#E7E5E0] bg-white hover:border-[#D1CEC7] hover:bg-[#FAFAF8]"
@@ -108,10 +109,10 @@ export default function BusinessTypeStepPage() {
                       {opt.subtitle}
                     </span>
                   </div>
-                  <p className="text-[13px] text-[#6B6B67] mt-1 leading-snug">{opt.desc}</p>
+                  <p className="text-[13px] text-[#6B6B67] mt-1.5 leading-snug">{opt.desc}</p>
                 </div>
 
-                <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                <div className="absolute right-4 sm:right-5 top-1/2 -translate-y-1/2">
                   <div
                     className={`w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
                       isSelected
@@ -122,58 +123,66 @@ export default function BusinessTypeStepPage() {
                     {isSelected && <Check size={14} strokeWidth={3} />}
                   </div>
                 </div>
-              </div>
+              </motion.div>
             );
           })}
         </div>
 
-        {/* Corporate Details if Corporate or Manager */}
-        {(data.hostType === "company" || data.hostType === "property_manager") && (
-          <div className="p-5 rounded-2xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-4 animate-in fade-in duration-150">
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-[13px] font-semibold text-[#171717]">
-                  {data.hostType === "company" ? "Registered Company Name" : "Management Agency / Brand"}
-                </label>
-                <span className="text-[12px] text-[#8B8B86]">As registered with CAC</span>
-              </div>
-              <input
-                type="text"
-                value={data.companyName}
-                onChange={(e) => updateData({ companyName: e.target.value })}
-                placeholder="e.g. Maitama Executive Suites Ltd."
-                className="w-full h-[50px] px-4 bg-white border border-[#E7E5E0] rounded-xl text-[14.5px] text-[#171717] placeholder:text-[#9E9E9A] focus:border-[#0B5D45] focus:ring-2 focus:ring-[#0B5D45]/10 outline-none transition-all"
-              />
-            </div>
-
-            {data.hostType === "company" && (
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[13px] font-semibold text-[#171717]">
-                    CAC Registration Number (RC / BN)
+        {/* Dynamic Corporate Details with Animated Height */}
+        <AnimatePresence>
+          {(data.hostType === "company" || data.hostType === "property_manager") && (
+            <motion.div
+              layout
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="p-5 sm:p-6 rounded-2xl bg-[#FAFAF8] border border-[#E7E5E0] space-y-4">
+                <div>
+                  <label className="text-[13px] font-semibold text-[#171717] block mb-1.5">
+                    {data.hostType === "company" ? "Registered Company Name" : "Management Agency / Brand"}
                   </label>
-                  <span className="text-[12px] text-[#8B8B86]">Optional for preliminary draft</span>
+                  <input
+                    type="text"
+                    value={data.companyName}
+                    onChange={(e) => updateData({ companyName: e.target.value })}
+                    placeholder="e.g. Maitama Executive Suites Ltd."
+                    className="w-full h-[50px] px-4 bg-white border border-[#E7E5E0] rounded-xl text-[14.5px] text-[#171717] placeholder:text-[#9E9E9A] focus:border-[#0B5D45] focus:ring-2 focus:ring-[#0B5D45]/10 outline-none transition-all"
+                  />
+                  <p className="text-[12px] text-[#8B8B86] mt-1.5">
+                    As registered with the Corporate Affairs Commission (CAC)
+                  </p>
                 </div>
-                <input
-                  type="text"
-                  value={data.companyRegNumber}
-                  onChange={(e) => updateData({ companyRegNumber: e.target.value })}
-                  placeholder="e.g. RC 1928374"
-                  className="w-full h-[50px] px-4 bg-white border border-[#E7E5E0] rounded-xl text-[14.5px] text-[#171717] placeholder:text-[#9E9E9A] focus:border-[#0B5D45] focus:ring-2 focus:ring-[#0B5D45]/10 outline-none transition-all"
-                />
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Direct Contact / WhatsApp Phone */}
+                {data.hostType === "company" && (
+                  <div>
+                    <label className="text-[13px] font-semibold text-[#171717] block mb-1.5">
+                      CAC Registration Number (RC / BN)
+                    </label>
+                    <input
+                      type="text"
+                      value={data.companyRegNumber}
+                      onChange={(e) => updateData({ companyRegNumber: e.target.value })}
+                      placeholder="e.g. RC 1928374"
+                      className="w-full h-[50px] px-4 bg-white border border-[#E7E5E0] rounded-xl text-[14.5px] text-[#171717] placeholder:text-[#9E9E9A] focus:border-[#0B5D45] focus:ring-2 focus:ring-[#0B5D45]/10 outline-none transition-all"
+                    />
+                    <p className="text-[12px] text-[#8B8B86] mt-1.5">
+                      Optional for initial setup. Can be verified later.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Direct Contact / Operations Phone */}
         <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-[13px] font-semibold text-[#171717]">
-              Primary Host / Operations Phone
-            </label>
-            <span className="text-[12px] text-[#8B8B86]">WhatsApp or direct Nigerian line</span>
-          </div>
+          <label className="text-[13px] font-semibold text-[#171717] block mb-1.5">
+            Primary Host / Operations Phone
+          </label>
           <div className="relative">
             <input
               type="tel"
@@ -186,13 +195,16 @@ export default function BusinessTypeStepPage() {
               <Phone size={17} />
             </div>
           </div>
+          <p className="text-[12px] text-[#8B8B86] mt-1.5">
+            WhatsApp enabled or direct Nigerian contact line
+          </p>
         </div>
 
-        {/* Navigation Action Buttons */}
-        <div className="pt-4 border-t border-[#E7E5E0] flex items-center justify-between gap-4">
+        {/* Navigation Action Row: Standardized Ghost Secondary alongside Primary Continue */}
+        <div className="pt-6 border-t border-[#E7E5E0] flex flex-col-reverse sm:flex-row items-center justify-end gap-3 sm:gap-4">
           <Link
             href="/host/dashboard"
-            className="text-[13.5px] font-medium text-[#6B6B67] hover:text-[#171717] transition-colors"
+            className="w-full sm:w-auto h-[48px] sm:h-[50px] px-5 sm:px-6 rounded-xl border border-[#E7E5E0] hover:border-[#D1CEC7] bg-white hover:bg-[#FAFAF8] text-[14px] font-medium text-[#6B6B67] hover:text-[#171717] transition-all flex items-center justify-center"
           >
             Skip to Dashboard
           </Link>
@@ -200,7 +212,7 @@ export default function BusinessTypeStepPage() {
           <button
             type="submit"
             disabled={isNavigating}
-            className="h-[50px] px-7 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center gap-2 transition-all shadow-sm hover:shadow cursor-pointer"
+            className="w-full sm:w-auto h-[48px] sm:h-[50px] px-7 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow cursor-pointer disabled:opacity-50"
           >
             <span>Continue to Profile</span>
             <ArrowRight size={16} />

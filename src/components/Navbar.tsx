@@ -45,13 +45,14 @@ export default function Navbar() {
   const isTripsActive = pathname === "/trips";
   const isHostActive = pathname?.startsWith("/host") || pathname === "/become-a-host";
 
-  const isAuthPage = [
-    "/login",
-    "/register",
-    "/signup",
-    "/forgot-password",
-    "/reset-password",
-  ].includes(pathname);
+  const isAuthPage =
+    [
+      "/login",
+      "/register",
+      "/signup",
+      "/forgot-password",
+      "/reset-password",
+    ].includes(pathname) || pathname?.startsWith("/host/onboarding");
 
   if (isAuthPage) return null;
 

@@ -177,10 +177,7 @@ export default function IdentityStepPage() {
       />
 
       <div className="mb-8">
-        <span className="text-[11px] font-bold text-[#0B5D45] uppercase tracking-widest bg-[#EDF5F2] px-3 py-1 rounded-full border border-[#0B5D45]/15">
-          Stage 3 of 4 • Identity Verification
-        </span>
-        <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mt-3 mb-2">
+        <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mb-2">
           Verify your identity
         </h1>
         <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">

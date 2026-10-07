@@ -76,10 +76,7 @@ export default function ReviewStepPage() {
       />
 
       <div className="mb-8">
-        <span className="text-[11px] font-bold text-[#0B5D45] uppercase tracking-widest bg-[#EDF5F2] px-3 py-1 rounded-full border border-[#0B5D45]/15">
-          Stage 5 of 5 • Review &amp; Submit Dossier
-        </span>
-        <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mt-3 mb-2">
+        <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mb-2">
           Review your verification dossier
         </h1>
         <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">
