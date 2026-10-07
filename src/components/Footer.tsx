@@ -7,12 +7,13 @@ import { ShieldCheck, Zap, Lock } from "lucide-react";
 export default function Footer() {
   const pathname = usePathname();
 
-  const isAuthPage = [
-    "/login",
-    "/register",
-    "/forgot-password",
-    "/reset-password",
-  ].includes(pathname);
+  const isAuthPage =
+    [
+      "/login",
+      "/register",
+      "/forgot-password",
+      "/reset-password",
+    ].includes(pathname) || pathname?.startsWith("/host/onboarding");
 
   if (isAuthPage) return null;
 

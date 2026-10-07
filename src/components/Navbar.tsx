@@ -40,6 +40,13 @@ export default function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const isHostUrl = pathname?.startsWith("/host") || pathname === "/become-a-host";
+  const [activeMode, setActiveMode] = useState<"guest" | "host">(isHostUrl ? "host" : "guest");
+
+  useEffect(() => {
+    setActiveMode(isHostUrl ? "host" : "guest");
+  }, [isHostUrl]);
+
   const isSearchActive = pathname === "/search";
   const isHomeActive = pathname === "/";
   const isTripsActive = pathname === "/trips";
@@ -58,13 +65,6 @@ export default function Navbar() {
 
   const isHost = user?.role === "host";
   const isAdmin = user?.role === "admin";
-
-  const isHostUrl = pathname?.startsWith("/host") || pathname === "/become-a-host";
-  const [activeMode, setActiveMode] = useState<"guest" | "host">(isHostUrl ? "host" : "guest");
-
-  useEffect(() => {
-    setActiveMode(isHostUrl ? "host" : "guest");
-  }, [isHostUrl]);
 
   const handleLogout = async () => {
     setProfileDropdownOpen(false);

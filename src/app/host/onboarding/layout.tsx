@@ -66,8 +66,8 @@ export default function HostOnboardingLayout({ children }: { children: React.Rea
   return (
     <OnboardingProvider>
       <div className="min-h-screen bg-[#FAFAF8] text-[#171717] relative flex flex-col justify-between selection:bg-[#EDF3F0] selection:text-[#0B5D45]">
-        {/* Subtle Ambient Background Depth */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+        {/* Subtle Ambient Background Depth & Bespoke Ilé Watermark */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden select-none" aria-hidden="true">
           <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[720px] h-[360px] bg-[#0B5D45]/[0.035] rounded-full blur-3xl" />
           <div className="absolute -bottom-32 left-1/2 -translate-x-1/2 w-[580px] h-[320px] bg-[#0B5D45]/[0.02] rounded-full blur-3xl" />
           <div
@@ -77,6 +77,10 @@ export default function HostOnboardingLayout({ children }: { children: React.Rea
               backgroundSize: "28px 28px",
             }}
           />
+          {/* Oversized transparent brand watermark */}
+          <div className="absolute -bottom-10 -right-10 font-display text-[200px] sm:text-[280px] font-normal tracking-tighter text-[#0B5D45]/[0.025] leading-none pointer-events-none select-none">
+            Ilé
+          </div>
         </div>
 
         {/* Focus Mode Navigation Bar */}
