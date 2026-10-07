@@ -32,10 +32,10 @@ import {
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
-import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
+import { motion, AnimatePresence, useSpring, useTransform, type Variants } from "framer-motion";
 
 // ── Physics-Grade Springs (Precision Tool: High Damping, High Stiffness, Zero Bounce) ──
-const containerVariants = {
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -46,7 +46,7 @@ const containerVariants = {
   },
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 14, filter: "blur(4px)" },
   show: {
     opacity: 1,

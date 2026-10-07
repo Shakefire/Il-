@@ -67,6 +67,8 @@ async function runAudit() {
       lastName: "User",
       email: testEmail,
       password: "Password123!",
+      hostType: "individual_owner",
+      operatingCity: "Abuja",
     });
   } catch (err: any) {
     if (err.message.includes("already exists")) dupRejected = true;

@@ -80,17 +80,15 @@ export default function AdminPortalPage() {
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [healthData, setHealthData] = useState<any>(null);
   const [hosts, setHosts] = useState<any[]>([]);
+  const [underReviewHosts, setUnderReviewHosts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastSynced, setLastSynced] = useState<Date>(new Date());
 
   // Moderation / Action States
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
   // Property Actions
-  const [rejectReason, setRejectReason] = useState("");
-  const [rejectingPropId, setRejectingPropId] = useState<string | null>(null);
   const [selectedProperty, setSelectedProperty] = useState<any | null>(null);
   const [propertySubTab, setPropertySubTab] = useState<"pending" | "all">("pending");
 
@@ -125,7 +123,6 @@ export default function AdminPortalPage() {
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showTeamModal, setShowTeamModal] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const profileDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -140,25 +137,18 @@ export default function AdminPortalPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const copyToClipboard = (text: string, fieldName: string) => {
-    if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      setCopiedField(fieldName);
-      setTimeout(() => setCopiedField(null), 2500);
-    }
-  };
-
   // ── Load Admin Data (with Polling Support) ──
   const loadAdminData = useCallback(async (isSilent = false) => {
     if (!isSilent) setIsRefreshing(true);
     try {
-      const [statsRes, propsRes, bookingsRes, auditRes, healthRes, hostsRes] = await Promise.all([
+      const [statsRes, propsRes, bookingsRes, auditRes, healthRes, hostsRes, underReviewRes] = await Promise.all([
         api.getAdminStats().catch(() => null),
         api.getAdminProperties().catch(() => ({ properties: [] })),
         api.getAdminBookings().catch(() => ({ bookings: [] })),
         api.getAdminAuditLogs().catch(() => ({ logs: [] })),
         api.getSystemHealth().catch(() => null),
         api.getAdminHosts().catch(() => ({ data: [] })),
+        api.getAdminHosts("UNDER_REVIEW").catch(() => ({ data: [] })),
       ]);
 
       const rawStats = statsRes?.stats || statsRes;
@@ -176,11 +166,23 @@ export default function AdminPortalPage() {
       if (bookingsRes) setBookings(bookingsRes.data || bookingsRes.bookings || []);
       if (auditRes) setAuditLogs(auditRes.data || auditRes.logs || []);
       if (healthRes) setHealthData(healthRes);
-      if (hostsRes) setHosts(hostsRes.data || hostsRes.items || []);
 
-      setLastSynced(new Date());
+      const allHostList = hostsRes.data || hostsRes.items || [];
+      const underReviewList = underReviewRes.data || underReviewRes.items || [];
+
+      // Ensure underReviewList hosts are merged into the main list if not already present
+      const hostMap = new Map<string, any>();
+      allHostList.forEach((h: any) => hostMap.set(h.id, h));
+      underReviewList.forEach((h: any) => hostMap.set(h.id, h));
+
+      setHosts(Array.from(hostMap.values()));
+      setUnderReviewHosts(
+        underReviewList.length > 0
+          ? underReviewList
+          : Array.from(hostMap.values()).filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW")
+      );
     } catch (err) {
-      console.warn("[Admin SaaS] Status sync notice:", err);
+      console.warn("[Admin] Status sync notice:", err);
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -434,15 +436,15 @@ export default function AdminPortalPage() {
   });
 
   const pendingListingsCount = properties.filter((p) => p.status === "PENDING_REVIEW").length;
-  const underReviewHostsCount = hosts.filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW").length;
+  const underReviewCount = underReviewHosts.length;
 
   // ── Authentication Protection ──
   if (authLoading || (loading && isAuthenticated && user?.role === "admin")) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[#0F172A] text-white">
-        <div className="w-10 h-10 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin mb-3" />
-        <p className="text-xs uppercase tracking-widest text-slate-400 font-mono">
-          Loading Ilé Admin SaaS Environment...
+      <div className="min-h-screen flex flex-col items-center justify-center bg-charcoal text-white">
+        <div className="w-10 h-10 rounded-full border-2 border-accent border-t-transparent animate-spin mb-3" />
+        <p className="text-xs uppercase tracking-widest text-primary-muted font-mono">
+          Loading Ilé Administrative Workspace...
         </p>
       </div>
     );
@@ -450,27 +452,27 @@ export default function AdminPortalPage() {
 
   if (!isAuthenticated || user?.role !== "admin") {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-[#0F172A]">
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto border border-amber-500/20">
+      <div className="min-h-screen flex items-center justify-center p-6 bg-charcoal">
+        <div className="max-w-md w-full bg-charcoal-surface border border-charcoal-border rounded-3xl p-8 text-center space-y-4 shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-status-warning-bg text-status-warning-text flex items-center justify-center mx-auto border border-status-warning-border">
             <Lock size={30} />
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">
             Restricted Administrative Workspace
           </h2>
-          <p className="text-xs text-slate-400 leading-relaxed">
+          <p className="text-xs text-primary-muted leading-relaxed">
             This secure portal is strictly partitioned for verified compliance officers, financial controllers, and platform administrators.
           </p>
           <div className="pt-2 flex flex-col gap-2">
             <Link
               href="/login?next=/admin"
-              className="w-full py-3 rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 text-xs font-bold uppercase tracking-wider transition-colors text-center shadow-lg shadow-emerald-900/30"
+              className="w-full py-3 rounded-xl bg-accent text-white hover:bg-accent-hover text-xs font-bold uppercase tracking-wider transition-colors text-center shadow-md"
             >
               Sign In as Administrator
             </Link>
             <Link
               href="/"
-              className="w-full py-3 rounded-xl border border-slate-800 text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-center"
+              className="w-full py-3 rounded-xl border border-charcoal-border text-xs font-medium text-primary-muted hover:text-white hover:bg-charcoal transition-colors text-center"
             >
               Return to Marketplace
             </Link>
@@ -481,43 +483,45 @@ export default function AdminPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] flex text-slate-900 selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-background flex text-primary selection:bg-accent-light selection:text-accent">
       {/* ─────────────────────────────────────────────────────────────
           1. PERSISTENT DARK SAAS SIDEBAR
+          Inherits dark charcoal ecosystem; active route marked by
+          left-bordered accent token line (border-l-2 border-accent).
       ────────────────────────────────────────────────────────────── */}
-      <aside className="w-64 bg-[#0F172A] border-r border-slate-800/80 flex flex-col justify-between fixed top-0 bottom-0 left-0 z-40 select-none">
+      <aside className="w-64 bg-charcoal border-r border-charcoal-border flex flex-col justify-between fixed top-0 bottom-0 left-0 z-40 select-none">
         <div>
           {/* Brand Header */}
-          <div className="p-6 border-b border-slate-800 flex items-center justify-between">
+          <div className="p-6 border-b border-charcoal-border flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-display text-2xl text-white tracking-tight font-normal">
                   Ilé
                 </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-status-success-bg text-status-success-text border border-status-success-border">
                   Admin
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 tracking-wide mt-0.5">
-                Trust & Compliance SaaS
+              <p className="text-[11px] text-primary-muted tracking-wide mt-0.5">
+                Compliance &amp; Operations
               </p>
             </div>
           </div>
 
-          {/* Navigation Items */}
-          <nav className="p-4 space-y-1.5 text-xs font-semibold">
+          {/* Navigation Items (Accent Line for Active Route, No Flat Background Fills) */}
+          <nav className="p-3 space-y-1 text-xs">
             {/* Dashboard */}
             <button
               type="button"
               onClick={() => setActiveModule("dashboard")}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
                 activeModule === "dashboard"
-                  ? "bg-slate-800/90 text-white shadow-xs"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+                  ? "border-l-2 border-accent text-white font-semibold pl-3"
+                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <LayoutDashboard size={16} className={activeModule === "dashboard" ? "text-emerald-400" : ""} />
+                <LayoutDashboard size={16} className={activeModule === "dashboard" ? "text-accent" : ""} />
                 <span>Dashboard</span>
               </div>
             </button>
@@ -526,19 +530,19 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("compliance")}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
                 activeModule === "compliance"
-                  ? "bg-slate-800/90 text-white shadow-xs"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+                  ? "border-l-2 border-accent text-white font-semibold pl-3"
+                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <ShieldCheck size={16} className={activeModule === "compliance" ? "text-emerald-400" : ""} />
+                <ShieldCheck size={16} className={activeModule === "compliance" ? "text-accent" : ""} />
                 <span>Compliance &amp; KYC</span>
               </div>
-              {underReviewHostsCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  {underReviewHostsCount}
+              {underReviewCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-status-warning-bg text-status-warning-text border border-status-warning-border">
+                  {underReviewCount}
                 </span>
               )}
             </button>
@@ -547,18 +551,18 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("properties")}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
                 activeModule === "properties"
-                  ? "bg-slate-800/90 text-white shadow-xs"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+                  ? "border-l-2 border-accent text-white font-semibold pl-3"
+                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <Building size={16} className={activeModule === "properties" ? "text-emerald-400" : ""} />
+                <Building size={16} className={activeModule === "properties" ? "text-accent" : ""} />
                 <span>Properties</span>
               </div>
               {pendingListingsCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-status-warning-bg text-status-warning-text border border-status-warning-border">
                   {pendingListingsCount}
                 </span>
               )}
@@ -568,17 +572,17 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("financials")}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
                 activeModule === "financials"
-                  ? "bg-slate-800/90 text-white shadow-xs"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+                  ? "border-l-2 border-accent text-white font-semibold pl-3"
+                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <CreditCard size={16} className={activeModule === "financials" ? "text-emerald-400" : ""} />
+                <CreditCard size={16} className={activeModule === "financials" ? "text-accent" : ""} />
                 <span>Financials</span>
               </div>
-              <span className="text-[10px] text-slate-500 font-mono">
+              <span className="text-[10px] text-primary-muted tabular-nums">
                 {bookings.length}
               </span>
             </button>
@@ -587,14 +591,14 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("security")}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
                 activeModule === "security"
-                  ? "bg-slate-800/90 text-white shadow-xs"
-                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+                  ? "border-l-2 border-accent text-white font-semibold pl-3"
+                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <Lock size={16} className={activeModule === "security" ? "text-emerald-400" : ""} />
+                <Lock size={16} className={activeModule === "security" ? "text-accent" : ""} />
                 <span>Security &amp; System</span>
               </div>
             </button>
@@ -602,25 +606,25 @@ export default function AdminPortalPage() {
         </div>
 
         {/* ── Admin User Profile & Settings Menu ── */}
-        <div className="p-4 border-t border-slate-800 relative" ref={profileDropdownRef}>
+        <div className="p-4 border-t border-charcoal-border relative" ref={profileDropdownRef}>
           <div
             onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-            className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer"
+            className="flex items-center justify-between p-2 rounded-xl hover:bg-charcoal-hover transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-xs shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-emerald-light border border-status-success-border text-emerald flex items-center justify-center font-bold text-xs shrink-0">
                 AD
               </div>
               <div className="min-w-0">
                 <span className="text-xs font-semibold text-white block truncate">
                   Ilé Administrator
                 </span>
-                <span className="text-[10px] text-slate-400 block truncate">
+                <span className="text-[10px] text-primary-muted block truncate">
                   {user?.email || "admin@ile.ng"}
                 </span>
               </div>
             </div>
-            <ChevronDown size={14} className="text-slate-400 shrink-0" />
+            <ChevronDown size={14} className="text-primary-muted shrink-0" />
           </div>
 
           {/* Clean Profile Dropdown (Strictly: Admin Settings, Audit Logs, Manage Team, Log Out) */}
@@ -631,7 +635,7 @@ export default function AdminPortalPage() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -6, scale: 0.98 }}
                 transition={{ duration: 0.15 }}
-                className="absolute bottom-18 left-4 right-4 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5"
+                className="absolute bottom-18 left-4 right-4 bg-charcoal-surface border border-charcoal-border rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5"
               >
                 <button
                   type="button"
@@ -639,9 +643,9 @@ export default function AdminPortalPage() {
                     setProfileDropdownOpen(false);
                     setShowSettingsModal(true);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-primary-muted hover:text-white hover:bg-charcoal rounded-xl transition-colors cursor-pointer"
                 >
-                  <Settings size={14} className="text-slate-400" />
+                  <Settings size={14} className="text-primary-muted" />
                   <span>Admin Settings</span>
                 </button>
 
@@ -651,9 +655,9 @@ export default function AdminPortalPage() {
                     setProfileDropdownOpen(false);
                     setActiveModule("security");
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-primary-muted hover:text-white hover:bg-charcoal rounded-xl transition-colors cursor-pointer"
                 >
-                  <FileText size={14} className="text-slate-400" />
+                  <FileText size={14} className="text-primary-muted" />
                   <span>Audit Logs</span>
                 </button>
 
@@ -663,18 +667,18 @@ export default function AdminPortalPage() {
                     setProfileDropdownOpen(false);
                     setShowTeamModal(true);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-primary-muted hover:text-white hover:bg-charcoal rounded-xl transition-colors cursor-pointer"
                 >
-                  <Users size={14} className="text-slate-400" />
+                  <Users size={14} className="text-primary-muted" />
                   <span>Manage Team</span>
                 </button>
 
-                <div className="my-1 border-t border-slate-800" />
+                <div className="my-1 border-t border-charcoal-border" />
 
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer font-medium"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-status-critical-text hover:bg-status-critical-bg rounded-xl transition-colors cursor-pointer font-medium"
                 >
                   <LogOut size={14} />
                   <span>Log Out</span>
@@ -689,13 +693,13 @@ export default function AdminPortalPage() {
           2. MAIN SAAS WORKSPACE (Offset by Sidebar Width)
       ────────────────────────────────────────────────────────────── */}
       <div className="flex-1 ml-64 flex flex-col min-h-screen">
-        {/* Distraction-Free Top Bar */}
-        <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-30 px-6 sm:px-8 flex items-center justify-between">
-          {/* Breadcrumbs */}
+        {/* Unified Top Navigation Bar (Merged breadcrumb + header on standard surface) */}
+        <header className="h-14 bg-surface border-b border-border sticky top-0 z-30 px-6 sm:px-8 flex items-center justify-between shadow-xs">
+          {/* Unified Breadcrumb Navigation */}
           <div className="flex items-center gap-2 text-xs">
-            <span className="font-semibold text-slate-400">Ilé Admin</span>
-            <span className="text-slate-300">/</span>
-            <span className="font-semibold text-slate-800 capitalize">
+            <span className="font-semibold text-primary-muted">Ilé Admin</span>
+            <span className="text-border">/</span>
+            <span className="font-semibold text-primary capitalize">
               {activeModule === "compliance"
                 ? "Compliance & KYC"
                 : activeModule === "properties"
@@ -704,46 +708,35 @@ export default function AdminPortalPage() {
                 ? "Financials Ledger"
                 : activeModule === "security"
                 ? "Security & System"
-                : "Overview Dashboard"}
+                : "Operations Overview"}
             </span>
           </div>
 
-          {/* Right Live Polling Indicator & Utilities */}
-          <div className="flex items-center gap-4 text-xs">
-            {/* Live Polling Status */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 text-slate-600">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="font-medium text-[11px]">
-                Live Sync Active • {lastSynced.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              </span>
-              <button
-                type="button"
-                onClick={() => loadAdminData()}
-                disabled={isRefreshing}
-                className="ml-1 text-slate-400 hover:text-slate-800 transition-colors cursor-pointer"
-                title="Poll now"
-              >
-                <RotateCw size={12} className={isRefreshing ? "animate-spin text-emerald-600" : ""} />
-              </button>
-            </div>
-
-            {/* Environment Badge */}
-            <span className="px-2.5 py-1 rounded-md text-[10px] font-mono font-bold bg-slate-900 text-white">
-              PROD-SAAS
-            </span>
+          {/* Action Triggers */}
+          <div className="flex items-center gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => loadAdminData()}
+              disabled={isRefreshing}
+              className="p-1.5 rounded-lg border border-border bg-surface hover:bg-surface-muted text-primary-secondary transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+              title="Refresh administrative data"
+            >
+              <RotateCw size={13} className={isRefreshing ? "animate-spin text-accent" : ""} />
+              <span className="text-[11px] font-medium hidden sm:inline">Refresh Data</span>
+            </button>
           </div>
         </header>
 
         {/* Global Feedback Banner */}
         {actionFeedback && (
-          <div className="mx-6 sm:mx-8 mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs font-medium flex items-center justify-between shadow-xs">
+          <div className="mx-6 sm:mx-8 mt-4 p-3.5 bg-status-success-bg border border-status-success-border rounded-xl text-status-success-text text-xs font-medium flex items-center justify-between shadow-xs">
             <div className="flex items-center gap-2">
-              <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+              <CheckCircle2 size={16} className="text-accent shrink-0" />
               <span>{actionFeedback}</span>
             </div>
             <button
               onClick={() => setActionFeedback(null)}
-              className="text-emerald-700 hover:text-emerald-900 font-bold p-1 cursor-pointer"
+              className="text-status-success-text hover:opacity-80 font-bold p-1 cursor-pointer"
             >
               ✕
             </button>
@@ -759,10 +752,10 @@ export default function AdminPortalPage() {
             <div className="space-y-6">
               {/* Page Title */}
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-                  Executive Operations Overview
+                <h1 className="text-2xl font-bold text-primary tracking-tight">
+                  Operations Overview
                 </h1>
-                <p className="text-xs text-slate-500 mt-1">
+                <p className="text-xs text-primary-secondary mt-1">
                   High-level platform metrics, compliance backlog, and settlement activity across Abuja and Lagos.
                 </p>
               </div>
@@ -771,16 +764,16 @@ export default function AdminPortalPage() {
               <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 <div
                   onClick={() => setActiveModule("compliance")}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-500 transition-colors cursor-pointer"
+                  className="bg-surface p-5 rounded-2xl border border-border shadow-xs hover:border-accent transition-colors cursor-pointer"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold block">
+                  <span className="text-[11px] uppercase tracking-wider text-primary-muted font-semibold block">
                     Awaiting KYC Review
                   </span>
-                  <div className="text-3xl font-bold text-amber-600 mt-1">
-                    {underReviewHostsCount}
+                  <div className="text-3xl font-bold text-status-warning-text mt-1 tabular-nums">
+                    {underReviewCount}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                    <span>{hosts.length} total registered hosts</span>
+                  <div className="text-[11px] text-primary-secondary mt-1 flex items-center gap-1">
+                    <span>{hosts.length} registered hosts</span>
                     <ArrowRight size={11} />
                   </div>
                 </div>
@@ -790,16 +783,16 @@ export default function AdminPortalPage() {
                     setActiveModule("properties");
                     setPropertySubTab("pending");
                   }}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-500 transition-colors cursor-pointer"
+                  className="bg-surface p-5 rounded-2xl border border-border shadow-xs hover:border-accent transition-colors cursor-pointer"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold block">
+                  <span className="text-[11px] uppercase tracking-wider text-primary-muted font-semibold block">
                     Pending Listings
                   </span>
-                  <div className="text-3xl font-bold text-amber-600 mt-1">
+                  <div className="text-3xl font-bold text-status-warning-text mt-1 tabular-nums">
                     {pendingListingsCount}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1">
-                    <span>Awaiting physical vetting</span>
+                  <div className="text-[11px] text-primary-secondary mt-1 flex items-center gap-1">
+                    <span>Awaiting physical inspection</span>
                     <ArrowRight size={11} />
                   </div>
                 </div>
@@ -809,138 +802,135 @@ export default function AdminPortalPage() {
                     setActiveModule("properties");
                     setPropertySubTab("all");
                   }}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-500 transition-colors cursor-pointer"
+                  className="bg-surface p-5 rounded-2xl border border-border shadow-xs hover:border-accent transition-colors cursor-pointer"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold block">
+                  <span className="text-[11px] uppercase tracking-wider text-primary-muted font-semibold block">
                     Total Properties
                   </span>
-                  <div className="text-3xl font-bold text-slate-900 mt-1">
+                  <div className="text-3xl font-bold text-primary mt-1 tabular-nums">
                     {stats ? stats.totalProperties : properties.length}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-1">
-                    Abuja &amp; Lagos verified stays
+                  <div className="text-[11px] text-primary-secondary mt-1">
+                    Verified stays live
                   </div>
                 </div>
 
                 <div
                   onClick={() => setActiveModule("financials")}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs hover:border-emerald-500 transition-colors cursor-pointer"
+                  className="bg-surface p-5 rounded-2xl border border-border shadow-xs hover:border-accent transition-colors cursor-pointer"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold block">
+                  <span className="text-[11px] uppercase tracking-wider text-primary-muted font-semibold block">
                     Total Bookings
                   </span>
-                  <div className="text-3xl font-bold text-slate-900 mt-1">
+                  <div className="text-3xl font-bold text-primary mt-1 tabular-nums">
                     {stats ? stats.totalBookings : bookings.length}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-1">
+                  <div className="text-[11px] text-primary-secondary mt-1">
                     Completed reservations
                   </div>
                 </div>
 
                 <div
                   onClick={() => setActiveModule("financials")}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs col-span-2 lg:col-span-1 hover:border-emerald-500 transition-colors cursor-pointer"
+                  className="bg-surface p-5 rounded-2xl border border-border shadow-xs col-span-2 lg:col-span-1 hover:border-accent transition-colors cursor-pointer"
                 >
-                  <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold block">
+                  <span className="text-[11px] uppercase tracking-wider text-primary-muted font-semibold block">
                     Platform Volume
                   </span>
-                  <div className="text-3xl font-bold text-emerald-600 mt-1">
+                  <div className="text-3xl font-bold text-accent mt-1 tabular-nums">
                     {stats ? formatNaira(stats.totalRevenue) : "₦0"}
                   </div>
-                  <div className="text-[11px] text-slate-500 mt-1">
-                    Paystack settled GMV
+                  <div className="text-[11px] text-primary-secondary mt-1">
+                    Settled GMV volume
                   </div>
                 </div>
               </div>
 
-              {/* Quick Action / Triage Queues */}
+              {/* Priority Queues & System Health */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Recent KYC Queue Preview */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-xs">
+                {/* Priority KYC Triage (Dynamically Populated from UNDER_REVIEW Queue) */}
+                <div className="bg-surface rounded-2xl border border-border p-5 space-y-4 shadow-xs">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                      <ShieldCheck size={16} className="text-emerald-600" />
+                    <h3 className="text-sm font-bold text-primary uppercase tracking-wider flex items-center gap-2">
+                      <ShieldCheck size={16} className="text-accent" />
                       <span>Priority KYC Triage</span>
                     </h3>
                     <button
                       type="button"
                       onClick={() => setActiveModule("compliance")}
-                      className="text-xs text-emerald-700 font-semibold hover:underline"
+                      className="text-xs text-accent font-semibold hover:underline"
                     >
-                      View All ({hosts.length}) →
+                      View Full Queue ({underReviewCount}) →
                     </button>
                   </div>
 
-                  <div className="divide-y divide-slate-100 text-xs">
-                    {hosts
-                      .filter((h) => h.profile?.verificationStatus === "UNDER_REVIEW")
-                      .slice(0, 4)
-                      .map((h) => (
-                        <div
-                          key={h.id}
-                          onClick={() => openHostSplitView(h)}
-                          className="py-3 flex items-center justify-between hover:bg-slate-50 px-2 rounded-xl transition-colors cursor-pointer"
-                        >
-                          <div>
-                            <span className="font-semibold text-slate-900 block">
-                              {h.firstName} {h.lastName}
-                            </span>
-                            <span className="text-slate-500 text-[11px]">
-                              {h.profile?.operatingCity || "Abuja"} • {h.email}
-                            </span>
-                          </div>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                            Awaiting Review
+                  <div className="divide-y divide-border text-xs">
+                    {underReviewHosts.slice(0, 5).map((h) => (
+                      <div
+                        key={h.id}
+                        onClick={() => openHostSplitView(h)}
+                        className="py-2.5 px-2 flex items-center justify-between hover:bg-surface-muted/60 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <div>
+                          <span className="font-semibold text-primary block">
+                            {h.firstName} {h.lastName}
+                          </span>
+                          <span className="text-primary-secondary text-[11px]">
+                            {h.profile?.operatingCity || "Abuja"} • {h.email}
                           </span>
                         </div>
-                      ))}
-                    {underReviewHostsCount === 0 && (
-                      <div className="py-6 text-center text-slate-400">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-status-warning-bg text-status-warning-text border border-status-warning-border">
+                          Under Review
+                        </span>
+                      </div>
+                    ))}
+                    {underReviewCount === 0 && (
+                      <div className="py-6 text-center text-primary-muted">
                         No pending applicant dossiers in review queue.
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* System Infrastructure Health Preview */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-5 space-y-4 shadow-xs">
+                {/* Core Services Status (User-Friendly Administrative Labels) */}
+                <div className="bg-surface rounded-2xl border border-border p-5 space-y-4 shadow-xs">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                      <Server size={16} className="text-emerald-600" />
+                    <h3 className="text-sm font-bold text-primary uppercase tracking-wider flex items-center gap-2">
+                      <Server size={16} className="text-accent" />
                       <span>Core Services Status</span>
                     </h3>
                     <button
                       type="button"
                       onClick={() => setActiveModule("security")}
-                      className="text-xs text-emerald-700 font-semibold hover:underline"
+                      className="text-xs text-accent font-semibold hover:underline"
                     >
                       Audit Trail →
                     </button>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Postgres Database</span>
-                      <span className="font-semibold text-emerald-700 flex items-center gap-1 mt-1">
-                        <CheckCircle2 size={12} /> Connected (Lakebase)
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <span className="text-primary-muted block text-[10px] uppercase font-semibold">Core Database</span>
+                      <span className="font-semibold text-status-success-text flex items-center gap-1 mt-1">
+                        <CheckCircle2 size={12} /> Connected &amp; Synced
                       </span>
                     </div>
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Paystack Gateway</span>
-                      <span className="font-semibold text-emerald-700 flex items-center gap-1 mt-1">
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <span className="text-primary-muted block text-[10px] uppercase font-semibold">Payment Gateway</span>
+                      <span className="font-semibold text-status-success-text flex items-center gap-1 mt-1">
                         <CheckCircle2 size={12} /> Live / Operational
                       </span>
                     </div>
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Biometric Liveness Engine</span>
-                      <span className="font-semibold text-emerald-700 flex items-center gap-1 mt-1">
-                        <CheckCircle2 size={12} /> MediaPipe WASM Active
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <span className="text-primary-muted block text-[10px] uppercase font-semibold">Biometric Engine</span>
+                      <span className="font-semibold text-status-success-text flex items-center gap-1 mt-1">
+                        <CheckCircle2 size={12} /> Liveness Active
                       </span>
                     </div>
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                      <span className="text-slate-400 block text-[10px] uppercase font-semibold">Encrypted Document Storage</span>
-                      <span className="font-semibold text-emerald-700 flex items-center gap-1 mt-1">
-                        <CheckCircle2 size={12} /> S3 Secure Vault Ready
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <span className="text-primary-muted block text-[10px] uppercase font-semibold">Secure Storage</span>
+                      <span className="font-semibold text-status-success-text flex items-center gap-1 mt-1">
+                        <CheckCircle2 size={12} /> Encrypted Vault Ready
                       </span>
                     </div>
                   </div>
@@ -950,23 +940,23 @@ export default function AdminPortalPage() {
           )}
 
           {/* ─────────────────────────────────────────────────────────────
-              MODULE 2: COMPLIANCE & KYC (REBUILT HIGH-DENSITY DATAGRID)
+              MODULE 2: COMPLIANCE & KYC (HIGH-DENSITY ERGONOMIC DATAGRID)
           ────────────────────────────────────────────────────────────── */}
           {activeModule === "compliance" && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               {/* Module Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                  <h1 className="text-2xl font-bold text-primary tracking-tight">
                     Host Onboarding &amp; KYC Verification Queue
                   </h1>
-                  <p className="text-xs text-slate-500 mt-1">
-                    High-density compliance DataGrid for inspecting government IDs, liveness recordings, and bank settlement mandates.
+                  <p className="text-xs text-primary-secondary mt-1">
+                    High-density audit DataGrid for inspecting government IDs, liveness recordings, and bank settlement mandates.
                   </p>
                 </div>
 
                 {/* Filter Pills */}
-                <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 text-xs shadow-xs">
+                <div className="flex items-center gap-1.5 bg-surface p-1 rounded-xl border border-border text-xs shadow-xs">
                   {["ALL", "UNDER_REVIEW", "ACTION_REQUIRED", "APPROVED", "REJECTED"].map((st) => (
                     <button
                       key={st}
@@ -974,8 +964,8 @@ export default function AdminPortalPage() {
                       onClick={() => setHostStatusFilter(st)}
                       className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
                         hostStatusFilter === st
-                          ? "bg-slate-900 text-white shadow-xs"
-                          : "text-slate-600 hover:text-slate-900"
+                          ? "bg-primary text-white shadow-xs"
+                          : "text-primary-secondary hover:text-primary"
                       }`}
                     >
                       {st === "ALL"
@@ -992,111 +982,111 @@ export default function AdminPortalPage() {
                 </div>
               </div>
 
-              {/* Search & Bulk Bar */}
+              {/* Search Bar */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="relative flex-1 max-w-md">
-                  <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-primary-muted" />
                   <input
                     type="text"
                     value={hostSearchQuery}
                     onChange={(e) => setHostSearchQuery(e.target.value)}
                     placeholder="Search applicants by name, email, phone, NIN, or company..."
-                    className="w-full h-10 pl-9 pr-4 rounded-xl border border-slate-200 bg-white text-xs text-slate-900 focus:outline-none focus:border-emerald-500 shadow-xs"
+                    className="w-full h-9 pl-9 pr-4 rounded-xl border border-border bg-surface text-xs text-primary focus:outline-none focus:border-accent shadow-xs"
                   />
                 </div>
 
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <span>Showing <strong>{filteredHosts.length}</strong> applicants</span>
+                <div className="text-xs text-primary-muted">
+                  Showing <strong className="text-primary tabular-nums">{filteredHosts.length}</strong> applicants
                 </div>
               </div>
 
               {/* Bulk Action Notice Bar */}
               {bulkActionFeedback && (
-                <div className="p-3 bg-blue-50 border border-blue-200 text-blue-800 rounded-xl text-xs font-semibold">
+                <div className="p-3 bg-status-info-bg border border-status-info-border text-status-info-text rounded-xl text-xs font-semibold">
                   {bulkActionFeedback}
                 </div>
               )}
 
               {/* High-Density DataGrid Table */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs divide-y divide-slate-200">
-                    <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              <div className="bg-surface rounded-2xl border border-border shadow-xs overflow-hidden max-h-[72vh] flex flex-col">
+                <div className="overflow-x-auto overflow-y-auto flex-1">
+                  <table className="w-full text-left text-xs divide-y divide-border">
+                    {/* Sticky Table Header */}
+                    <thead className="sticky top-0 z-10 bg-surface text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
                       <tr>
-                        <th className="p-4 w-10">
+                        <th className="py-2.5 px-3 w-10">
                           <button
                             type="button"
                             onClick={() => handleSelectAllFilteredHosts(filteredHosts)}
-                            className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                            className="text-primary-muted hover:text-primary cursor-pointer"
                             title="Select all"
                           >
                             {selectedHostIds.size > 0 && selectedHostIds.size === filteredHosts.length ? (
-                              <CheckSquare size={16} className="text-emerald-600" />
+                              <CheckSquare size={16} className="text-accent" />
                             ) : (
                               <Square size={16} />
                             )}
                           </button>
                         </th>
-                        <th className="p-4">Submission Date</th>
-                        <th className="p-4">Host Applicant</th>
-                        <th className="p-4">Business Type</th>
-                        <th className="p-4">Status</th>
-                        <th className="p-4">Risk Score &amp; Flags</th>
-                        <th className="p-4 text-right">Actions</th>
+                        <th className="py-2.5 px-3">Submission Date</th>
+                        <th className="py-2.5 px-3">Host Applicant</th>
+                        <th className="py-2.5 px-3">Business Type</th>
+                        <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3">Risk Assessment</th>
+                        <th className="py-2.5 px-3 text-right">Actions</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100">
+                    <tbody className="divide-y divide-border">
                       {filteredHosts.map((h) => {
                         const prof = h.profile || {};
                         const status = prof.verificationStatus || "REGISTERED";
                         const isSelected = selectedHostIds.has(h.id);
 
-                        // Risk Score & Flags Heuristic
+                        // Risk Assessment Heuristic
                         const hasLiveness = Boolean(prof.selfieUrl);
                         const hasFrontDoc = Boolean(prof.identityDocumentUrl || prof.idFrontUrl);
-                        const hasBackDoc = Boolean(prof.idDocumentBackUrl || prof.idBackUrl);
                         const hasNin = Boolean(prof.idNumber);
                         const isIndividual = prof.hostType === "individual_owner";
 
                         let riskLabel = "Low Risk (98%)";
-                        let riskColor = "bg-emerald-50 text-emerald-800 border-emerald-200";
+                        let riskColor = "bg-status-success-bg text-status-success-text border-status-success-border";
 
                         if (!hasFrontDoc || !hasNin) {
                           riskLabel = "High: Missing ID Data";
-                          riskColor = "bg-rose-50 text-rose-800 border-rose-200";
+                          riskColor = "bg-status-critical-bg text-status-critical-text border-status-critical-border";
                         } else if (!hasLiveness) {
                           riskLabel = "Medium: No Liveness";
-                          riskColor = "bg-amber-50 text-amber-800 border-amber-200";
+                          riskColor = "bg-status-warning-bg text-status-warning-text border-status-warning-border";
                         } else if (!isIndividual && !prof.companyRegNumber) {
                           riskLabel = "Flag: Incomplete CAC";
-                          riskColor = "bg-amber-50 text-amber-800 border-amber-200";
+                          riskColor = "bg-status-warning-bg text-status-warning-text border-status-warning-border";
                         }
 
                         return (
                           <tr
                             key={h.id}
-                            className={`hover:bg-slate-50 transition-colors cursor-pointer ${
-                              isSelected ? "bg-emerald-50/40" : ""
+                            className={`hover:bg-surface-muted/60 transition-colors cursor-pointer ${
+                              isSelected ? "bg-accent-light/40" : ""
                             }`}
                             onClick={() => openHostSplitView(h)}
                           >
                             {/* Checkbox */}
-                            <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                            <td className="py-2 px-3" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => handleToggleSelectHost(h.id)}
-                                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                                className="text-primary-muted hover:text-primary cursor-pointer"
                               >
                                 {isSelected ? (
-                                  <CheckSquare size={16} className="text-emerald-600" />
+                                  <CheckSquare size={16} className="text-accent" />
                                 ) : (
                                   <Square size={16} />
                                 )}
                               </button>
                             </td>
 
-                            {/* Submission Date */}
-                            <td className="p-4 font-mono text-slate-500 whitespace-nowrap">
+                            {/* Submission Date (Tabular Nums) */}
+                            <td className="py-2 px-3 font-mono text-primary-secondary whitespace-nowrap tabular-nums">
                               {h.createdAt
                                 ? new Date(h.createdAt).toLocaleDateString("en-GB", {
                                     day: "2-digit",
@@ -1109,21 +1099,23 @@ export default function AdminPortalPage() {
                             </td>
 
                             {/* Host Applicant */}
-                            <td className="p-4">
-                              <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                            <td className="py-2 px-3">
+                              <div className="font-semibold text-primary flex items-center gap-1.5">
                                 <span>{h.firstName} {h.lastName}</span>
                                 {h.emailVerified && (
-                                  <BadgeCheck size={13} className="text-emerald-600" title="Email Verified" />
+                                  <span title="Email Verified">
+                                    <BadgeCheck size={13} className="text-accent" />
+                                  </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                              <div className="text-[11px] text-primary-muted font-mono mt-0.5">
                                 {h.email} {h.phone ? `• ${h.phone}` : ""}
                               </div>
                             </td>
 
                             {/* Business Type */}
-                            <td className="p-4">
-                              <div className="font-medium text-slate-800">
+                            <td className="py-2 px-3">
+                              <div className="font-medium text-primary">
                                 {prof.hostType === "company" || prof.hostType === "CORPORATE_ENTITY"
                                   ? "Corporate Entity"
                                   : prof.hostType === "property_manager"
@@ -1131,38 +1123,38 @@ export default function AdminPortalPage() {
                                   : "Individual Owner"}
                               </div>
                               {prof.companyName && (
-                                <div className="text-[11px] text-slate-500 font-medium truncate max-w-[180px]">
+                                <div className="text-[11px] text-primary-secondary font-medium truncate max-w-[180px]">
                                   {prof.companyName}
                                 </div>
                               )}
-                              <div className="text-[10px] text-slate-400">
+                              <div className="text-[10px] text-primary-muted">
                                 {prof.operatingCity || "Abuja"}
                               </div>
                             </td>
 
-                            {/* Status */}
-                            <td className="p-4">
+                            {/* Status Badge */}
+                            <td className="py-2 px-3">
                               <span
-                                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
                                   status === "APPROVED"
-                                    ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                                    ? "bg-status-success-bg text-status-success-text border-status-success-border"
                                     : status === "UNDER_REVIEW"
-                                    ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                    ? "bg-status-warning-bg text-status-warning-text border-status-warning-border"
                                     : status === "ACTION_REQUIRED"
-                                    ? "bg-blue-50 text-blue-800 border border-blue-200"
+                                    ? "bg-status-info-bg text-status-info-text border-status-info-border"
                                     : status === "REJECTED"
-                                    ? "bg-rose-50 text-rose-800 border border-rose-200"
-                                    : "bg-slate-100 text-slate-700"
+                                    ? "bg-status-critical-bg text-status-critical-text border-status-critical-border"
+                                    : "bg-surface-muted text-primary-secondary border-border"
                                 }`}
                               >
                                 {status === "UNDER_REVIEW" && (
-                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                                  <span className="w-1.5 h-1.5 rounded-full bg-status-warning-text animate-pulse" />
                                 )}
                                 <span>
                                   {status === "UNDER_REVIEW"
-                                    ? "Awaiting Review"
+                                    ? "Under Review"
                                     : status === "ACTION_REQUIRED"
-                                    ? "Action Required"
+                                    ? "Action Needed"
                                     : status === "APPROVED"
                                     ? "Approved"
                                     : status === "REJECTED"
@@ -1172,8 +1164,8 @@ export default function AdminPortalPage() {
                               </span>
                             </td>
 
-                            {/* Risk Score & Flags */}
-                            <td className="p-4">
+                            {/* Risk Assessment */}
+                            <td className="py-2 px-3">
                               <span
                                 className={`px-2 py-0.5 rounded-md text-[10px] font-bold border inline-block ${riskColor}`}
                               >
@@ -1182,11 +1174,11 @@ export default function AdminPortalPage() {
                             </td>
 
                             {/* Actions */}
-                            <td className="p-4 text-right space-x-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <td className="py-2 px-3 text-right space-x-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => openHostSplitView(h)}
-                                className="px-3 py-1.5 bg-slate-900 hover:bg-black text-white rounded-lg text-xs font-semibold transition-all inline-flex items-center gap-1 cursor-pointer shadow-xs"
+                                className="px-2.5 py-1 bg-surface border border-border hover:bg-surface-muted text-primary rounded-lg text-xs font-semibold transition-all inline-flex items-center gap-1 cursor-pointer shadow-xs"
                               >
                                 <Eye size={12} />
                                 <span>Review Dossier</span>
@@ -1197,7 +1189,7 @@ export default function AdminPortalPage() {
                                   type="button"
                                   disabled={actionLoading === h.id}
                                   onClick={() => handleApproveHost(h.id)}
-                                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-all inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                  className="px-2.5 py-1 bg-accent hover:bg-accent-hover text-white rounded-lg text-xs font-semibold transition-all inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
                                 >
                                   {actionLoading === h.id ? (
                                     <Loader2 size={12} className="animate-spin" />
@@ -1214,7 +1206,7 @@ export default function AdminPortalPage() {
 
                       {filteredHosts.length === 0 && (
                         <tr>
-                          <td colSpan={7} className="p-12 text-center text-slate-400">
+                          <td colSpan={7} className="p-12 text-center text-primary-muted">
                             No applicant dossiers match the selected filter.
                           </td>
                         </tr>
@@ -1225,10 +1217,10 @@ export default function AdminPortalPage() {
 
                 {/* Floating Bulk Action Bar */}
                 {selectedHostIds.size > 0 && (
-                  <div className="p-4 bg-slate-900 text-white border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-bottom duration-200">
+                  <div className="p-3 bg-charcoal text-white border-t border-charcoal-border flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-bottom duration-200 shrink-0">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-emerald-400" />
-                      <span className="font-semibold text-xs">
+                      <CheckCircle2 size={16} className="text-accent" />
+                      <span className="font-semibold text-xs tabular-nums">
                         {selectedHostIds.size} dossiers selected
                       </span>
                     </div>
@@ -1239,7 +1231,7 @@ export default function AdminPortalPage() {
                         <select
                           value={bulkAssignReviewer}
                           onChange={(e) => setBulkAssignReviewer(e.target.value)}
-                          className="h-8 px-2.5 rounded-lg bg-slate-800 border border-slate-700 text-white text-xs focus:outline-none"
+                          className="h-8 px-2.5 rounded-lg bg-charcoal-surface border border-charcoal-border text-white text-xs focus:outline-none"
                         >
                           <option value="">Assign to Reviewer...</option>
                           <option value="Senior Officer Adeyemi (Abuja Desk)">Officer Adeyemi (Abuja)</option>
@@ -1250,7 +1242,7 @@ export default function AdminPortalPage() {
                           type="button"
                           onClick={handleBulkAssign}
                           disabled={!bulkAssignReviewer}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 cursor-pointer"
+                          className="px-3 py-1.5 bg-charcoal-surface hover:bg-charcoal text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 cursor-pointer"
                         >
                           Assign
                         </button>
@@ -1260,7 +1252,7 @@ export default function AdminPortalPage() {
                       <button
                         type="button"
                         onClick={handleBulkApprove}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        className="px-3.5 py-1.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
                       >
                         Bulk Approve ({selectedHostIds.size})
                       </button>
@@ -1269,7 +1261,7 @@ export default function AdminPortalPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedHostIds(new Set())}
-                        className="px-2.5 py-1.5 text-slate-400 hover:text-white text-xs cursor-pointer"
+                        className="px-2.5 py-1.5 text-primary-muted hover:text-white text-xs cursor-pointer"
                       >
                         Clear
                       </button>
@@ -1287,22 +1279,22 @@ export default function AdminPortalPage() {
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                  <h1 className="text-2xl font-bold text-primary tracking-tight">
                     Properties Oversight &amp; Inspection
                   </h1>
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-primary-secondary mt-1">
                     Manage active listings, review incoming physical inspection requests, and manage power/security guarantees.
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-slate-200 text-xs shadow-xs">
+                <div className="flex items-center gap-2 bg-surface p-1 rounded-xl border border-border text-xs shadow-xs">
                   <button
                     type="button"
                     onClick={() => setPropertySubTab("pending")}
                     className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
                       propertySubTab === "pending"
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : "text-slate-600 hover:text-slate-900"
+                        ? "bg-primary text-white shadow-xs"
+                        : "text-primary-secondary hover:text-primary"
                     }`}
                   >
                     Pending Approvals ({pendingListingsCount})
@@ -1312,8 +1304,8 @@ export default function AdminPortalPage() {
                     onClick={() => setPropertySubTab("all")}
                     className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
                       propertySubTab === "all"
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : "text-slate-600 hover:text-slate-900"
+                        ? "bg-primary text-white shadow-xs"
+                        : "text-primary-secondary hover:text-primary"
                     }`}
                   >
                     All Properties ({properties.length})
@@ -1322,56 +1314,56 @@ export default function AdminPortalPage() {
               </div>
 
               {/* Properties Table */}
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs divide-y divide-slate-200">
-                  <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                <table className="w-full text-left text-xs divide-y divide-border">
+                  <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
                     <tr>
-                      <th className="p-4">Property</th>
-                      <th className="p-4">Location</th>
-                      <th className="p-4">Nightly Rate</th>
-                      <th className="p-4">Status</th>
-                      <th className="p-4 text-right">Actions</th>
+                      <th className="py-2.5 px-3">Property</th>
+                      <th className="py-2.5 px-3">Location</th>
+                      <th className="py-2.5 px-3">Nightly Rate</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border">
                     {properties
                       .filter((p) => (propertySubTab === "pending" ? p.status === "PENDING_REVIEW" : true))
                       .map((prop) => (
                         <tr
                           key={prop.id}
                           onClick={() => setSelectedProperty(prop)}
-                          className="hover:bg-slate-50 transition-colors cursor-pointer"
+                          className="hover:bg-surface-muted/60 transition-colors cursor-pointer"
                         >
-                          <td className="p-4">
-                            <div className="font-semibold text-slate-900">{prop.title}</div>
-                            <div className="text-[11px] text-slate-500">{prop.propertyType}</div>
+                          <td className="py-2 px-3">
+                            <div className="font-semibold text-primary">{prop.title}</div>
+                            <div className="text-[11px] text-primary-muted">{prop.propertyType}</div>
                           </td>
-                          <td className="p-4 text-slate-600">
+                          <td className="py-2 px-3 text-primary-secondary">
                             {prop.neighborhood}, {prop.city}
                           </td>
-                          <td className="p-4 font-semibold text-slate-900">
+                          <td className="py-2 px-3 font-semibold text-primary tabular-nums">
                             {formatNaira(prop.pricePerNight)}
                           </td>
-                          <td className="p-4">
+                          <td className="py-2 px-3">
                             <span
-                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${
+                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
                                 prop.status === "PUBLISHED"
-                                  ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                                  ? "bg-status-success-bg text-status-success-text border-status-success-border"
                                   : prop.status === "PENDING_REVIEW"
-                                  ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                  ? "bg-status-warning-bg text-status-warning-text border-status-warning-border"
                                   : prop.status === "REJECTED"
-                                  ? "bg-rose-50 text-rose-800 border border-rose-200"
-                                  : "bg-slate-100 text-slate-700"
+                                  ? "bg-status-critical-bg text-status-critical-text border-status-critical-border"
+                                  : "bg-surface-muted text-primary-secondary border-border"
                               }`}
                             >
                               {prop.status}
                             </span>
                           </td>
-                          <td className="p-4 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2 px-3 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
                               onClick={() => setSelectedProperty(prop)}
-                              className="px-2.5 py-1 text-slate-700 font-semibold border border-slate-200 rounded-lg hover:bg-slate-100"
+                              className="px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted"
                             >
                               Inspect
                             </button>
@@ -1379,7 +1371,7 @@ export default function AdminPortalPage() {
                               <button
                                 type="button"
                                 onClick={() => handleApproveProperty(prop.id)}
-                                className="px-2.5 py-1 bg-emerald-600 text-white font-semibold rounded-lg hover:bg-emerald-500"
+                                className="px-2.5 py-1 bg-accent text-white font-semibold rounded-lg hover:bg-accent-hover"
                               >
                                 Approve
                               </button>
@@ -1399,63 +1391,63 @@ export default function AdminPortalPage() {
           {activeModule === "financials" && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                <h1 className="text-2xl font-bold text-primary tracking-tight">
                   Financials &amp; Bookings Ledger
                 </h1>
-                <p className="text-xs text-slate-500 mt-1">
-                  Full transactional audit of reservations, Paystack payment references, cleaning fee splits, and host settlement payouts.
+                <p className="text-xs text-primary-secondary mt-1">
+                  Full transactional audit of reservations, payment references, cleaning fee splits, and host settlement payouts.
                 </p>
               </div>
 
               {/* Bookings Ledger Table */}
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs divide-y divide-slate-200">
-                  <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                <table className="w-full text-left text-xs divide-y divide-border">
+                  <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
                     <tr>
-                      <th className="p-4">Order Ref</th>
-                      <th className="p-4">Guest</th>
-                      <th className="p-4">Stay Dates</th>
-                      <th className="p-4">Total Amount</th>
-                      <th className="p-4">Payment Method</th>
-                      <th className="p-4">Status</th>
-                      <th className="p-4 text-right">Actions</th>
+                      <th className="py-2.5 px-3">Order Ref</th>
+                      <th className="py-2.5 px-3">Guest</th>
+                      <th className="py-2.5 px-3">Stay Dates</th>
+                      <th className="py-2.5 px-3">Total Amount</th>
+                      <th className="py-2.5 px-3">Payment Method</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border">
                     {bookings.map((b) => (
                       <tr
                         key={b.id}
                         onClick={() => setSelectedBooking(b)}
-                        className="hover:bg-slate-50 transition-colors cursor-pointer"
+                        className="hover:bg-surface-muted/60 transition-colors cursor-pointer"
                       >
-                        <td className="p-4 font-mono font-bold text-slate-900">
+                        <td className="py-2 px-3 font-mono font-bold text-primary tabular-nums">
                           {b.id?.slice(0, 8) || b.referenceCode || "BK-ORD"}
                         </td>
-                        <td className="p-4">
-                          <div className="font-semibold text-slate-900">
+                        <td className="py-2 px-3">
+                          <div className="font-semibold text-primary">
                             {b.guestName || "Guest User"}
                           </div>
-                          <div className="text-[11px] text-slate-500 font-mono">{b.guestEmail}</div>
+                          <div className="text-[11px] text-primary-muted font-mono">{b.guestEmail}</div>
                         </td>
-                        <td className="p-4 text-slate-600">
+                        <td className="py-2 px-3 text-primary-secondary tabular-nums">
                           {b.checkInDate || b.checkIn} → {b.checkOutDate || b.checkOut}
                         </td>
-                        <td className="p-4 font-bold text-emerald-700">
+                        <td className="py-2 px-3 font-bold text-accent tabular-nums">
                           {formatNaira(b.totalAmount || b.totalPrice || 0)}
                         </td>
-                        <td className="p-4 text-slate-600 font-medium">
-                          {b.payment?.paymentMethod || "Paystack Direct"}
+                        <td className="py-2 px-3 text-primary-secondary font-medium">
+                          {b.payment?.paymentMethod || "Payment Gateway"}
                         </td>
-                        <td className="p-4">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <td className="py-2 px-3">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-status-success-bg text-status-success-text border border-status-success-border">
                             {b.status || "CONFIRMED"}
                           </span>
                         </td>
-                        <td className="p-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2 px-3 text-right" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
                             onClick={() => setSelectedBooking(b)}
-                            className="px-2.5 py-1 text-slate-700 font-semibold border border-slate-200 rounded-lg hover:bg-slate-100"
+                            className="px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted"
                           >
                             Details
                           </button>
@@ -1464,7 +1456,7 @@ export default function AdminPortalPage() {
                     ))}
                     {bookings.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="p-10 text-center text-slate-400">
+                        <td colSpan={7} className="p-10 text-center text-primary-muted">
                           No transactions recorded in ledger.
                         </td>
                       </tr>
@@ -1481,22 +1473,22 @@ export default function AdminPortalPage() {
           {activeModule === "security" && (
             <div className="space-y-6">
               <div>
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+                <h1 className="text-2xl font-bold text-primary tracking-tight">
                   Security, Audit Trail &amp; Diagnostics
                 </h1>
-                <p className="text-xs text-slate-500 mt-1">
-                  Immutable administrative action log, encrypted document download ledger, and Resend email deliverability probe.
+                <p className="text-xs text-primary-secondary mt-1">
+                  Immutable administrative action log, encrypted document download ledger, and email deliverability probe.
                 </p>
               </div>
 
               {/* Email Diagnostic Probe */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="bg-surface p-5 rounded-2xl border border-border shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
-                    <Mail size={14} className="text-emerald-600" />
-                    <span>Resend Compliance Notification Probe</span>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                    <Mail size={14} className="text-accent" />
+                    <span>Compliance Notification Probe</span>
                   </h4>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="text-xs text-primary-secondary mt-0.5">
                     Test automated email dispatch to hosts and compliance reviewers.
                   </p>
                 </div>
@@ -1506,13 +1498,13 @@ export default function AdminPortalPage() {
                     value={testEmailTo}
                     onChange={(e) => setTestEmailTo(e.target.value)}
                     placeholder="email@domain.com"
-                    className="h-9 px-3 rounded-xl border border-slate-200 text-xs text-slate-900"
+                    className="h-9 px-3 rounded-xl border border-border text-xs text-primary bg-surface"
                   />
                   <button
                     type="button"
                     onClick={handleSendTestEmail}
                     disabled={testEmailLoading}
-                    className="h-9 px-4 rounded-xl bg-slate-900 text-white text-xs font-semibold hover:bg-black transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    className="h-9 px-4 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-black transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   >
                     {testEmailLoading ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
                     <span>Test Dispatch</span>
@@ -1520,50 +1512,50 @@ export default function AdminPortalPage() {
                 </div>
               </div>
               {testEmailResult && (
-                <div className="p-3 bg-slate-100 rounded-xl text-xs font-mono text-slate-800">
+                <div className="p-3 bg-surface-muted rounded-xl text-xs font-mono text-primary border border-border">
                   {testEmailResult}
                 </div>
               )}
 
               {/* Security Audit Trail Table */}
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-                <div className="p-4 border-b border-slate-200 font-bold text-xs uppercase tracking-wider text-slate-800 flex items-center justify-between">
+              <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                <div className="p-4 border-b border-border font-bold text-xs uppercase tracking-wider text-primary flex items-center justify-between">
                   <span>Security Audit Log ({auditLogs.length} Events)</span>
-                  <span className="text-[11px] text-slate-400 font-normal">Tamper-evident system trail</span>
+                  <span className="text-[11px] text-primary-muted font-normal">Tamper-evident system trail</span>
                 </div>
-                <table className="w-full text-left text-xs divide-y divide-slate-200">
-                  <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <table className="w-full text-left text-xs divide-y divide-border">
+                  <thead className="bg-surface text-[11px] font-bold uppercase tracking-wider text-primary-muted">
                     <tr>
-                      <th className="p-4">Timestamp</th>
-                      <th className="p-4">Action</th>
-                      <th className="p-4">Admin Actor</th>
-                      <th className="p-4">Details / Notes</th>
+                      <th className="py-2.5 px-3">Timestamp</th>
+                      <th className="py-2.5 px-3">Action</th>
+                      <th className="py-2.5 px-3">Admin Actor</th>
+                      <th className="py-2.5 px-3">Details / Notes</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-border">
                     {auditLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-50">
-                        <td className="p-4 font-mono text-slate-500 whitespace-nowrap">
+                      <tr key={log.id} className="hover:bg-surface-muted/60 transition-colors">
+                        <td className="py-2 px-3 font-mono text-primary-muted whitespace-nowrap tabular-nums">
                           {log.createdAt
                             ? new Date(log.createdAt).toLocaleString("en-GB")
                             : "Just now"}
                         </td>
-                        <td className="p-4 font-semibold text-slate-900">
-                          <span className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 font-mono text-[11px]">
+                        <td className="py-2 px-3 font-semibold text-primary">
+                          <span className="px-2 py-0.5 rounded-md bg-surface-muted border border-border font-mono text-[11px]">
                             {log.action}
                           </span>
                         </td>
-                        <td className="p-4 text-slate-600 font-mono text-[11px]">
+                        <td className="py-2 px-3 text-primary-secondary font-mono text-[11px]">
                           {log.adminEmail || "admin@ile.ng"}
                         </td>
-                        <td className="p-4 text-slate-700">
+                        <td className="py-2 px-3 text-primary">
                           {log.notes || log.details || "Administrative event verified."}
                         </td>
                       </tr>
                     ))}
                     {auditLogs.length === 0 && (
                       <tr>
-                        <td colSpan={4} className="p-8 text-center text-slate-400">
+                        <td colSpan={4} className="p-8 text-center text-primary-muted">
                           No audit trail events recorded.
                         </td>
                       </tr>
@@ -1577,28 +1569,28 @@ export default function AdminPortalPage() {
       </div>
 
       {/* ─────────────────────────────────────────────────────────────
-          4. THE DEDICATED DOCUMENT REVIEW & APPROVAL SPLIT-VIEW
+          3. THE DEDICATED DOCUMENT REVIEW & APPROVAL SPLIT-VIEW
       ────────────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedHost && (
-          <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white overflow-hidden animate-in fade-in duration-150">
+          <div className="fixed inset-0 z-50 flex flex-col bg-charcoal text-white overflow-hidden animate-in fade-in duration-150">
             {/* Split-View Top Bar */}
-            <div className="h-16 px-6 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div className="h-14 px-6 bg-charcoal-surface border-b border-charcoal-border flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600/30 border border-emerald-500/40 text-emerald-400 flex items-center justify-center font-bold text-sm shrink-0">
+                <div className="w-8 h-8 rounded-xl bg-emerald-light border border-status-success-border text-emerald flex items-center justify-center font-bold text-xs shrink-0">
                   KYC
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base font-bold text-white">
+                    <h2 className="text-sm font-bold text-white">
                       {selectedHost.firstName} {selectedHost.lastName}
                     </h2>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-status-warning-bg text-status-warning-text border border-status-warning-border">
                       {selectedHost.profile?.verificationStatus || "UNDER_REVIEW"}
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-400">
-                    Host ID: <span className="font-mono">{selectedHost.id}</span> • Registered on {selectedHost.createdAt ? new Date(selectedHost.createdAt).toLocaleDateString("en-GB") : "Recently"}
+                  <p className="text-[11px] text-primary-muted">
+                    Host ID: <span className="font-mono">{selectedHost.id}</span>
                   </p>
                 </div>
               </div>
@@ -1610,48 +1602,48 @@ export default function AdminPortalPage() {
                   setSelectedHost(null);
                   setSelectedHostDossier(null);
                 }}
-                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+                className="p-1.5 text-primary-muted hover:text-white rounded-xl hover:bg-charcoal transition-colors cursor-pointer"
                 title="Exit Review Workspace"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
             {/* Split Screen Workspace Body */}
             <div className="flex-1 flex overflow-hidden">
               {/* ── LEFT PANE (40% width): DATA, BIOMETRICS & ACTIONS ── */}
-              <div className="w-full sm:w-[420px] lg:w-[460px] bg-slate-900 border-r border-slate-800 flex flex-col justify-between overflow-y-auto shrink-0">
+              <div className="w-full sm:w-[420px] lg:w-[460px] bg-charcoal-surface border-r border-charcoal-border flex flex-col justify-between overflow-y-auto shrink-0">
                 <div className="p-6 space-y-6 text-xs">
                   {/* Notice Pill if Action Feedback */}
                   {downloadSuccessNotice && (
-                    <div className="p-3 bg-emerald-950/80 border border-emerald-800 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
+                    <div className="p-3 bg-status-success-bg border border-status-success-border text-status-success-text rounded-xl text-xs flex items-center gap-2">
                       <Lock size={14} className="shrink-0" />
                       <span>{downloadSuccessNotice}</span>
                     </div>
                   )}
 
                   {/* 1. AI Biometric Match Interface */}
-                  <div className="p-4 bg-slate-800/80 border border-slate-700/80 rounded-2xl space-y-3">
+                  <div className="p-4 bg-charcoal border border-charcoal-border rounded-2xl space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
                         <Sparkles size={13} />
-                        <span>AI Biometric Match Analysis</span>
+                        <span>Biometric Engine Analysis</span>
                       </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-status-success-bg text-status-success-text border border-status-success-border">
                         AI Match: 99.4% • PASSED
                       </span>
                     </div>
 
                     {/* Submitted Selfie Display with AI Match Confidence Score Directly Above It */}
                     <div className="pt-1">
-                      <div className="flex items-center justify-between pb-1.5 text-[11px] text-slate-400">
+                      <div className="flex items-center justify-between pb-1.5 text-[11px] text-primary-muted">
                         <span>Submitted Biometric Liveness Capture:</span>
-                        <span className="text-emerald-400 font-semibold">AI Match: 99.4%</span>
+                        <span className="text-accent font-semibold">AI Match: 99.4%</span>
                       </div>
                       {selectedHost.profile?.selfieUrl ? (
                         <div
                           onClick={() => setActiveDocTab("selfie")}
-                          className="relative h-44 w-full rounded-xl overflow-hidden border border-slate-700 bg-slate-950 cursor-pointer group"
+                          className="relative h-44 w-full rounded-xl overflow-hidden border border-charcoal-border bg-charcoal cursor-pointer group"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
@@ -1659,34 +1651,34 @@ export default function AdminPortalPage() {
                             alt="Submitted Biometric Selfie"
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                           />
-                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-emerald-600/90 text-white text-[10px] font-bold flex items-center gap-1 shadow-xs">
+                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-accent text-white text-[10px] font-bold flex items-center gap-1 shadow-xs">
                             <ShieldCheck size={11} />
-                            <span>AI Verified Liveness</span>
+                            <span>Verified Liveness</span>
                           </div>
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold transition-opacity">
                             View Full Resolution In Document Viewer ↗
                           </div>
                         </div>
                       ) : (
-                        <div className="h-28 rounded-xl border border-dashed border-slate-700 bg-slate-900 flex items-center justify-center text-slate-500 text-xs">
+                        <div className="h-28 rounded-xl border border-dashed border-charcoal-border bg-charcoal flex items-center justify-center text-primary-muted text-xs">
                           No selfie capture provided
                         </div>
                       )}
                     </div>
 
-                    <p className="text-[11px] text-slate-300 leading-relaxed pt-1">
-                      Liveness verification verified client-side using Google MediaPipe WASM. The selfie photo exhibits 99.4% biometric facial landmarks concordance with the government ID portrait.
+                    <p className="text-[11px] text-primary-secondary leading-relaxed pt-1">
+                      Liveness verification verified client-side. The selfie capture exhibits 99.4% biometric facial landmarks concordance with the government ID portrait.
                     </p>
 
                     {/* Challenge Checklist */}
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-700 text-[10px]">
-                      <div className="text-emerald-400 flex items-center gap-1 font-semibold">
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-charcoal-border text-[10px]">
+                      <div className="text-accent flex items-center gap-1 font-semibold">
                         <Check size={11} /> Center Face
                       </div>
-                      <div className="text-emerald-400 flex items-center gap-1 font-semibold">
+                      <div className="text-accent flex items-center gap-1 font-semibold">
                         <Check size={11} /> Blink Motion
                       </div>
-                      <div className="text-emerald-400 flex items-center gap-1 font-semibold">
+                      <div className="text-accent flex items-center gap-1 font-semibold">
                         <Check size={11} /> Head Turn Left
                       </div>
                     </div>
@@ -1694,44 +1686,44 @@ export default function AdminPortalPage() {
 
                   {/* 2. Host Identity Details */}
                   <div className="space-y-2">
-                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                      <User size={13} className="text-emerald-400" />
+                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center gap-1.5">
+                      <User size={13} className="text-accent" />
                       <span>Applicant Personal &amp; Legal Info</span>
                     </h4>
 
-                    <div className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2 text-slate-300">
+                    <div className="p-4 bg-charcoal border border-charcoal-border rounded-2xl space-y-2 text-primary-secondary">
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Full Legal Name:</span>
+                        <span className="text-primary-muted">Full Legal Name:</span>
                         <span className="font-semibold text-white">
                           {selectedHost.firstName} {selectedHost.lastName}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">ID Document Type:</span>
+                        <span className="text-primary-muted">ID Document Type:</span>
                         <span className="font-semibold text-white uppercase">
                           {selectedHost.profile?.idType ? selectedHost.profile.idType.replace(/_/g, " ") : "NIN Slip"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">ID / NIN Number:</span>
-                        <span className="font-mono font-bold text-white">
+                        <span className="text-primary-muted">ID / NIN Number:</span>
+                        <span className="font-mono font-bold text-white tabular-nums">
                           {selectedHost.profile?.idNumber || "Uploaded Document"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Email Address:</span>
+                        <span className="text-primary-muted">Email Address:</span>
                         <span className="text-white font-mono">{selectedHost.email}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-400">Phone Number:</span>
+                        <span className="text-primary-muted">Phone Number:</span>
                         <div className="flex items-center gap-1.5">
-                          <span className="text-white">{selectedHost.phone || "Not set"}</span>
+                          <span className="text-white tabular-nums">{selectedHost.phone || "Not set"}</span>
                           {selectedHost.phone && (
                             <a
                               href={`https://wa.me/${selectedHost.phone.replace(/[^0-9]/g, "")}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] hover:bg-emerald-500/30 font-semibold"
+                              className="px-1.5 py-0.5 rounded bg-accent-light text-accent text-[10px] font-semibold"
                             >
                               WhatsApp
                             </a>
@@ -1739,15 +1731,15 @@ export default function AdminPortalPage() {
                         </div>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Operating Region:</span>
+                        <span className="text-primary-muted">Operating Region:</span>
                         <span className="text-white font-medium">
                           {selectedHost.profile?.operatingCity || "Abuja"}
                           {selectedHost.profile?.operatingAreas ? ` (${selectedHost.profile.operatingAreas})` : ""}
                         </span>
                       </div>
                       {selectedHost.profile?.companyName && (
-                        <div className="pt-2 border-t border-slate-700/60 flex justify-between">
-                          <span className="text-slate-400">Company &amp; CAC:</span>
+                        <div className="pt-2 border-t border-charcoal-border flex justify-between">
+                          <span className="text-primary-muted">Company &amp; CAC:</span>
                           <span className="text-white font-semibold">
                             {selectedHost.profile.companyName} ({selectedHost.profile.companyRegNumber || "N/A"})
                           </span>
@@ -1755,8 +1747,8 @@ export default function AdminPortalPage() {
                       )}
 
                       {/* Login as User Function (Support Masquerade) */}
-                      <div className="pt-2 border-t border-slate-700/60 flex items-center justify-between">
-                        <span className="text-slate-400">Support Masquerade:</span>
+                      <div className="pt-2 border-t border-charcoal-border flex items-center justify-between">
+                        <span className="text-primary-muted">Support Masquerade:</span>
                         <button
                           type="button"
                           onClick={() => {
@@ -1778,9 +1770,9 @@ export default function AdminPortalPage() {
                               window.open("/host/dashboard", "_blank");
                             }
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-charcoal-border hover:bg-charcoal text-white text-[11px] font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
                         >
-                          <User size={11} className="text-emerald-400" />
+                          <User size={11} className="text-accent" />
                           <span>Login as User</span>
                         </button>
                       </div>
@@ -1789,26 +1781,26 @@ export default function AdminPortalPage() {
 
                   {/* 3. Settlement Bank Account */}
                   <div className="space-y-2">
-                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                      <Landmark size={13} className="text-emerald-400" />
+                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center gap-1.5">
+                      <Landmark size={13} className="text-accent" />
                       <span>Settlement Bank Account</span>
                     </h4>
 
-                    <div className="p-4 bg-slate-800/40 border border-slate-800 rounded-2xl space-y-2 text-slate-300">
+                    <div className="p-4 bg-charcoal border border-charcoal-border rounded-2xl space-y-2 text-primary-secondary">
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Bank Name:</span>
+                        <span className="text-primary-muted">Bank Name:</span>
                         <span className="font-semibold text-white">
                           {selectedHost.profile?.bankName || "Not configured"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">NUBAN Account:</span>
-                        <span className="font-mono font-bold text-white">
+                        <span className="text-primary-muted">NUBAN Account:</span>
+                        <span className="font-mono font-bold text-white tabular-nums">
                           {selectedHost.profile?.bankAccountNumber || "—"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-slate-400">Account Name:</span>
+                        <span className="text-primary-muted">Account Name:</span>
                         <span className="font-medium text-white">
                           {selectedHost.profile?.bankAccountName || "—"}
                         </span>
@@ -1818,8 +1810,8 @@ export default function AdminPortalPage() {
 
                   {/* 4. Action Prompts */}
                   {isRejectPromptOpen && (
-                    <div className="p-4 bg-rose-950/60 border border-rose-800 rounded-2xl space-y-3">
-                      <h5 className="font-bold text-xs text-rose-300">
+                    <div className="p-4 bg-status-critical-bg border border-status-critical-border rounded-2xl space-y-3">
+                      <h5 className="font-bold text-xs text-status-critical-text">
                         Specify Rejection Reason (Dispatched to Host via Email)
                       </h5>
                       <textarea
@@ -1827,13 +1819,13 @@ export default function AdminPortalPage() {
                         value={rejectHostReason}
                         onChange={(e) => setRejectHostReason(e.target.value)}
                         placeholder="e.g. Identity card is blurry or expired; please upload a clear photo of your Nigerian International Passport or NIN slip."
-                        className="w-full p-2.5 bg-slate-900 border border-rose-800 rounded-xl text-xs text-white focus:outline-none"
+                        className="w-full p-2.5 bg-charcoal-surface border border-charcoal-border rounded-xl text-xs text-white focus:outline-none"
                       />
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setIsRejectPromptOpen(false)}
-                          className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
+                          className="px-3 py-1.5 text-xs text-primary-muted hover:text-white"
                         >
                           Cancel
                         </button>
@@ -1841,7 +1833,7 @@ export default function AdminPortalPage() {
                           type="button"
                           disabled={actionLoading === selectedHost.id}
                           onClick={() => handleRejectHost(selectedHost.id)}
-                          className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl text-xs transition-colors"
+                          className="px-4 py-1.5 bg-status-critical-text hover:opacity-90 text-white font-bold rounded-xl text-xs transition-colors"
                         >
                           Confirm Rejection
                         </button>
@@ -1850,8 +1842,8 @@ export default function AdminPortalPage() {
                   )}
 
                   {isRequestInfoPromptOpen && (
-                    <div className="p-4 bg-amber-950/60 border border-amber-800 rounded-2xl space-y-3">
-                      <h5 className="font-bold text-xs text-amber-300">
+                    <div className="p-4 bg-status-warning-bg border border-status-warning-border rounded-2xl space-y-3">
+                      <h5 className="font-bold text-xs text-status-warning-text">
                         Request Document Clarification
                       </h5>
                       <textarea
@@ -1859,13 +1851,13 @@ export default function AdminPortalPage() {
                         value={requestInfoText}
                         onChange={(e) => setRequestInfoText(e.target.value)}
                         placeholder="e.g. Please provide a clearer, glare-free photo of your NIN slip and ensure your bank account matches your legal name."
-                        className="w-full p-2.5 bg-slate-900 border border-amber-800 rounded-xl text-xs text-white focus:outline-none"
+                        className="w-full p-2.5 bg-charcoal-surface border border-charcoal-border rounded-xl text-xs text-white focus:outline-none"
                       />
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setIsRequestInfoPromptOpen(false)}
-                          className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
+                          className="px-3 py-1.5 text-xs text-primary-muted hover:text-white"
                         >
                           Cancel
                         </button>
@@ -1873,7 +1865,7 @@ export default function AdminPortalPage() {
                           type="button"
                           disabled={actionLoading === selectedHost.id}
                           onClick={() => handleRequestHostInfo(selectedHost.id)}
-                          className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs transition-colors"
+                          className="px-4 py-1.5 bg-status-warning-text text-white font-bold rounded-xl text-xs transition-colors"
                         >
                           Dispatch Request
                         </button>
@@ -1883,7 +1875,7 @@ export default function AdminPortalPage() {
                 </div>
 
                 {/* Fixed Action Buttons at Bottom of Left Pane */}
-                <div className="p-6 border-t border-slate-800 bg-slate-900/90 sticky bottom-0 space-y-2">
+                <div className="p-6 border-t border-charcoal-border bg-charcoal-surface sticky bottom-0 space-y-2">
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -1891,7 +1883,7 @@ export default function AdminPortalPage() {
                         setIsRequestInfoPromptOpen(true);
                         setIsRejectPromptOpen(false);
                       }}
-                      className="w-full py-2.5 rounded-xl bg-amber-600/20 border border-amber-600/40 hover:bg-amber-600/30 text-amber-300 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 rounded-xl bg-status-warning-bg border border-status-warning-border text-status-warning-text text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <AlertTriangle size={13} />
                       <span>Request Clarification</span>
@@ -1903,7 +1895,7 @@ export default function AdminPortalPage() {
                         setIsRejectPromptOpen(true);
                         setIsRequestInfoPromptOpen(false);
                       }}
-                      className="w-full py-2.5 rounded-xl bg-rose-600/20 border border-rose-600/40 hover:bg-rose-600/30 text-rose-300 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 rounded-xl bg-status-critical-bg border border-status-critical-border text-status-critical-text text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <XCircle size={13} />
                       <span>Reject with Reason</span>
@@ -1914,7 +1906,7 @@ export default function AdminPortalPage() {
                     type="button"
                     disabled={actionLoading === selectedHost.id}
                     onClick={() => handleApproveHost(selectedHost.id)}
-                    className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold tracking-wide transition-all shadow-lg shadow-emerald-900/40 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="w-full py-3 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold tracking-wide transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {actionLoading === selectedHost.id ? (
                       <Loader2 size={15} className="animate-spin" />
@@ -1927,9 +1919,9 @@ export default function AdminPortalPage() {
               </div>
 
               {/* ── RIGHT PANE (~60% width): NATIVE DOCUMENT VIEWER WORKSPACE ── */}
-              <div className="flex-1 bg-slate-950 flex flex-col justify-between overflow-hidden">
+              <div className="flex-1 bg-charcoal flex flex-col justify-between overflow-hidden">
                 {/* Document Viewer Tabs & Controls Header */}
-                <div className="p-4 border-b border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="p-3 border-b border-charcoal-border bg-charcoal-surface flex flex-wrap items-center justify-between gap-3 shrink-0">
                   {/* Document Switcher Tabs */}
                   <div className="flex items-center gap-2">
                     <button
@@ -1937,8 +1929,8 @@ export default function AdminPortalPage() {
                       onClick={() => setActiveDocTab("front")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                         activeDocTab === "front"
-                          ? "bg-emerald-600 text-white shadow-xs"
-                          : "text-slate-400 hover:text-white bg-slate-800"
+                          ? "bg-accent text-white shadow-xs"
+                          : "text-primary-muted hover:text-white bg-charcoal"
                       }`}
                     >
                       Front of ID
@@ -1949,8 +1941,8 @@ export default function AdminPortalPage() {
                       onClick={() => setActiveDocTab("back")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                         activeDocTab === "back"
-                          ? "bg-emerald-600 text-white shadow-xs"
-                          : "text-slate-400 hover:text-white bg-slate-800"
+                          ? "bg-accent text-white shadow-xs"
+                          : "text-primary-muted hover:text-white bg-charcoal"
                       }`}
                     >
                       Back of ID
@@ -1961,8 +1953,8 @@ export default function AdminPortalPage() {
                       onClick={() => setActiveDocTab("selfie")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                         activeDocTab === "selfie"
-                          ? "bg-emerald-600 text-white shadow-xs"
-                          : "text-slate-400 hover:text-white bg-slate-800"
+                          ? "bg-accent text-white shadow-xs"
+                          : "text-primary-muted hover:text-white bg-charcoal"
                       }`}
                     >
                       Live Selfie
@@ -1974,8 +1966,8 @@ export default function AdminPortalPage() {
                         onClick={() => setActiveDocTab("authority")}
                         className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                           activeDocTab === "authority"
-                            ? "bg-emerald-600 text-white shadow-xs"
-                            : "text-slate-400 hover:text-white bg-slate-800"
+                            ? "bg-accent text-white shadow-xs"
+                            : "text-primary-muted hover:text-white bg-charcoal"
                         }`}
                       >
                         Authority Deed
@@ -1988,20 +1980,20 @@ export default function AdminPortalPage() {
                     <button
                       type="button"
                       onClick={() => setDocZoom((z) => Math.max(0.5, z - 0.25))}
-                      className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                      className="p-1.5 text-primary-muted hover:text-white bg-charcoal rounded-lg transition-colors cursor-pointer"
                       title="Zoom Out"
                     >
                       <ZoomOut size={14} />
                     </button>
 
-                    <span className="text-[11px] font-mono text-slate-400 px-1">
+                    <span className="text-[11px] font-mono text-primary-muted px-1 tabular-nums">
                       {Math.round(docZoom * 100)}%
                     </span>
 
                     <button
                       type="button"
                       onClick={() => setDocZoom((z) => Math.min(3, z + 0.25))}
-                      className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                      className="p-1.5 text-primary-muted hover:text-white bg-charcoal rounded-lg transition-colors cursor-pointer"
                       title="Zoom In"
                     >
                       <ZoomIn size={14} />
@@ -2035,10 +2027,10 @@ export default function AdminPortalPage() {
                             )
                           }
                           disabled={!currentUrl}
-                          className="ml-2 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                          className="ml-2 px-3 py-1.5 rounded-xl bg-charcoal hover:bg-charcoal-border text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
                           title="Download encrypted document & log in audit trail"
                         >
-                          <Lock size={12} className="text-emerald-400" />
+                          <Lock size={12} className="text-accent" />
                           <span>Download Encrypted File</span>
                         </button>
                       );
@@ -2047,7 +2039,7 @@ export default function AdminPortalPage() {
                 </div>
 
                 {/* Viewer Canvas Area */}
-                <div className="flex-1 overflow-auto p-6 flex items-center justify-center relative bg-[#090D16]">
+                <div className="flex-1 overflow-auto p-6 flex items-center justify-center relative bg-charcoal">
                   {(() => {
                     const prof = selectedHost.profile || {};
                     const currentUrl =
@@ -2061,12 +2053,12 @@ export default function AdminPortalPage() {
 
                     if (!currentUrl) {
                       return (
-                        <div className="text-center text-slate-500 space-y-2 p-8 border border-dashed border-slate-800 rounded-3xl">
-                          <FileText size={36} className="mx-auto text-slate-600" />
+                        <div className="text-center text-primary-muted space-y-2 p-8 border border-dashed border-charcoal-border rounded-3xl">
+                          <FileText size={36} className="mx-auto text-primary-muted" />
                           <p className="text-sm font-semibold">
                             No document uploaded for {activeDocTab.toUpperCase()}
                           </p>
-                          <p className="text-xs text-slate-600">
+                          <p className="text-xs text-primary-muted">
                             The applicant did not provide a file for this section.
                           </p>
                         </div>
@@ -2080,7 +2072,7 @@ export default function AdminPortalPage() {
                         <iframe
                           src={currentUrl}
                           title="Document PDF Viewer"
-                          className="w-full h-full rounded-2xl border border-slate-800 bg-white"
+                          className="w-full h-full rounded-2xl border border-charcoal-border bg-white"
                         />
                       );
                     }
@@ -2094,7 +2086,7 @@ export default function AdminPortalPage() {
                         <img
                           src={currentUrl}
                           alt="Applicant Document"
-                          className="max-h-[75vh] max-w-[85vw] object-contain rounded-2xl shadow-2xl border border-slate-800 bg-slate-900"
+                          className="max-h-[75vh] max-w-[85vw] object-contain rounded-2xl shadow-2xl border border-charcoal-border bg-charcoal-surface"
                         />
                       </div>
                     );
@@ -2107,45 +2099,45 @@ export default function AdminPortalPage() {
       </AnimatePresence>
 
       {/* ─────────────────────────────────────────────────────────────
-          5. MODALS (PROPERTY REVIEW, BOOKING DETAILS, SETTINGS, TEAM)
+          4. MODALS (PROPERTY REVIEW, BOOKING DETAILS, SETTINGS, TEAM)
       ────────────────────────────────────────────────────────────── */}
       {/* Property Inspection Modal */}
       {selectedProperty && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 p-6 space-y-6 text-slate-900">
-            <div className="flex items-start justify-between pb-4 border-b border-slate-200">
+          <div className="bg-surface rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-border p-6 space-y-6 text-primary">
+            <div className="flex items-start justify-between pb-4 border-b border-border">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Property Review &amp; Physical Vetting
+                <span className="text-[10px] font-bold uppercase tracking-wider text-primary-muted">
+                  Property Review &amp; Physical Inspection
                 </span>
-                <h3 className="text-xl font-bold text-slate-900 mt-1">
+                <h3 className="text-xl font-bold text-primary mt-1">
                   {selectedProperty.title}
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-primary-secondary">
                   {selectedProperty.neighborhood}, {selectedProperty.city} · {selectedProperty.propertyType}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedProperty(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 rounded-lg"
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 grid grid-cols-2 gap-3 text-xs">
+            <div className="p-4 bg-surface-muted rounded-2xl border border-border grid grid-cols-2 gap-3 text-xs">
               <div>
-                <span className="text-slate-400 block">Nightly Price</span>
-                <span className="font-bold text-slate-900 text-sm">{formatNaira(selectedProperty.pricePerNight)}</span>
+                <span className="text-primary-muted block">Nightly Price</span>
+                <span className="font-bold text-primary text-sm tabular-nums">{formatNaira(selectedProperty.pricePerNight)}</span>
               </div>
               <div>
-                <span className="text-slate-400 block">Host Name</span>
-                <span className="font-semibold text-slate-900">{selectedProperty.hostName || "Host Partner"}</span>
+                <span className="text-primary-muted block">Host Name</span>
+                <span className="font-semibold text-primary">{selectedProperty.hostName || "Host Partner"}</span>
               </div>
-              <div className="col-span-2 pt-2 border-t border-slate-200">
-                <span className="text-slate-400 block">Power Infrastructure Guarantee</span>
-                <span className="font-semibold text-emerald-800">{selectedProperty.powerType}</span>
+              <div className="col-span-2 pt-2 border-t border-border">
+                <span className="text-primary-muted block">Power Infrastructure Guarantee</span>
+                <span className="font-semibold text-accent">{selectedProperty.powerType}</span>
               </div>
             </div>
 
@@ -2153,7 +2145,7 @@ export default function AdminPortalPage() {
               <Link
                 href={`/stay/${selectedProperty.slug}`}
                 target="_blank"
-                className="text-xs text-emerald-700 font-semibold hover:underline inline-flex items-center gap-1"
+                className="text-xs text-accent font-semibold hover:underline inline-flex items-center gap-1"
               >
                 <span>Preview Public Stay Page</span>
                 <ExternalLink size={12} />
@@ -2164,7 +2156,7 @@ export default function AdminPortalPage() {
                   <button
                     type="button"
                     onClick={() => handleApproveProperty(selectedProperty.id)}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                    className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
                   >
                     Approve &amp; Publish
                   </button>
@@ -2173,7 +2165,7 @@ export default function AdminPortalPage() {
                   <button
                     type="button"
                     onClick={() => handleSuspendProperty(selectedProperty.id)}
-                    className="px-4 py-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-semibold hover:bg-rose-100 transition-colors cursor-pointer"
+                    className="px-4 py-2 bg-status-critical-bg border border-status-critical-border text-status-critical-text rounded-xl text-xs font-semibold hover:opacity-90 transition-colors cursor-pointer"
                   >
                     Suspend Listing
                   </button>
@@ -2181,7 +2173,7 @@ export default function AdminPortalPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedProperty(null)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer"
+                  className="px-4 py-2 bg-surface-muted hover:bg-border text-primary rounded-xl text-xs font-semibold cursor-pointer"
                 >
                   Close
                 </button>
@@ -2194,39 +2186,39 @@ export default function AdminPortalPage() {
       {/* Booking Details Modal */}
       {selectedBooking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200 p-6 space-y-5 text-slate-900">
-            <div className="flex items-start justify-between pb-4 border-b border-slate-200">
+          <div className="bg-surface rounded-3xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-border p-6 space-y-5 text-primary">
+            <div className="flex items-start justify-between pb-4 border-b border-border">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-primary-muted">
                   Booking Ledger Details
                 </span>
-                <h3 className="text-lg font-bold text-slate-900 mt-1 font-mono">
+                <h3 className="text-lg font-bold text-primary mt-1 font-mono tabular-nums">
                   {selectedBooking.id}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedBooking(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 rounded-lg"
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2 text-xs">
+            <div className="p-4 bg-surface-muted rounded-2xl border border-border space-y-2 text-xs">
               <div className="flex justify-between">
-                <span className="text-slate-500">Guest Legal Name:</span>
-                <span className="font-semibold text-slate-900">{selectedBooking.guestName || "Guest User"}</span>
+                <span className="text-primary-secondary">Guest Legal Name:</span>
+                <span className="font-semibold text-primary">{selectedBooking.guestName || "Guest User"}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Guest Email:</span>
-                <span className="font-mono text-slate-900">{selectedBooking.guestEmail}</span>
+                <span className="text-primary-secondary">Guest Email:</span>
+                <span className="font-mono text-primary">{selectedBooking.guestEmail}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-500">Dates:</span>
-                <span className="font-semibold text-slate-900">{selectedBooking.checkInDate} → {selectedBooking.checkOutDate}</span>
+                <span className="text-primary-secondary">Dates:</span>
+                <span className="font-semibold text-primary tabular-nums">{selectedBooking.checkInDate} → {selectedBooking.checkOutDate}</span>
               </div>
-              <div className="flex justify-between font-bold text-sm pt-2 border-t border-slate-200 text-emerald-800">
+              <div className="flex justify-between font-bold text-sm pt-2 border-t border-border text-accent tabular-nums">
                 <span>Total Amount:</span>
                 <span>{formatNaira(selectedBooking.totalAmount || selectedBooking.totalPrice || 0)}</span>
               </div>
@@ -2235,7 +2227,7 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setSelectedBooking(null)}
-              className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors"
+              className="w-full py-2.5 bg-primary text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors"
             >
               Close Details
             </button>
@@ -2246,38 +2238,38 @@ export default function AdminPortalPage() {
       {/* Admin Settings Modal */}
       {showSettingsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 text-slate-900 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                <Settings size={18} className="text-emerald-600" />
-                <span>Admin SaaS Settings</span>
+          <div className="bg-surface rounded-3xl max-w-md w-full p-6 space-y-5 text-primary shadow-2xl border border-border">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <h3 className="font-bold text-base text-primary flex items-center gap-2">
+                <Settings size={18} className="text-accent" />
+                <span>Admin Workspace Settings</span>
               </h3>
               <button
                 type="button"
                 onClick={() => setShowSettingsModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 rounded-lg cursor-pointer"
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
             <div className="space-y-3 text-xs">
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+              <div className="p-3 bg-surface-muted rounded-xl border border-border flex justify-between items-center">
                 <span>Security Tier</span>
-                <span className="font-bold text-emerald-700">Bank-Grade Tier 3</span>
+                <span className="font-bold text-accent">Bank-Grade Tier 3</span>
               </div>
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+              <div className="p-3 bg-surface-muted rounded-xl border border-border flex justify-between items-center">
                 <span>Session Timeout</span>
-                <span className="font-mono text-slate-700">12 Hours (Enforced)</span>
+                <span className="font-mono text-primary-secondary">12 Hours (Enforced)</span>
               </div>
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+              <div className="p-3 bg-surface-muted rounded-xl border border-border flex justify-between items-center">
                 <span>Environment</span>
-                <span className="font-bold text-slate-900">Production SaaS</span>
+                <span className="font-bold text-primary">Enterprise Workspace</span>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setShowSettingsModal(false)}
-              className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors"
+              className="w-full py-2.5 bg-primary text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors"
             >
               Done
             </button>
@@ -2288,36 +2280,36 @@ export default function AdminPortalPage() {
       {/* Manage Team Modal */}
       {showTeamModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 text-slate-900 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <h3 className="font-bold text-base text-slate-900 flex items-center gap-2">
-                <Users size={18} className="text-emerald-600" />
+          <div className="bg-surface rounded-3xl max-w-md w-full p-6 space-y-5 text-primary shadow-2xl border border-border">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <h3 className="font-bold text-base text-primary flex items-center gap-2">
+                <Users size={18} className="text-accent" />
                 <span>Manage Administrative Team</span>
               </h3>
               <button
                 type="button"
                 onClick={() => setShowTeamModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-800 rounded-lg cursor-pointer"
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
             <div className="space-y-2 text-xs">
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+              <div className="p-3 bg-surface-muted rounded-xl border border-border flex justify-between items-center">
                 <div>
-                  <span className="font-semibold block text-slate-900">Ilé Administrator</span>
-                  <span className="text-[10px] text-slate-400">admin@ile.ng</span>
+                  <span className="font-semibold block text-primary">Ilé Administrator</span>
+                  <span className="text-[10px] text-primary-muted">admin@ile.ng</span>
                 </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-status-success-bg text-status-success-text border border-status-success-border">
                   Super Admin
                 </span>
               </div>
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex justify-between items-center">
+              <div className="p-3 bg-surface-muted rounded-xl border border-border flex justify-between items-center">
                 <div>
-                  <span className="font-semibold block text-slate-900">Abuja KYC Desk</span>
-                  <span className="text-[10px] text-slate-400">compliance.abj@ile.ng</span>
+                  <span className="font-semibold block text-primary">Abuja KYC Desk</span>
+                  <span className="text-[10px] text-primary-muted">compliance.abj@ile.ng</span>
                 </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-status-info-bg text-status-info-text border border-status-info-border">
                   Compliance Officer
                 </span>
               </div>
@@ -2325,7 +2317,7 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setShowTeamModal(false)}
-              className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors"
+              className="w-full py-2.5 bg-primary text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors"
             >
               Done
             </button>

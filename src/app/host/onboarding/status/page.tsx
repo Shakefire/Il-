@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, type Variants } from "framer-motion";
 import { useOnboarding } from "@/context/OnboardingContext";
 import {
   Clock,
@@ -257,7 +257,7 @@ export default function OnboardingStatusPage() {
   };
 
   // Stagger reveal variants
-  const dossierContainerVariants = {
+  const dossierContainerVariants: Variants = {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
@@ -268,7 +268,7 @@ export default function OnboardingStatusPage() {
     },
   };
 
-  const dossierItemVariants = {
+  const dossierItemVariants: Variants = {
     hidden: { opacity: 0, y: 10 },
     show: {
       opacity: 1,

@@ -10,11 +10,33 @@
     --font-display: "DM Serif Display", Georgia, Cambria, serif;
     --background: #FAFAF8;
     --surface: #FFFFFF;
+    --surface-muted: #F5F5F3;
+    --surface-elevated: #FFFFFF;
     --foreground: #171717;
     --foreground-secondary: #6B6B67;
     --foreground-muted: #8B8B86;
     --border: #E7E5E0;
-    --accent: #24483A;
+    --border-subtle: #F0EFEA;
+    --accent: #0B5D45;
+    --accent-hover: #084936;
+    --accent-light: #EDF5F2;
+
+    /* Semantic Status Tokens */
+    --status-success-bg: #EDF5F2;
+    --status-success-text: #0B5D45;
+    --status-success-border: #D1E5DE;
+
+    --status-warning-bg: #FEF7ED;
+    --status-warning-text: #9A5B13;
+    --status-warning-border: #FCE8CF;
+
+    --status-info-bg: #F0F6FC;
+    --status-info-text: #1B65C5;
+    --status-info-border: #CDE1F3;
+
+    --status-critical-bg: #FDF2F2;
+    --status-critical-text: #B91C1C;
+    --status-critical-border: #F8D7D7;
   }
 
   body {

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, type Variants } from "framer-motion";
 import { useOnboarding } from "@/context/OnboardingContext";
 import { ArrowRight, ArrowLeft } from "lucide-react";
 
@@ -20,7 +20,7 @@ const NIGERIAN_CITIES = [
   "Kano",
 ];
 
-const containerVariants = {
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -30,7 +30,7 @@ const containerVariants = {
   },
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 10 },
   show: {
     opacity: 1,

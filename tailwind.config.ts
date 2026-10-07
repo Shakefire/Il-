@@ -10,7 +10,11 @@ const config: Config = {
     extend: {
       colors: {
         background: "#FAFAF8",
-        surface: "#FFFFFF",
+        surface: {
+          DEFAULT: "#FFFFFF",
+          muted: "var(--surface-muted)",
+          elevated: "var(--surface-elevated)",
+        },
         charcoal: {
           DEFAULT: "#1A1A1A",
           surface: "#222222",
@@ -36,6 +40,28 @@ const config: Config = {
           hover: "#084936",
           light: "#EDF5F2",
           surface: "#F4F7F5",
+        },
+        status: {
+          success: {
+            bg: "var(--status-success-bg)",
+            text: "var(--status-success-text)",
+            border: "var(--status-success-border)",
+          },
+          warning: {
+            bg: "var(--status-warning-bg)",
+            text: "var(--status-warning-text)",
+            border: "var(--status-warning-border)",
+          },
+          info: {
+            bg: "var(--status-info-bg)",
+            text: "var(--status-info-text)",
+            border: "var(--status-info-border)",
+          },
+          critical: {
+            bg: "var(--status-critical-bg)",
+            text: "var(--status-critical-text)",
+            border: "var(--status-critical-border)",
+          },
         },
       },
       fontFamily: {
