@@ -42,19 +42,21 @@ function OnboardingHeader() {
 
       {/* Distraction-Free Focus Mode Header */}
       <header className="w-full max-w-4xl mx-auto px-4 sm:px-6 py-5 flex items-center justify-between z-10">
-        <Link href="/" className="flex items-center gap-2 group focus:outline-none">
+        <Link href="/host/dashboard" className="flex items-center gap-2 group focus:outline-none" title="Go to Host Dashboard">
           <span className="font-display text-2xl sm:text-3xl tracking-tight text-[#171717] font-normal">
             Ilé
           </span>
           <span className="w-2 h-2 rounded-full bg-[#0B5D45] mt-1 group-hover:scale-125 transition-transform" />
         </Link>
 
-        <Link
-          href="/host/dashboard"
-          className="inline-flex items-center gap-1.5 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl border border-[#E7E5E0] bg-white hover:bg-[#FAFAF8] text-[13px] font-semibold text-[#6B6B67] hover:text-[#171717] transition-all shadow-xs"
-        >
-          <span>Save & Exit</span>
-        </Link>
+        <div className="flex items-center gap-2.5">
+          <Link
+            href="/host/dashboard"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-[13px] font-semibold text-white transition-all shadow-xs"
+          >
+            <span>Host Dashboard →</span>
+          </Link>
+        </div>
       </header>
     </>
   );

@@ -128,8 +128,12 @@ export default function BecomeAHostPage() {
       api
         .getHostOnboardingStatus()
         .then((res) => {
-          if (res?.profile) {
-            setHostProfile(res.profile);
+          if (res) {
+            setHostProfile({
+              ...(res.profile || {}),
+              isVerified: res.isVerified ?? res.profile?.isVerified,
+              verificationStatus: res.verificationStatus ?? res.profile?.verificationStatus,
+            });
           }
         })
         .catch((err) => {
@@ -337,7 +341,9 @@ export default function BecomeAHostPage() {
   // Verification Gate for non-admin hosts
   const isApprovedHost =
     user?.role === "admin" ||
-    (hostProfile?.isVerified && hostProfile?.verificationStatus === "APPROVED");
+    user?.role === "host" ||
+    Boolean(hostProfile?.isVerified) ||
+    hostProfile?.verificationStatus === "APPROVED";
 
   if (!isApprovedHost) {
     const status = hostProfile?.verificationStatus || "NOT_STARTED";
@@ -378,12 +384,20 @@ export default function BecomeAHostPage() {
 
           <div className="pt-2 flex flex-col gap-3">
             {status === "UNDER_REVIEW" ? (
-              <Link
-                href="/host/dashboard"
-                className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
-              >
-                Go to Host Dashboard
-              </Link>
+              <div className="flex flex-col gap-2.5">
+                <Link
+                  href="/host/dashboard"
+                  className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
+                >
+                  Go to Host Dashboard
+                </Link>
+                <Link
+                  href="/host/onboarding/status"
+                  className="w-full py-2.5 px-4 rounded-xl border border-[#E7E5E0] bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold transition-colors text-center"
+                >
+                  View Verification Dossier
+                </Link>
+              </div>
             ) : status === "SUSPENDED" ? (
               <a
                 href="mailto:support@ile.ng"
@@ -392,16 +406,23 @@ export default function BecomeAHostPage() {
                 Contact Support
               </a>
             ) : (
-              <Link
-                href="/host/onboarding"
-                className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
-              >
-                {status === "ACTION_REQUIRED" || status === "REJECTED"
-                  ? "Update Host Documents & Resubmit →"
-                  : "Complete Host Onboarding →"}
-              </Link>
+              <div className="flex flex-col gap-2.5">
+                <Link
+                  href="/host/onboarding"
+                  className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
+                >
+                  {status === "ACTION_REQUIRED" || status === "REJECTED"
+                    ? "Update Host Documents & Resubmit →"
+                    : "Complete Host Onboarding →"}
+                </Link>
+                <Link
+                  href="/host/dashboard"
+                  className="w-full py-2.5 px-4 rounded-xl border border-[#E7E5E0] bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold transition-colors text-center"
+                >
+                  Go to Host Dashboard
+                </Link>
+              </div>
             )}
-
           </div>
         </div>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence, type Variants } from "framer-motion";
 import { useOnboarding } from "@/context/OnboardingContext";
@@ -70,7 +70,11 @@ const ID_TYPE_LABELS: Record<string, string> = {
 type EditSection = "identity" | "bank" | "profile" | "property" | null;
 
 export default function OnboardingStatusPage() {
-  const { data, updateData } = useOnboarding();
+  const { data, updateData, refreshStatus } = useOnboarding();
+
+  useEffect(() => {
+    refreshStatus();
+  }, [refreshStatus]);
 
   const isApproved = data.verificationStatus === "APPROVED";
   const isActionRequired = data.verificationStatus === "ACTION_REQUIRED";
@@ -367,6 +371,26 @@ export default function OnboardingStatusPage() {
               "Our compliance team requires additional information to approve your account. Please update your submitted documents below."
             : "Thank you for completing your partner onboarding! Our physical verification team in Abuja and Lagos is auditing your submitted documents and parameters."}
         </p>
+
+        {/* Quick Top Access to Host Dashboard */}
+        <div className="pt-3 flex flex-wrap items-center justify-center gap-3">
+          <Link
+            href="/host/dashboard"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-semibold transition-all shadow-xs"
+          >
+            <Home size={16} />
+            <span>Go to Host Dashboard</span>
+            <ArrowRight size={15} />
+          </Link>
+          {isActionRequired && (
+            <Link
+              href="/host/onboarding/identity"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-sm font-semibold transition-all"
+            >
+              <span>Update Required Documents →</span>
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* Interactive Submitted Dossier Overview Box */}
@@ -573,23 +597,23 @@ export default function OnboardingStatusPage() {
 
       {/* Action CTA */}
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
-        {isActionRequired ? (
+        {isActionRequired && (
           <Link
             href="/host/onboarding/identity"
-            className="w-full sm:w-auto h-[50px] px-8 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center justify-center gap-2 transition-all shadow-sm"
+            className="w-full sm:w-auto h-[50px] px-8 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-[14.5px] font-semibold flex items-center justify-center gap-2 transition-all shadow-sm"
           >
             <span>Update Submitted Documents</span>
             <ArrowRight size={16} />
           </Link>
-        ) : (
-          <Link
-            href="/host/dashboard"
-            className="w-full sm:w-auto h-[50px] px-8 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center justify-center gap-2 transition-all shadow-sm"
-          >
-            <span>Go to Host Dashboard</span>
-            <ArrowRight size={16} />
-          </Link>
         )}
+        <Link
+          href="/host/dashboard"
+          className="w-full sm:w-auto h-[50px] px-8 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center justify-center gap-2 transition-all shadow-sm"
+        >
+          <Home size={16} />
+          <span>Go to Host Dashboard</span>
+          <ArrowRight size={16} />
+        </Link>
       </div>
 
       {/* Elevated Concierge Support Micro-Card */}

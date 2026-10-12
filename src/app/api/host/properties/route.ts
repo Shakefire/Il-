@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await hostsService.getHostProperties(session.userId);
-    return NextResponse.json(result);
+    return NextResponse.json({ properties: result });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Failed to load properties" }, { status: 500 });
   }

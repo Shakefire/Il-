@@ -214,9 +214,8 @@ export default function HostDashboardPage() {
     setLoading(true);
     try {
       const res = await api.getHostProperties();
-      if (res && res.properties) {
-        setProperties(res.properties);
-      }
+      const list = Array.isArray(res) ? res : (res?.properties || []);
+      setProperties(list);
     } catch (err: any) {
       console.warn("Could not load host properties:", err);
     } finally {
@@ -243,6 +242,9 @@ export default function HostDashboardPage() {
       const res = await api.getHostDashboard();
       if (res) {
         setStats(res);
+        if (Array.isArray(res.properties) && res.properties.length > 0) {
+          setProperties((prev) => (prev.length === 0 ? res.properties : prev));
+        }
       }
     } catch (err: any) {
       console.warn("Could not load host dashboard stats:", err);
@@ -526,15 +528,21 @@ export default function HostDashboardPage() {
                 Go to Admin Portal →
               </Link>
             )}
-            {(onboardingStatus?.verificationStatus === "APPROVED" || user?.role === "admin") && (
-              <Link
-                href="/become-a-host"
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B5D45] text-white text-[14px] font-medium hover:bg-[#084936] transition-colors shadow-sm"
-              >
-                <Plus size={16} />
-                <span>List New Property</span>
-              </Link>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-[#0B5D45] text-[#0B5D45] hover:bg-[#EDF3F0] text-[14px] font-semibold transition-colors cursor-pointer"
+            >
+              <Plus size={16} />
+              <span>Quick Listing</span>
+            </button>
+            <Link
+              href="/become-a-host"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#0B5D45] text-white text-[14px] font-medium hover:bg-[#084936] transition-colors shadow-sm"
+            >
+              <Plus size={16} />
+              <span>List New Property</span>
+            </Link>
           </div>
         </motion.div>
 
@@ -798,12 +806,22 @@ export default function HostDashboardPage() {
                 <p className="text-[15px] text-[#6B6B67]">
                   Start hosting on Ilé. Create a listing, specify your 24/7 power setup, and submit for verification.
                 </p>
-                <Link
-                  href="/become-a-host"
-                  className="inline-block px-6 py-3 bg-[#0B5D45] text-white text-sm font-medium rounded-xl hover:bg-[#084936] transition-colors"
-                >
-                  Create your first listing
-                </Link>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(true)}
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 bg-[#0B5D45] text-white text-sm font-medium rounded-xl hover:bg-[#084936] transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Plus size={16} />
+                    <span>Create your first listing</span>
+                  </button>
+                  <Link
+                    href="/become-a-host"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 border border-[#E7E5E0] bg-white hover:bg-stone-50 text-stone-700 text-sm font-medium rounded-xl transition-colors cursor-pointer"
+                  >
+                    <span>Full Listing Wizard →</span>
+                  </Link>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

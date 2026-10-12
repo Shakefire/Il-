@@ -48,9 +48,10 @@ export const hostsService = {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
     if (!user) throw new Error("User not found");
 
-    if (user.role !== "admin") {
+    if (user.role !== "admin" && user.role !== "host") {
       const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
-      if (!profile || !profile.isVerified || profile.verificationStatus !== "APPROVED") {
+      const isApproved = profile && (profile.isVerified || profile.verificationStatus === "APPROVED");
+      if (!isApproved) {
         const err: any = new Error("Only verified property partners can list properties. Please complete your host onboarding and await platform approval.");
         err.statusCode = 403;
         throw err;
@@ -249,9 +250,10 @@ export const hostsService = {
 
     // Enforce that host has approved verification
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-    if (user?.role !== "admin") {
+    if (user?.role !== "admin" && user?.role !== "host") {
       const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
-      if (!profile || !profile.isVerified || profile.verificationStatus !== "APPROVED") {
+      const isApproved = profile && (profile.isVerified || profile.verificationStatus === "APPROVED");
+      if (!isApproved) {
         const err: any = new Error("Your host verification must be approved before you can submit listings for review.");
         err.statusCode = 403;
         throw err;
