@@ -36,10 +36,7 @@ const nextConfig = {
         ? "https://il-production.up.railway.app"
         : "http://127.0.0.1:4000");
     return {
-      // beforeFiles: runs BEFORE Next.js checks its own file system.
-      // This means ALL /api/* requests proxy to Railway first,
-      // before any Next.js route handlers can intercept them.
-      beforeFiles: [
+      fallback: [
         {
           source: "/api/:path*",
           destination: `${backendUrl}/api/:path*`,

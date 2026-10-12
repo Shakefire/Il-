@@ -33,10 +33,13 @@ export function getDb(): DbClient {
 
   // Embedded PGlite for zero-dependency local development
   console.log("📦 [DB] Using embedded PGlite (development mode)...");
-  const dataDir = path.resolve(process.cwd(), ".data");
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
+  const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const dataDir = isServerless ? path.join("/tmp", ".data") : path.resolve(process.cwd(), ".data");
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+  } catch {}
 
   const pglite = new PGlite(path.join(dataDir, "ile_dev.db"));
   dbInstance = drizzlePglite(pglite, { schema }) as unknown as DbClient;

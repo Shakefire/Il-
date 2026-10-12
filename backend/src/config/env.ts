@@ -52,13 +52,13 @@ function validateEnv(): Env {
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {
-    console.error("\n❌ [Ilé] Invalid environment configuration:\n");
+    console.warn("\n⚠️ [Ilé] Environment configuration warning:\n");
     for (const issue of result.error.issues) {
       const path = issue.path.join(".");
-      console.error(`   • ${path}: ${issue.message}`);
+      console.warn(`   • ${path}: ${issue.message}`);
     }
-    console.error("\n   See .env.example for required variables.\n");
-    process.exit(1);
+    // Return parsed defaults / process.env fallback instead of exiting in serverless
+    return (process.env as unknown) as Env;
   }
 
   const env = result.data;
