@@ -19,3 +19,9 @@ export function authenticateNextRequest(req: NextRequest): SessionPayload | null
 
   return null;
 }
+
+export function requireAdminSession(req: NextRequest): SessionPayload | null {
+  const session = authenticateNextRequest(req);
+  if (!session || session.role !== "admin") return null;
+  return session;
+}

@@ -52,30 +52,30 @@ export default function Footer() {
             </div>
           </div>
 
-          {/* Stays Column (2 cols) */}
+          {/* Host Portal Column (2 cols) */}
           <div className="md:col-span-2 space-y-3">
             <div className="text-[12px] font-bold uppercase tracking-wider text-white">
-              Stays
+              Host Portal
             </div>
             <ul className="space-y-2 text-[14px]">
               <li>
-                <Link href="/search?destination=Abuja" className="hover:text-white transition-colors">
-                  Abuja Portfolio
+                <Link href="/signup" className="hover:text-white transition-colors">
+                  Partner Sign Up
                 </Link>
               </li>
               <li>
-                <Link href="/search?destination=Lagos" className="hover:text-white transition-colors">
-                  Lagos Residences
+                <Link href="/login" className="hover:text-white transition-colors">
+                  Host Log In
                 </Link>
               </li>
               <li>
-                <Link href="/search" className="hover:text-white transition-colors">
-                  All 10 Stays
+                <Link href="/host/dashboard" className="hover:text-white transition-colors">
+                  Host Dashboard
                 </Link>
               </li>
               <li>
-                <Link href="/search" className="hover:text-white transition-colors">
-                  Serviced Villas
+                <Link href="/become-a-host" className="hover:text-white transition-colors">
+                  List Property
                 </Link>
               </li>
             </ul>
@@ -98,8 +98,8 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="/host" className="hover:text-white transition-colors">
-                  Host Your Residence
+                <Link href="/signup" className="hover:text-white transition-colors">
+                  Partner as Host
                 </Link>
               </li>
               <li>

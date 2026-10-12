@@ -1,4 +1,4 @@
-import { eq, and, sql, desc, count } from "drizzle-orm";
+import { eq, and, sql, desc, count, inArray } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { parsePagination, paginatedResponse, PaginationParams } from "../../lib/pagination";
 import crypto from "crypto";
@@ -143,6 +143,56 @@ export const adminService = {
     }
 
     return updated;
+  },
+
+  async deleteProperty(id: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+    const [property] = await db
+      .select()
+      .from(schema.properties)
+      .where(eq(schema.properties.id, id))
+      .limit(1);
+
+    if (!property) {
+      throw new Error("Property not found");
+    }
+
+    // Guard against deleting property with active bookings
+    const activeBookings = await db
+      .select({ id: schema.bookings.id })
+      .from(schema.bookings)
+      .where(
+        and(
+          eq(schema.bookings.propertyId, id),
+          inArray(schema.bookings.status, ["CONFIRMED", "COMPLETED", "PAYMENT_PENDING"])
+        )
+      )
+      .limit(1);
+
+    if (activeBookings.length > 0) {
+      const err: any = new Error("Cannot delete property with active or pending reservations.");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, id));
+    await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, id));
+    await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, id));
+    await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.propertyId, id));
+    await db.delete(schema.properties).where(eq(schema.properties.id, id));
+
+    // Insert audit log
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "PROPERTY_DELETED",
+      entityType: "property",
+      entityId: id,
+      details: `Property "${property.title}" permanently deleted by admin.`,
+      ipAddress: ipAddress || null,
+    });
+
+    return { success: true, message: "Property permanently deleted by administrator." };
   },
 
   async getBookings(pagination: PaginationParams) {

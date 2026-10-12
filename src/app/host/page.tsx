@@ -33,7 +33,7 @@ export default function HostPage() {
               </p>
               <div className="pt-2">
                 <Link
-                  href="/become-a-host"
+                  href="/signup"
                   className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-[15px] font-semibold transition-all shadow-sm"
                 >
                   <span>Start listing your space</span>

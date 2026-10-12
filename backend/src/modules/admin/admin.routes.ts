@@ -69,6 +69,20 @@ export async function adminRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // DELETE /api/admin/properties/:id — Delete property permanently
+  fastify.delete("/properties/:id", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    try {
+      const result = await adminService.deleteProperty(id, session.userId, request.ip);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(err.statusCode || 400).send({ error: err.message });
+    }
+  });
+
   // GET /api/admin/bookings
   fastify.get("/bookings", async (request, reply) => {
     const session = await requireRole(request, reply, ["admin"]);

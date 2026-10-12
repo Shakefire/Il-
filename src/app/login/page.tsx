@@ -82,25 +82,11 @@ function LoginForm() {
         }
       }
 
-      // Role and lifecycle-aware redirection
-      if (nextUrl) {
-        router.push(nextUrl);
-      } else if (user.role === "admin") {
-        router.push("/admin");
-      } else if (user.role === "host") {
-        try {
-          const statusRes = await api.getHostOnboardingStatus();
-          const vStatus = statusRes?.verificationStatus;
-          if (vStatus === "APPROVED" || vStatus === "UNDER_REVIEW") {
-            router.push("/host/dashboard");
-          } else {
-            router.push("/host/onboarding");
-          }
-        } catch {
-          router.push("/host/dashboard");
-        }
+      // Role-based post-auth direct routing: admin -> /admin, all others -> /host/dashboard
+      if (user.role === "admin") {
+        router.push(nextUrl && nextUrl.startsWith("/admin") ? nextUrl : "/admin");
       } else {
-        router.push("/profile");
+        router.push(nextUrl && nextUrl.startsWith("/host") ? nextUrl : "/host/dashboard");
       }
     } catch (err: unknown) {
       const message =
@@ -134,15 +120,15 @@ function LoginForm() {
       {/* 2. Top Navigation Bar */}
       <header className="w-full max-w-xl flex items-center justify-between mb-4 sm:mb-6 z-10">
         <Link
-          href="/"
+          href="/signup"
           className="inline-flex items-center gap-2 text-[13px] font-medium text-primary-secondary hover:text-primary transition-colors py-1.5 px-2.5 -ml-2 rounded-lg hover:bg-[#F0EFEA]/60 group"
         >
-          <ArrowLeft size={16} className="group-hover:-translate-x-0.5 transition-transform" />
-          <span>Return to marketplace</span>
+          <span>Create Host Partner Account</span>
+          <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
         </Link>
 
         <span className="text-[11px] font-semibold text-primary-muted uppercase tracking-widest font-sans">
-          Partner Portal
+          Host &amp; Admin Access
         </span>
       </header>
 
@@ -150,7 +136,7 @@ function LoginForm() {
       <main className="w-full max-w-xl bg-surface border border-border rounded-2xl sm:rounded-3xl p-7 sm:p-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02),0_12px_24px_-4px_rgba(0,0,0,0.05),0_24px_48px_-12px_rgba(0,0,0,0.07)] relative z-10 backdrop-blur-xs">
         {/* Brand Mark */}
         <div className="flex justify-center mb-5">
-          <Link href="/" className="inline-flex items-center gap-1.5 group focus:outline-none" aria-label="Ilé Homepage">
+          <Link href="/signup" className="inline-flex items-center gap-1.5 group focus:outline-none" aria-label="Ilé">
             <span className="font-display text-3xl sm:text-[34px] tracking-tight text-primary font-normal">
               Ilé
             </span>

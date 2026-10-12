@@ -115,7 +115,7 @@ export default function BecomeAHostPage() {
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      router.push("/login?next=/become-a-host");
+      router.push("/signup?next=/become-a-host");
       return;
     }
 
@@ -402,12 +402,6 @@ export default function BecomeAHostPage() {
               </Link>
             )}
 
-            <Link
-              href="/"
-              className="w-full py-2.5 rounded-xl border border-[#E7E5E0] text-sm font-medium text-[#6B6B67] hover:text-[#171717] transition-colors text-center"
-            >
-              Back to Marketplace
-            </Link>
           </div>
         </div>
       </div>
@@ -494,18 +488,12 @@ export default function BecomeAHostPage() {
           <p className="text-sm text-[#6B6B67] leading-relaxed">
             Your listing &ldquo;{title}&rdquo; is now in <strong>PENDING_REVIEW</strong>. Our team reviews submissions to verify continuous power, security, and accuracy before publishing.
           </p>
-          <div className="pt-3 flex flex-col gap-2.5">
+          <div className="pt-3">
             <Link
               href="/host/dashboard"
-              className="w-full py-3 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-sm text-center"
+              className="w-full py-3 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-sm text-center block"
             >
               Go to Host Dashboard
-            </Link>
-            <Link
-              href="/"
-              className="w-full py-2.5 rounded-xl border border-[#E7E5E0] text-sm font-medium text-[#6B6B67] hover:text-[#171717] transition-colors text-center"
-            >
-              Return Home
             </Link>
           </div>
         </div>

@@ -486,6 +486,17 @@ export const api = {
     return body;
   },
 
+  async deleteAdminProperty(propertyId: string) {
+    const res = await fetch(`/api/admin/properties/${propertyId}`, {
+      method: "DELETE",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to delete property");
+    return body;
+  },
+
   async getAdminBookings() {
     const res = await fetch("/api/admin/bookings", {
       headers: getAuthHeader(),

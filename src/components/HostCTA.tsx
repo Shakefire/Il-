@@ -5,8 +5,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
 import { getFallbackImage } from "@/lib/placeholders";
+import { useAuth } from "@/context/AuthContext";
 
 export default function HostCTA() {
+  const { isAuthenticated } = useAuth();
   const [imgSrc, setImgSrc] = useState(
     "https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&w=1200&q=80"
   );
@@ -25,14 +27,14 @@ export default function HostCTA() {
                 Have a beautiful space?
               </h2>
               <p className="text-white/80 text-[17px] sm:text-[19px] leading-relaxed max-w-lg font-light">
-                Share it with guests looking for somewhere quiet, reliable, and special to stay in Abuja or Lagos.
+                Partner with Ilé to host verified stays with guaranteed 24/7 power, high-speed fiber internet, and premium guest hospitality.
               </p>
               <div className="pt-2">
                 <Link
-                  href="/become-a-host"
+                  href={isAuthenticated ? "/host/dashboard" : "/signup"}
                   className="inline-flex items-center gap-2 bg-white text-[#171717] px-6 py-3.5 rounded-xl font-medium text-[15px] hover:bg-[#FAFAF8] transition-colors"
                 >
-                  <span>Become a host</span>
+                  <span>{isAuthenticated ? "Go to Host Dashboard" : "Partner as Host"}</span>
                   <ArrowUpRight size={17} />
                 </Link>
               </div>

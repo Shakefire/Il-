@@ -37,42 +37,49 @@ export function middleware(request: NextRequest) {
   const isHostDashboard = pathname === "/host/dashboard";
   const isAuthRoute = ["/login", "/register", "/signup"].includes(pathname);
 
-  // 1. Unauthenticated or non-admin access to Admin Workspace
-  if (isAdminRoute) {
-    if (!userRole) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("next", pathname);
-      return NextResponse.redirect(loginUrl);
-    }
-    if (userRole !== "admin") {
-      // Divert hosts or guests away from isolated admin portal
-      return NextResponse.redirect(
-        new URL(userRole === "host" ? "/host/dashboard" : "/", request.url)
-      );
-    }
-  }
-
-  // 2. Admin attempting to navigate to consumer or host portals
+  // 1. Admin isolation: Admins are strictly contained in /admin
   if (userRole === "admin") {
-    const isConsumerOnly =
-      pathname === "/trips" ||
-      pathname === "/become-a-host" ||
-      pathname.startsWith("/host/onboarding");
-    if (isConsumerOnly || isAuthRoute) {
+    if (!pathname.startsWith("/admin")) {
       return NextResponse.redirect(new URL("/admin", request.url));
     }
+    return NextResponse.next();
   }
 
-  // 3. Host accessing auth routes -> divert to Host Dashboard
-  if (userRole === "host" && isAuthRoute) {
-    return NextResponse.redirect(new URL("/host/dashboard", request.url));
-  }
-
-  // 4. Unauthenticated access to Host Dashboard
-  if (isHostDashboard && !userRole) {
+  // 2. Unauthenticated access attempting to reach /admin
+  if (isAdminRoute && userRole !== "admin") {
     const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", "/host/dashboard");
+    loginUrl.searchParams.set("next", "/admin");
     return NextResponse.redirect(loginUrl);
+  }
+
+  // 3. Host isolation: Non-admin users are strictly contained in the Host Workspace
+  // Completely isolated from consumer pages (/ , /search, /stay/*, /trips, /messages, etc.)
+  if (userRole && userRole !== "admin") {
+    const isHostAllowed =
+      pathname.startsWith("/host/dashboard") ||
+      pathname.startsWith("/host/onboarding") ||
+      pathname === "/become-a-host";
+
+    if (!isHostAllowed) {
+      return NextResponse.redirect(new URL("/host/dashboard", request.url));
+    }
+    return NextResponse.next();
+  }
+
+  // 4. Unauthenticated access attempting to access Host Workspace or legacy guest pages
+  // Routes directly to host account creation page (/signup), NOT admin login
+  if (
+    !userRole &&
+    (pathname.startsWith("/host/dashboard") ||
+      pathname.startsWith("/host/onboarding") ||
+      pathname === "/become-a-host" ||
+      pathname === "/trips" ||
+      pathname === "/messages" ||
+      pathname === "/profile")
+  ) {
+    const signupUrl = new URL("/signup", request.url);
+    signupUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(signupUrl);
   }
 
   return NextResponse.next();

@@ -59,6 +59,7 @@ import {
   Sparkles,
   ArrowRight,
   TrendingUp,
+  Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
@@ -393,6 +394,23 @@ export default function AdminPortalPage() {
     }
   };
 
+  const handleDeleteProperty = async (id: string) => {
+    if (!window.confirm("Are you sure you want to permanently delete this property listing? This action cannot be undone.")) {
+      return;
+    }
+    setActionLoading(id);
+    try {
+      const res = await api.deleteAdminProperty(id);
+      setActionFeedback(res.message || "Property listing permanently deleted.");
+      setSelectedProperty(null);
+      await loadAdminData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete property");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleSendTestEmail = async () => {
     setTestEmailLoading(true);
     setTestEmailResult(null);
@@ -441,9 +459,9 @@ export default function AdminPortalPage() {
   // ── Authentication Protection ──
   if (authLoading || (loading && isAuthenticated && user?.role === "admin")) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-charcoal text-white">
-        <div className="w-10 h-10 rounded-full border-2 border-accent border-t-transparent animate-spin mb-3" />
-        <p className="text-xs uppercase tracking-widest text-primary-muted font-mono">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#FAFAF8] text-[#171717]">
+        <div className="w-10 h-10 rounded-full border-2 border-[#0B5D45] border-t-transparent animate-spin mb-3" />
+        <p className="text-xs uppercase tracking-widest text-[#6B6B67] font-sans">
           Loading Ilé Administrative Workspace...
         </p>
       </div>
@@ -452,29 +470,23 @@ export default function AdminPortalPage() {
 
   if (!isAuthenticated || user?.role !== "admin") {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 bg-charcoal">
-        <div className="max-w-md w-full bg-charcoal-surface border border-charcoal-border rounded-3xl p-8 text-center space-y-4 shadow-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-status-warning-bg text-status-warning-text flex items-center justify-center mx-auto border border-status-warning-border">
+      <div className="min-h-screen flex items-center justify-center p-6 bg-[#FAFAF8]">
+        <div className="max-w-md w-full bg-white border border-[#E7E5E0] rounded-3xl p-8 text-center space-y-4 shadow-xl">
+          <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto border border-amber-200">
             <Lock size={30} />
           </div>
-          <h2 className="text-xl font-bold text-white tracking-tight">
+          <h2 className="text-xl font-bold font-display text-[#171717] tracking-tight">
             Restricted Administrative Workspace
           </h2>
-          <p className="text-xs text-primary-muted leading-relaxed">
+          <p className="text-xs text-[#6B6B67] leading-relaxed">
             This secure portal is strictly partitioned for verified compliance officers, financial controllers, and platform administrators.
           </p>
           <div className="pt-2 flex flex-col gap-2">
             <Link
               href="/login?next=/admin"
-              className="w-full py-3 rounded-xl bg-accent text-white hover:bg-accent-hover text-xs font-bold uppercase tracking-wider transition-colors text-center shadow-md"
+              className="w-full py-3 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-bold uppercase tracking-wider transition-colors text-center shadow-xs"
             >
               Sign In as Administrator
-            </Link>
-            <Link
-              href="/"
-              className="w-full py-3 rounded-xl border border-charcoal-border text-xs font-medium text-primary-muted hover:text-white hover:bg-charcoal transition-colors text-center"
-            >
-              Return to Marketplace
             </Link>
           </div>
         </div>
@@ -483,26 +495,26 @@ export default function AdminPortalPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex text-primary selection:bg-accent-light selection:text-accent">
+    <div className="min-h-screen bg-[#FAFAF8] flex text-[#171717] selection:bg-[#EDF3F0] selection:text-[#0B5D45]">
       {/* ─────────────────────────────────────────────────────────────
-          1. PERSISTENT DARK SAAS SIDEBAR
-          Inherits dark charcoal ecosystem; active route marked by
-          left-bordered accent token line (border-l-2 border-accent).
+          1. MARKETPLACE-ALIGNED SAAS SIDEBAR
+          Inherits marketplace styling ecosystem (#FAFAF8, bg-white, border-[#E7E5E0],
+          #0B5D45 emerald accents, active route marked with border-l-2 border-[#0B5D45]).
       ────────────────────────────────────────────────────────────── */}
-      <aside className="w-64 bg-charcoal border-r border-charcoal-border flex flex-col justify-between fixed top-0 bottom-0 left-0 z-40 select-none">
+      <aside className="w-64 bg-white border-r border-[#E7E5E0] flex flex-col justify-between fixed top-0 bottom-0 left-0 z-40 select-none shadow-xs">
         <div>
           {/* Brand Header */}
-          <div className="p-6 border-b border-charcoal-border flex items-center justify-between">
+          <div className="p-6 border-b border-[#E7E5E0] flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-display text-2xl text-white tracking-tight font-normal">
+                <span className="font-display text-2xl text-[#171717] tracking-tight font-normal">
                   Ilé
                 </span>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-status-success-bg text-status-success-text border border-status-success-border">
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-[#EDF5F2] text-[#0B5D45] border border-[#0B5D45]/20">
                   Admin
                 </span>
               </div>
-              <p className="text-[11px] text-primary-muted tracking-wide mt-0.5">
+              <p className="text-[11px] text-[#6B6B67] tracking-wide mt-0.5">
                 Compliance &amp; Operations
               </p>
             </div>
@@ -514,14 +526,14 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("dashboard")}
-              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "dashboard"
-                  ? "border-l-2 border-accent text-white font-semibold pl-3"
-                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
+                  ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
+                  : "border-l-2 border-transparent text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <LayoutDashboard size={16} className={activeModule === "dashboard" ? "text-accent" : ""} />
+                <LayoutDashboard size={16} className={activeModule === "dashboard" ? "text-[#0B5D45]" : ""} />
                 <span>Dashboard</span>
               </div>
             </button>
@@ -530,18 +542,18 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("compliance")}
-              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "compliance"
-                  ? "border-l-2 border-accent text-white font-semibold pl-3"
-                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
+                  ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
+                  : "border-l-2 border-transparent text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <ShieldCheck size={16} className={activeModule === "compliance" ? "text-accent" : ""} />
+                <ShieldCheck size={16} className={activeModule === "compliance" ? "text-[#0B5D45]" : ""} />
                 <span>Compliance &amp; KYC</span>
               </div>
               {underReviewCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-status-warning-bg text-status-warning-text border border-status-warning-border">
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                   {underReviewCount}
                 </span>
               )}
@@ -551,18 +563,18 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("properties")}
-              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "properties"
-                  ? "border-l-2 border-accent text-white font-semibold pl-3"
-                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
+                  ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
+                  : "border-l-2 border-transparent text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <Building size={16} className={activeModule === "properties" ? "text-accent" : ""} />
+                <Building size={16} className={activeModule === "properties" ? "text-[#0B5D45]" : ""} />
                 <span>Properties</span>
               </div>
               {pendingListingsCount > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-status-warning-bg text-status-warning-text border border-status-warning-border">
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                   {pendingListingsCount}
                 </span>
               )}
@@ -572,17 +584,17 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("financials")}
-              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "financials"
-                  ? "border-l-2 border-accent text-white font-semibold pl-3"
-                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
+                  ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
+                  : "border-l-2 border-transparent text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <CreditCard size={16} className={activeModule === "financials" ? "text-accent" : ""} />
+                <CreditCard size={16} className={activeModule === "financials" ? "text-[#0B5D45]" : ""} />
                 <span>Financials</span>
               </div>
-              <span className="text-[10px] text-primary-muted tabular-nums">
+              <span className="text-[10px] text-[#6B6B67] tabular-nums font-mono">
                 {bookings.length}
               </span>
             </button>
@@ -591,14 +603,14 @@ export default function AdminPortalPage() {
             <button
               type="button"
               onClick={() => setActiveModule("security")}
-              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer ${
+              className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "security"
-                  ? "border-l-2 border-accent text-white font-semibold pl-3"
-                  : "border-l-2 border-transparent text-primary-muted hover:text-white pl-3"
+                  ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
+                  : "border-l-2 border-transparent text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] pl-3"
               }`}
             >
               <div className="flex items-center gap-3">
-                <Lock size={16} className={activeModule === "security" ? "text-accent" : ""} />
+                <Lock size={16} className={activeModule === "security" ? "text-[#0B5D45]" : ""} />
                 <span>Security &amp; System</span>
               </div>
             </button>
@@ -606,25 +618,25 @@ export default function AdminPortalPage() {
         </div>
 
         {/* ── Admin User Profile & Settings Menu ── */}
-        <div className="p-4 border-t border-charcoal-border relative" ref={profileDropdownRef}>
+        <div className="p-4 border-t border-[#E7E5E0] relative" ref={profileDropdownRef}>
           <div
             onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-            className="flex items-center justify-between p-2 rounded-xl hover:bg-charcoal-hover transition-colors cursor-pointer"
+            className="flex items-center justify-between p-2 rounded-xl hover:bg-[#FAFAF8] transition-colors cursor-pointer"
           >
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-emerald-light border border-status-success-border text-emerald flex items-center justify-center font-bold text-xs shrink-0">
+              <div className="w-8 h-8 rounded-lg bg-[#EDF5F2] border border-[#0B5D45]/20 text-[#0B5D45] flex items-center justify-center font-bold text-xs shrink-0">
                 AD
               </div>
               <div className="min-w-0">
-                <span className="text-xs font-semibold text-white block truncate">
+                <span className="text-xs font-semibold text-[#171717] block truncate">
                   Ilé Administrator
                 </span>
-                <span className="text-[10px] text-primary-muted block truncate">
+                <span className="text-[10px] text-[#6B6B67] block truncate">
                   {user?.email || "admin@ile.ng"}
                 </span>
               </div>
             </div>
-            <ChevronDown size={14} className="text-primary-muted shrink-0" />
+            <ChevronDown size={14} className="text-[#6B6B67] shrink-0" />
           </div>
 
           {/* Clean Profile Dropdown (Strictly: Admin Settings, Audit Logs, Manage Team, Log Out) */}
@@ -635,7 +647,7 @@ export default function AdminPortalPage() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -6, scale: 0.98 }}
                 transition={{ duration: 0.15 }}
-                className="absolute bottom-18 left-4 right-4 bg-charcoal-surface border border-charcoal-border rounded-2xl shadow-2xl p-1.5 z-50 text-xs space-y-0.5"
+                className="absolute bottom-18 left-4 right-4 bg-white border border-[#E7E5E0] rounded-2xl shadow-xl p-1.5 z-50 text-xs space-y-0.5"
               >
                 <button
                   type="button"
@@ -643,9 +655,9 @@ export default function AdminPortalPage() {
                     setProfileDropdownOpen(false);
                     setShowSettingsModal(true);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-primary-muted hover:text-white hover:bg-charcoal rounded-xl transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] rounded-xl transition-colors cursor-pointer"
                 >
-                  <Settings size={14} className="text-primary-muted" />
+                  <Settings size={14} className="text-[#6B6B67]" />
                   <span>Admin Settings</span>
                 </button>
 
@@ -655,9 +667,9 @@ export default function AdminPortalPage() {
                     setProfileDropdownOpen(false);
                     setActiveModule("security");
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-primary-muted hover:text-white hover:bg-charcoal rounded-xl transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] rounded-xl transition-colors cursor-pointer"
                 >
-                  <FileText size={14} className="text-primary-muted" />
+                  <FileText size={14} className="text-[#6B6B67]" />
                   <span>Audit Logs</span>
                 </button>
 
@@ -667,18 +679,18 @@ export default function AdminPortalPage() {
                     setProfileDropdownOpen(false);
                     setShowTeamModal(true);
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-primary-muted hover:text-white hover:bg-charcoal rounded-xl transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-[#6B6B67] hover:text-[#171717] hover:bg-[#FAFAF8] rounded-xl transition-colors cursor-pointer"
                 >
-                  <Users size={14} className="text-primary-muted" />
+                  <Users size={14} className="text-[#6B6B67]" />
                   <span>Manage Team</span>
                 </button>
 
-                <div className="my-1 border-t border-charcoal-border" />
+                <div className="my-1 border-t border-[#E7E5E0]" />
 
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-status-critical-text hover:bg-status-critical-bg rounded-xl transition-colors cursor-pointer font-medium"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer font-medium"
                 >
                   <LogOut size={14} />
                   <span>Log Out</span>
@@ -1217,10 +1229,10 @@ export default function AdminPortalPage() {
 
                 {/* Floating Bulk Action Bar */}
                 {selectedHostIds.size > 0 && (
-                  <div className="p-3 bg-charcoal text-white border-t border-charcoal-border flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-bottom duration-200 shrink-0">
+                  <div className="p-3 bg-white text-[#171717] border-t border-[#E7E5E0] flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-bottom duration-200 shrink-0 shadow-sm">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 size={16} className="text-accent" />
-                      <span className="font-semibold text-xs tabular-nums">
+                      <CheckCircle2 size={16} className="text-[#0B5D45]" />
+                      <span className="font-semibold text-xs tabular-nums text-[#171717]">
                         {selectedHostIds.size} dossiers selected
                       </span>
                     </div>
@@ -1231,7 +1243,7 @@ export default function AdminPortalPage() {
                         <select
                           value={bulkAssignReviewer}
                           onChange={(e) => setBulkAssignReviewer(e.target.value)}
-                          className="h-8 px-2.5 rounded-lg bg-charcoal-surface border border-charcoal-border text-white text-xs focus:outline-none"
+                          className="h-8 px-2.5 rounded-lg bg-[#FAFAF8] border border-[#E7E5E0] text-[#171717] text-xs focus:outline-none"
                         >
                           <option value="">Assign to Reviewer...</option>
                           <option value="Senior Officer Adeyemi (Abuja Desk)">Officer Adeyemi (Abuja)</option>
@@ -1242,7 +1254,7 @@ export default function AdminPortalPage() {
                           type="button"
                           onClick={handleBulkAssign}
                           disabled={!bulkAssignReviewer}
-                          className="px-3 py-1.5 bg-charcoal-surface hover:bg-charcoal text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 cursor-pointer"
+                          className="px-3 py-1.5 bg-[#FAFAF8] hover:bg-[#F0EFEA] border border-[#E7E5E0] text-[#171717] rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 cursor-pointer"
                         >
                           Assign
                         </button>
@@ -1252,7 +1264,7 @@ export default function AdminPortalPage() {
                       <button
                         type="button"
                         onClick={handleBulkApprove}
-                        className="px-3.5 py-1.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                        className="px-3.5 py-1.5 bg-[#0B5D45] hover:bg-[#084936] text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs"
                       >
                         Bulk Approve ({selectedHostIds.size})
                       </button>
@@ -1261,7 +1273,7 @@ export default function AdminPortalPage() {
                       <button
                         type="button"
                         onClick={() => setSelectedHostIds(new Set())}
-                        className="px-2.5 py-1.5 text-primary-muted hover:text-white text-xs cursor-pointer"
+                        className="px-2.5 py-1.5 text-[#6B6B67] hover:text-[#171717] text-xs cursor-pointer"
                       >
                         Clear
                       </button>
@@ -1376,6 +1388,14 @@ export default function AdminPortalPage() {
                                 Approve
                               </button>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProperty(prop.id)}
+                              title="Delete Listing Permanently"
+                              className="p-1.5 text-primary-muted hover:text-rose-600 border border-border rounded-lg hover:bg-rose-50 transition-colors inline-flex items-center align-middle cursor-pointer"
+                            >
+                              <Trash2 size={13} />
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -1573,23 +1593,23 @@ export default function AdminPortalPage() {
       ────────────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {selectedHost && (
-          <div className="fixed inset-0 z-50 flex flex-col bg-charcoal text-white overflow-hidden animate-in fade-in duration-150">
+          <div className="fixed inset-0 z-50 flex flex-col bg-[#FAFAF8] text-[#171717] overflow-hidden animate-in fade-in duration-150">
             {/* Split-View Top Bar */}
-            <div className="h-14 px-6 bg-charcoal-surface border-b border-charcoal-border flex items-center justify-between shrink-0">
+            <div className="h-14 px-6 bg-white border-b border-[#E7E5E0] flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-emerald-light border border-status-success-border text-emerald flex items-center justify-center font-bold text-xs shrink-0">
+                <div className="w-8 h-8 rounded-xl bg-[#EDF5F2] border border-[#0B5D45]/20 text-[#0B5D45] flex items-center justify-center font-bold text-xs shrink-0">
                   KYC
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-bold text-white">
+                    <h2 className="text-sm font-bold text-[#171717]">
                       {selectedHost.firstName} {selectedHost.lastName}
                     </h2>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-status-warning-bg text-status-warning-text border border-status-warning-border">
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
                       {selectedHost.profile?.verificationStatus || "UNDER_REVIEW"}
                     </span>
                   </div>
-                  <p className="text-[11px] text-primary-muted">
+                  <p className="text-[11px] text-[#6B6B67]">
                     Host ID: <span className="font-mono">{selectedHost.id}</span>
                   </p>
                 </div>
@@ -1602,7 +1622,7 @@ export default function AdminPortalPage() {
                   setSelectedHost(null);
                   setSelectedHostDossier(null);
                 }}
-                className="p-1.5 text-primary-muted hover:text-white rounded-xl hover:bg-charcoal transition-colors cursor-pointer"
+                className="p-1.5 text-[#6B6B67] hover:text-[#171717] rounded-xl hover:bg-[#F5F4F0] transition-colors cursor-pointer"
                 title="Exit Review Workspace"
               >
                 <X size={18} />
@@ -1612,38 +1632,38 @@ export default function AdminPortalPage() {
             {/* Split Screen Workspace Body */}
             <div className="flex-1 flex overflow-hidden">
               {/* ── LEFT PANE (40% width): DATA, BIOMETRICS & ACTIONS ── */}
-              <div className="w-full sm:w-[420px] lg:w-[460px] bg-charcoal-surface border-r border-charcoal-border flex flex-col justify-between overflow-y-auto shrink-0">
+              <div className="w-full sm:w-[420px] lg:w-[460px] bg-white border-r border-[#E7E5E0] flex flex-col justify-between overflow-y-auto shrink-0">
                 <div className="p-6 space-y-6 text-xs">
                   {/* Notice Pill if Action Feedback */}
                   {downloadSuccessNotice && (
-                    <div className="p-3 bg-status-success-bg border border-status-success-border text-status-success-text rounded-xl text-xs flex items-center gap-2">
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
                       <Lock size={14} className="shrink-0" />
                       <span>{downloadSuccessNotice}</span>
                     </div>
                   )}
 
                   {/* 1. AI Biometric Match Interface */}
-                  <div className="p-4 bg-charcoal border border-charcoal-border rounded-2xl space-y-3">
+                  <div className="p-4 bg-[#FAFAF8] border border-[#E7E5E0] rounded-2xl space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#0B5D45] flex items-center gap-1.5">
                         <Sparkles size={13} />
                         <span>Biometric Engine Analysis</span>
                       </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-status-success-bg text-status-success-text border border-status-success-border">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
                         AI Match: 99.4% • PASSED
                       </span>
                     </div>
 
                     {/* Submitted Selfie Display with AI Match Confidence Score Directly Above It */}
                     <div className="pt-1">
-                      <div className="flex items-center justify-between pb-1.5 text-[11px] text-primary-muted">
+                      <div className="flex items-center justify-between pb-1.5 text-[11px] text-[#6B6B67]">
                         <span>Submitted Biometric Liveness Capture:</span>
-                        <span className="text-accent font-semibold">AI Match: 99.4%</span>
+                        <span className="text-[#0B5D45] font-semibold">AI Match: 99.4%</span>
                       </div>
                       {selectedHost.profile?.selfieUrl ? (
                         <div
                           onClick={() => setActiveDocTab("selfie")}
-                          className="relative h-44 w-full rounded-xl overflow-hidden border border-charcoal-border bg-charcoal cursor-pointer group"
+                          className="relative h-44 w-full rounded-xl overflow-hidden border border-[#E7E5E0] bg-[#F5F4F0] cursor-pointer group"
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
@@ -1651,7 +1671,7 @@ export default function AdminPortalPage() {
                             alt="Submitted Biometric Selfie"
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                           />
-                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-accent text-white text-[10px] font-bold flex items-center gap-1 shadow-xs">
+                          <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-[#0B5D45] text-white text-[10px] font-bold flex items-center gap-1 shadow-xs">
                             <ShieldCheck size={11} />
                             <span>Verified Liveness</span>
                           </div>
@@ -1660,25 +1680,25 @@ export default function AdminPortalPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="h-28 rounded-xl border border-dashed border-charcoal-border bg-charcoal flex items-center justify-center text-primary-muted text-xs">
+                        <div className="h-28 rounded-xl border border-dashed border-[#E7E5E0] bg-[#F5F4F0] flex items-center justify-center text-[#6B6B67] text-xs">
                           No selfie capture provided
                         </div>
                       )}
                     </div>
 
-                    <p className="text-[11px] text-primary-secondary leading-relaxed pt-1">
+                    <p className="text-[11px] text-[#6B6B67] leading-relaxed pt-1">
                       Liveness verification verified client-side. The selfie capture exhibits 99.4% biometric facial landmarks concordance with the government ID portrait.
                     </p>
 
                     {/* Challenge Checklist */}
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-charcoal-border text-[10px]">
-                      <div className="text-accent flex items-center gap-1 font-semibold">
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-[#E7E5E0] text-[10px]">
+                      <div className="text-[#0B5D45] flex items-center gap-1 font-semibold">
                         <Check size={11} /> Center Face
                       </div>
-                      <div className="text-accent flex items-center gap-1 font-semibold">
+                      <div className="text-[#0B5D45] flex items-center gap-1 font-semibold">
                         <Check size={11} /> Blink Motion
                       </div>
-                      <div className="text-accent flex items-center gap-1 font-semibold">
+                      <div className="text-[#0B5D45] flex items-center gap-1 font-semibold">
                         <Check size={11} /> Head Turn Left
                       </div>
                     </div>
@@ -1686,44 +1706,44 @@ export default function AdminPortalPage() {
 
                   {/* 2. Host Identity Details */}
                   <div className="space-y-2">
-                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center gap-1.5">
-                      <User size={13} className="text-accent" />
+                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-[#6B6B67] flex items-center gap-1.5">
+                      <User size={13} className="text-[#0B5D45]" />
                       <span>Applicant Personal &amp; Legal Info</span>
                     </h4>
 
-                    <div className="p-4 bg-charcoal border border-charcoal-border rounded-2xl space-y-2 text-primary-secondary">
+                    <div className="p-4 bg-[#FAFAF8] border border-[#E7E5E0] rounded-2xl space-y-2 text-[#171717]">
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">Full Legal Name:</span>
-                        <span className="font-semibold text-white">
+                        <span className="text-[#6B6B67]">Full Legal Name:</span>
+                        <span className="font-semibold text-[#171717]">
                           {selectedHost.firstName} {selectedHost.lastName}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">ID Document Type:</span>
-                        <span className="font-semibold text-white uppercase">
+                        <span className="text-[#6B6B67]">ID Document Type:</span>
+                        <span className="font-semibold text-[#171717] uppercase">
                           {selectedHost.profile?.idType ? selectedHost.profile.idType.replace(/_/g, " ") : "NIN Slip"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">ID / NIN Number:</span>
-                        <span className="font-mono font-bold text-white tabular-nums">
+                        <span className="text-[#6B6B67]">ID / NIN Number:</span>
+                        <span className="font-mono font-bold text-[#171717] tabular-nums">
                           {selectedHost.profile?.idNumber || "Uploaded Document"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">Email Address:</span>
-                        <span className="text-white font-mono">{selectedHost.email}</span>
+                        <span className="text-[#6B6B67]">Email Address:</span>
+                        <span className="text-[#171717] font-mono">{selectedHost.email}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-primary-muted">Phone Number:</span>
+                        <span className="text-[#6B6B67]">Phone Number:</span>
                         <div className="flex items-center gap-1.5">
-                          <span className="text-white tabular-nums">{selectedHost.phone || "Not set"}</span>
+                          <span className="text-[#171717] tabular-nums">{selectedHost.phone || "Not set"}</span>
                           {selectedHost.phone && (
                             <a
                               href={`https://wa.me/${selectedHost.phone.replace(/[^0-9]/g, "")}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="px-1.5 py-0.5 rounded bg-accent-light text-accent text-[10px] font-semibold"
+                              className="px-1.5 py-0.5 rounded bg-[#EDF5F2] text-[#0B5D45] text-[10px] font-semibold"
                             >
                               WhatsApp
                             </a>
@@ -1731,24 +1751,24 @@ export default function AdminPortalPage() {
                         </div>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">Operating Region:</span>
-                        <span className="text-white font-medium">
+                        <span className="text-[#6B6B67]">Operating Region:</span>
+                        <span className="text-[#171717] font-medium">
                           {selectedHost.profile?.operatingCity || "Abuja"}
                           {selectedHost.profile?.operatingAreas ? ` (${selectedHost.profile.operatingAreas})` : ""}
                         </span>
                       </div>
                       {selectedHost.profile?.companyName && (
-                        <div className="pt-2 border-t border-charcoal-border flex justify-between">
-                          <span className="text-primary-muted">Company &amp; CAC:</span>
-                          <span className="text-white font-semibold">
+                        <div className="pt-2 border-t border-[#E7E5E0] flex justify-between">
+                          <span className="text-[#6B6B67]">Company &amp; CAC:</span>
+                          <span className="text-[#171717] font-semibold">
                             {selectedHost.profile.companyName} ({selectedHost.profile.companyRegNumber || "N/A"})
                           </span>
                         </div>
                       )}
 
                       {/* Login as User Function (Support Masquerade) */}
-                      <div className="pt-2 border-t border-charcoal-border flex items-center justify-between">
-                        <span className="text-primary-muted">Support Masquerade:</span>
+                      <div className="pt-2 border-t border-[#E7E5E0] flex items-center justify-between">
+                        <span className="text-[#6B6B67]">Support Masquerade:</span>
                         <button
                           type="button"
                           onClick={() => {
@@ -1770,9 +1790,9 @@ export default function AdminPortalPage() {
                               window.open("/host/dashboard", "_blank");
                             }
                           }}
-                          className="px-2.5 py-1 rounded-lg bg-charcoal-border hover:bg-charcoal text-white text-[11px] font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+                          className="px-2.5 py-1 rounded-lg bg-white border border-[#E7E5E0] hover:bg-[#F5F4F0] text-[#171717] text-[11px] font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
                         >
-                          <User size={11} className="text-accent" />
+                          <User size={11} className="text-[#0B5D45]" />
                           <span>Login as User</span>
                         </button>
                       </div>
@@ -1781,27 +1801,27 @@ export default function AdminPortalPage() {
 
                   {/* 3. Settlement Bank Account */}
                   <div className="space-y-2">
-                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center gap-1.5">
-                      <Landmark size={13} className="text-accent" />
+                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-[#6B6B67] flex items-center gap-1.5">
+                      <Landmark size={13} className="text-[#0B5D45]" />
                       <span>Settlement Bank Account</span>
                     </h4>
 
-                    <div className="p-4 bg-charcoal border border-charcoal-border rounded-2xl space-y-2 text-primary-secondary">
+                    <div className="p-4 bg-[#FAFAF8] border border-[#E7E5E0] rounded-2xl space-y-2 text-[#171717]">
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">Bank Name:</span>
-                        <span className="font-semibold text-white">
+                        <span className="text-[#6B6B67]">Bank Name:</span>
+                        <span className="font-semibold text-[#171717]">
                           {selectedHost.profile?.bankName || "Not configured"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">NUBAN Account:</span>
-                        <span className="font-mono font-bold text-white tabular-nums">
+                        <span className="text-[#6B6B67]">NUBAN Account:</span>
+                        <span className="font-mono font-bold text-[#171717] tabular-nums">
                           {selectedHost.profile?.bankAccountNumber || "—"}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-primary-muted">Account Name:</span>
-                        <span className="font-medium text-white">
+                        <span className="text-[#6B6B67]">Account Name:</span>
+                        <span className="font-medium text-[#171717]">
                           {selectedHost.profile?.bankAccountName || "—"}
                         </span>
                       </div>
@@ -1810,8 +1830,8 @@ export default function AdminPortalPage() {
 
                   {/* 4. Action Prompts */}
                   {isRejectPromptOpen && (
-                    <div className="p-4 bg-status-critical-bg border border-status-critical-border rounded-2xl space-y-3">
-                      <h5 className="font-bold text-xs text-status-critical-text">
+                    <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl space-y-3">
+                      <h5 className="font-bold text-xs text-rose-800">
                         Specify Rejection Reason (Dispatched to Host via Email)
                       </h5>
                       <textarea
@@ -1819,13 +1839,13 @@ export default function AdminPortalPage() {
                         value={rejectHostReason}
                         onChange={(e) => setRejectHostReason(e.target.value)}
                         placeholder="e.g. Identity card is blurry or expired; please upload a clear photo of your Nigerian International Passport or NIN slip."
-                        className="w-full p-2.5 bg-charcoal-surface border border-charcoal-border rounded-xl text-xs text-white focus:outline-none"
+                        className="w-full p-2.5 bg-white border border-rose-200 rounded-xl text-xs text-[#171717] focus:outline-none focus:ring-1 focus:ring-rose-400"
                       />
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setIsRejectPromptOpen(false)}
-                          className="px-3 py-1.5 text-xs text-primary-muted hover:text-white"
+                          className="px-3 py-1.5 text-xs text-[#6B6B67] hover:text-[#171717]"
                         >
                           Cancel
                         </button>
@@ -1833,7 +1853,7 @@ export default function AdminPortalPage() {
                           type="button"
                           disabled={actionLoading === selectedHost.id}
                           onClick={() => handleRejectHost(selectedHost.id)}
-                          className="px-4 py-1.5 bg-status-critical-text hover:opacity-90 text-white font-bold rounded-xl text-xs transition-colors"
+                          className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-colors"
                         >
                           Confirm Rejection
                         </button>
@@ -1842,8 +1862,8 @@ export default function AdminPortalPage() {
                   )}
 
                   {isRequestInfoPromptOpen && (
-                    <div className="p-4 bg-status-warning-bg border border-status-warning-border rounded-2xl space-y-3">
-                      <h5 className="font-bold text-xs text-status-warning-text">
+                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
+                      <h5 className="font-bold text-xs text-amber-800">
                         Request Document Clarification
                       </h5>
                       <textarea
@@ -1851,13 +1871,13 @@ export default function AdminPortalPage() {
                         value={requestInfoText}
                         onChange={(e) => setRequestInfoText(e.target.value)}
                         placeholder="e.g. Please provide a clearer, glare-free photo of your NIN slip and ensure your bank account matches your legal name."
-                        className="w-full p-2.5 bg-charcoal-surface border border-charcoal-border rounded-xl text-xs text-white focus:outline-none"
+                        className="w-full p-2.5 bg-white border border-amber-200 rounded-xl text-xs text-[#171717] focus:outline-none focus:ring-1 focus:ring-amber-400"
                       />
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setIsRequestInfoPromptOpen(false)}
-                          className="px-3 py-1.5 text-xs text-primary-muted hover:text-white"
+                          className="px-3 py-1.5 text-xs text-[#6B6B67] hover:text-[#171717]"
                         >
                           Cancel
                         </button>
@@ -1865,7 +1885,7 @@ export default function AdminPortalPage() {
                           type="button"
                           disabled={actionLoading === selectedHost.id}
                           onClick={() => handleRequestHostInfo(selectedHost.id)}
-                          className="px-4 py-1.5 bg-status-warning-text text-white font-bold rounded-xl text-xs transition-colors"
+                          className="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition-colors"
                         >
                           Dispatch Request
                         </button>
@@ -1875,7 +1895,7 @@ export default function AdminPortalPage() {
                 </div>
 
                 {/* Fixed Action Buttons at Bottom of Left Pane */}
-                <div className="p-6 border-t border-charcoal-border bg-charcoal-surface sticky bottom-0 space-y-2">
+                <div className="p-6 border-t border-[#E7E5E0] bg-white sticky bottom-0 space-y-2">
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -1883,7 +1903,7 @@ export default function AdminPortalPage() {
                         setIsRequestInfoPromptOpen(true);
                         setIsRejectPromptOpen(false);
                       }}
-                      className="w-full py-2.5 rounded-xl bg-status-warning-bg border border-status-warning-border text-status-warning-text text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 hover:bg-amber-100 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <AlertTriangle size={13} />
                       <span>Request Clarification</span>
@@ -1895,7 +1915,7 @@ export default function AdminPortalPage() {
                         setIsRejectPromptOpen(true);
                         setIsRequestInfoPromptOpen(false);
                       }}
-                      className="w-full py-2.5 rounded-xl bg-status-critical-bg border border-status-critical-border text-status-critical-text text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      className="w-full py-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                     >
                       <XCircle size={13} />
                       <span>Reject with Reason</span>
@@ -1906,7 +1926,7 @@ export default function AdminPortalPage() {
                     type="button"
                     disabled={actionLoading === selectedHost.id}
                     onClick={() => handleApproveHost(selectedHost.id)}
-                    className="w-full py-3 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold tracking-wide transition-all shadow-md cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
+                    className="w-full py-3 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-bold tracking-wide transition-all shadow-sm cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     {actionLoading === selectedHost.id ? (
                       <Loader2 size={15} className="animate-spin" />
@@ -1919,9 +1939,9 @@ export default function AdminPortalPage() {
               </div>
 
               {/* ── RIGHT PANE (~60% width): NATIVE DOCUMENT VIEWER WORKSPACE ── */}
-              <div className="flex-1 bg-charcoal flex flex-col justify-between overflow-hidden">
+              <div className="flex-1 bg-[#FAFAF8] flex flex-col justify-between overflow-hidden">
                 {/* Document Viewer Tabs & Controls Header */}
-                <div className="p-3 border-b border-charcoal-border bg-charcoal-surface flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="p-3 border-b border-[#E7E5E0] bg-white flex flex-wrap items-center justify-between gap-3 shrink-0">
                   {/* Document Switcher Tabs */}
                   <div className="flex items-center gap-2">
                     <button
@@ -1929,8 +1949,8 @@ export default function AdminPortalPage() {
                       onClick={() => setActiveDocTab("front")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                         activeDocTab === "front"
-                          ? "bg-accent text-white shadow-xs"
-                          : "text-primary-muted hover:text-white bg-charcoal"
+                          ? "bg-[#0B5D45] text-white shadow-xs"
+                          : "text-[#6B6B67] hover:text-[#171717] bg-[#F5F4F0] hover:bg-[#EBEAE5]"
                       }`}
                     >
                       Front of ID
@@ -1941,8 +1961,8 @@ export default function AdminPortalPage() {
                       onClick={() => setActiveDocTab("back")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                         activeDocTab === "back"
-                          ? "bg-accent text-white shadow-xs"
-                          : "text-primary-muted hover:text-white bg-charcoal"
+                          ? "bg-[#0B5D45] text-white shadow-xs"
+                          : "text-[#6B6B67] hover:text-[#171717] bg-[#F5F4F0] hover:bg-[#EBEAE5]"
                       }`}
                     >
                       Back of ID
@@ -1953,8 +1973,8 @@ export default function AdminPortalPage() {
                       onClick={() => setActiveDocTab("selfie")}
                       className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                         activeDocTab === "selfie"
-                          ? "bg-accent text-white shadow-xs"
-                          : "text-primary-muted hover:text-white bg-charcoal"
+                          ? "bg-[#0B5D45] text-white shadow-xs"
+                          : "text-[#6B6B67] hover:text-[#171717] bg-[#F5F4F0] hover:bg-[#EBEAE5]"
                       }`}
                     >
                       Live Selfie
@@ -1966,8 +1986,8 @@ export default function AdminPortalPage() {
                         onClick={() => setActiveDocTab("authority")}
                         className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                           activeDocTab === "authority"
-                            ? "bg-accent text-white shadow-xs"
-                            : "text-primary-muted hover:text-white bg-charcoal"
+                            ? "bg-[#0B5D45] text-white shadow-xs"
+                            : "text-[#6B6B67] hover:text-[#171717] bg-[#F5F4F0] hover:bg-[#EBEAE5]"
                         }`}
                       >
                         Authority Deed
@@ -1980,20 +2000,20 @@ export default function AdminPortalPage() {
                     <button
                       type="button"
                       onClick={() => setDocZoom((z) => Math.max(0.5, z - 0.25))}
-                      className="p-1.5 text-primary-muted hover:text-white bg-charcoal rounded-lg transition-colors cursor-pointer"
+                      className="p-1.5 text-[#6B6B67] hover:text-[#171717] bg-[#F5F4F0] hover:bg-[#EBEAE5] rounded-lg transition-colors cursor-pointer"
                       title="Zoom Out"
                     >
                       <ZoomOut size={14} />
                     </button>
 
-                    <span className="text-[11px] font-mono text-primary-muted px-1 tabular-nums">
+                    <span className="text-[11px] font-mono text-[#6B6B67] px-1 tabular-nums">
                       {Math.round(docZoom * 100)}%
                     </span>
 
                     <button
                       type="button"
                       onClick={() => setDocZoom((z) => Math.min(3, z + 0.25))}
-                      className="p-1.5 text-primary-muted hover:text-white bg-charcoal rounded-lg transition-colors cursor-pointer"
+                      className="p-1.5 text-[#6B6B67] hover:text-[#171717] bg-[#F5F4F0] hover:bg-[#EBEAE5] rounded-lg transition-colors cursor-pointer"
                       title="Zoom In"
                     >
                       <ZoomIn size={14} />
@@ -2027,10 +2047,10 @@ export default function AdminPortalPage() {
                             )
                           }
                           disabled={!currentUrl}
-                          className="ml-2 px-3 py-1.5 rounded-xl bg-charcoal hover:bg-charcoal-border text-white text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                          className="ml-2 px-3 py-1.5 rounded-xl bg-white border border-[#E7E5E0] hover:bg-[#F5F4F0] text-[#171717] text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
                           title="Download encrypted document & log in audit trail"
                         >
-                          <Lock size={12} className="text-accent" />
+                          <Lock size={12} className="text-[#0B5D45]" />
                           <span>Download Encrypted File</span>
                         </button>
                       );
@@ -2039,7 +2059,7 @@ export default function AdminPortalPage() {
                 </div>
 
                 {/* Viewer Canvas Area */}
-                <div className="flex-1 overflow-auto p-6 flex items-center justify-center relative bg-charcoal">
+                <div className="flex-1 overflow-auto p-6 flex items-center justify-center relative bg-[#EBEAE5]/40">
                   {(() => {
                     const prof = selectedHost.profile || {};
                     const currentUrl =
@@ -2053,12 +2073,12 @@ export default function AdminPortalPage() {
 
                     if (!currentUrl) {
                       return (
-                        <div className="text-center text-primary-muted space-y-2 p-8 border border-dashed border-charcoal-border rounded-3xl">
-                          <FileText size={36} className="mx-auto text-primary-muted" />
+                        <div className="text-center text-[#6B6B67] space-y-2 p-8 border border-dashed border-[#E7E5E0] rounded-3xl bg-white">
+                          <FileText size={36} className="mx-auto text-[#6B6B67]" />
                           <p className="text-sm font-semibold">
                             No document uploaded for {activeDocTab.toUpperCase()}
                           </p>
-                          <p className="text-xs text-primary-muted">
+                          <p className="text-xs text-[#6B6B67]">
                             The applicant did not provide a file for this section.
                           </p>
                         </div>
@@ -2072,7 +2092,7 @@ export default function AdminPortalPage() {
                         <iframe
                           src={currentUrl}
                           title="Document PDF Viewer"
-                          className="w-full h-full rounded-2xl border border-charcoal-border bg-white"
+                          className="w-full h-full rounded-2xl border border-[#E7E5E0] bg-white"
                         />
                       );
                     }
@@ -2086,7 +2106,7 @@ export default function AdminPortalPage() {
                         <img
                           src={currentUrl}
                           alt="Applicant Document"
-                          className="max-h-[75vh] max-w-[85vw] object-contain rounded-2xl shadow-2xl border border-charcoal-border bg-charcoal-surface"
+                          className="max-h-[75vh] max-w-[85vw] object-contain rounded-2xl shadow-xl border border-[#E7E5E0] bg-white"
                         />
                       </div>
                     );
@@ -2170,6 +2190,14 @@ export default function AdminPortalPage() {
                     Suspend Listing
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => handleDeleteProperty(selectedProperty.id)}
+                  className="px-4 py-2 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Trash2 size={13} />
+                  <span>Delete Listing</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setSelectedProperty(null)}

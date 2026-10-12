@@ -845,9 +845,10 @@ export default function HostDashboardPage() {
                         </div>
 
                         <div className="pt-3 border-t border-[#E7E5E0] flex flex-wrap items-center justify-between gap-2">
-                          {/* Draft actions */}
-                          {prop.status === "DRAFT" && (
-                            <div className="flex items-center gap-2">
+                          {/* Left: Status-specific actions */}
+                          <div className="flex items-center gap-2">
+                            {/* Draft actions */}
+                            {prop.status === "DRAFT" && (
                               <button
                                 type="button"
                                 onClick={() => handleSubmitForReview(prop.id)}
@@ -856,84 +857,87 @@ export default function HostDashboardPage() {
                                 <Send size={12} />
                                 <span>Submit for Review</span>
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteProperty(prop.id)}
-                                title="Delete Draft"
-                                className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          )}
+                            )}
 
-                          {/* Pending review info */}
-                          {prop.status === "PENDING_REVIEW" && (
-                            <span className="text-xs text-amber-700 italic flex items-center gap-1">
-                              <Clock size={12} />
-                              <span>Under admin inspection</span>
-                            </span>
-                          )}
+                            {/* Pending review info */}
+                            {prop.status === "PENDING_REVIEW" && (
+                              <span className="text-xs text-amber-700 italic flex items-center gap-1">
+                                <Clock size={12} />
+                                <span>Under admin inspection</span>
+                              </span>
+                            )}
 
-                          {/* Published actions */}
-                          {prop.status === "PUBLISHED" && (
-                            <div className="flex items-center gap-3">
-                              <Link
-                                href={`/stay/${prop.slug}`}
-                                className="inline-flex items-center gap-1 text-xs text-[#0B5D45] font-semibold hover:underline"
-                              >
-                                <Eye size={13} />
-                                <span>Live Stay</span>
-                              </Link>
-                              <button
-                                type="button"
-                                onClick={() => openAvailabilityModal(prop)}
-                                className="inline-flex items-center gap-1 text-xs text-[#171717] font-semibold px-2.5 py-1 rounded-lg border border-[#E7E5E0] hover:bg-stone-50"
-                              >
-                                <CalendarCheck size={12} className="text-[#0B5D45]" />
-                                <span>Availability</span>
-                              </button>
-                            </div>
-                          )}
+                            {/* Published actions */}
+                            {prop.status === "PUBLISHED" && (
+                              <div className="flex items-center gap-3">
+                                <Link
+                                  href={`/stay/${prop.slug}`}
+                                  className="inline-flex items-center gap-1 text-xs text-[#0B5D45] font-semibold hover:underline"
+                                >
+                                  <Eye size={13} />
+                                  <span>Live Stay</span>
+                                </Link>
+                                <button
+                                  type="button"
+                                  onClick={() => openAvailabilityModal(prop)}
+                                  className="inline-flex items-center gap-1 text-xs text-[#171717] font-semibold px-2.5 py-1 rounded-lg border border-[#E7E5E0] hover:bg-stone-50"
+                                >
+                                  <CalendarCheck size={12} className="text-[#0B5D45]" />
+                                  <span>Availability</span>
+                                </button>
+                              </div>
+                            )}
 
-                          {/* Rejected actions */}
-                          {prop.status === "REJECTED" && (
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleSubmitForReview(prop.id)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700"
-                              >
-                                <Send size={12} />
-                                <span>Resubmit for Review</span>
-                              </button>
+                            {/* Rejected actions */}
+                            {prop.status === "REJECTED" && (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSubmitForReview(prop.id)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600 text-white text-xs font-semibold hover:bg-rose-700"
+                                >
+                                  <Send size={12} />
+                                  <span>Resubmit for Review</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRelistProperty(prop.id)}
+                                  title="Relist Property"
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EDF3F0] text-[#0B5D45] text-xs font-semibold hover:bg-[#D5EAE1] border border-[#0B5D45]/20"
+                                >
+                                  <RotateCcw size={12} />
+                                  <span>Relist</span>
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Suspended actions */}
+                            {prop.status === "SUSPENDED" && (
                               <button
                                 type="button"
                                 onClick={() => handleRelistProperty(prop.id)}
-                                title="Relist Property"
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EDF3F0] text-[#0B5D45] text-xs font-semibold hover:bg-[#D5EAE1] border border-[#0B5D45]/20"
                               >
                                 <RotateCcw size={12} />
-                                <span>Relist</span>
+                                <span>Relist Property</span>
                               </button>
-                            </div>
-                          )}
+                            )}
+                          </div>
 
-                          {/* Suspended actions */}
-                          {prop.status === "SUSPENDED" && (
+                          {/* Right: Property ID and Delete Button */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-[#8B8B86]">
+                              ID: {prop.id.slice(0, 8)}...
+                            </span>
                             <button
                               type="button"
-                              onClick={() => handleRelistProperty(prop.id)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EDF3F0] text-[#0B5D45] text-xs font-semibold hover:bg-[#D5EAE1] border border-[#0B5D45]/20"
+                              onClick={() => handleDeleteProperty(prop.id)}
+                              title="Delete Listing"
+                              className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
                             >
-                              <RotateCcw size={12} />
-                              <span>Relist Property</span>
+                              <Trash2 size={14} />
                             </button>
-                          )}
-
-                          <span className="text-[11px] text-[#8B8B86]">
-                            ID: {prop.id.slice(0, 8)}...
-                          </span>
+                          </div>
                         </div>
                       </div>
                     </div>
