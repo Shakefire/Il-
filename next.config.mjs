@@ -11,6 +11,10 @@ const nextConfig = {
         protocol: "https",
         hostname: "plus.unsplash.com",
       },
+      {
+        protocol: "https",
+        hostname: "pub-c1c242c15972c98b84e9d48c43d1127f.r2.dev",
+      },
     ],
   },
   eslint: {
@@ -28,7 +32,10 @@ const nextConfig = {
   async rewrites() {
     const backendUrl = process.env.BACKEND_URL || "http://127.0.0.1:4000";
     return {
-      fallback: [
+      // beforeFiles: runs BEFORE Next.js checks its own file system.
+      // This means ALL /api/* requests proxy to Railway first,
+      // before any Next.js route handlers can intercept them.
+      beforeFiles: [
         {
           source: "/api/:path*",
           destination: `${backendUrl}/api/:path*`,
