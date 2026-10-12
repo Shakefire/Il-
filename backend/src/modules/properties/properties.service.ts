@@ -1,4 +1,4 @@
-import { eq, inArray, count, and, asc, or, gte } from "drizzle-orm";
+import { eq, inArray, count, and, asc, or, gte, lte } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
 import { PROPERTY_STATUS } from "../../config/constants";
@@ -121,6 +121,7 @@ export async function getPublishedProperties(pagination: { limit: number; offset
       .where(
         and(
           inArray(schema.availabilityBlocks.propertyId, propertyIds),
+          lte(schema.availabilityBlocks.startDate, today),
           gte(schema.availabilityBlocks.endDate, today)
         )
       );
@@ -133,6 +134,7 @@ export async function getPublishedProperties(pagination: { limit: number; offset
         and(
           inArray(schema.bookings.propertyId, propertyIds),
           eq(schema.bookings.status, "CONFIRMED"),
+          lte(schema.bookings.checkInDate, today),
           gte(schema.bookings.checkOutDate, today)
         )
       );
@@ -223,6 +225,7 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
         and(
           eq(schema.bookings.propertyId, prop.id),
           eq(schema.bookings.status, "CONFIRMED"),
+          lte(schema.bookings.checkInDate, today),
           gte(schema.bookings.checkOutDate, today)
         )
       )
@@ -237,6 +240,7 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
         .where(
           and(
             eq(schema.availabilityBlocks.propertyId, prop.id),
+            lte(schema.availabilityBlocks.startDate, today),
             gte(schema.availabilityBlocks.endDate, today)
           )
         )

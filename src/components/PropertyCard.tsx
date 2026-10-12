@@ -51,18 +51,15 @@ export default function PropertyCard({
 
   return (
     <Link
-      href={property.isReserved ? "#" : `/stay/${property.slug}`}
-      onClick={(e) => { if (property.isReserved) e.preventDefault(); }}
+      href={`/stay/${property.slug}`}
       onMouseEnter={() => onHover && onHover(property.id)}
       onMouseLeave={() => onHover && onHover(null)}
-      className={`group block focus:outline-none h-full ${property.isReserved ? "pointer-events-auto" : ""}`}
+      className="group block focus:outline-none h-full"
     >
       {/* Unified Card Container */}
       <div
         className={`h-full bg-white rounded-[18px] border p-3 sm:p-3.5 flex flex-col transition-all duration-300 shadow-xs ${
-          property.isReserved
-            ? "opacity-65 border-[#EAE8E3] cursor-not-allowed"
-            : isHovered
+          isHovered
             ? "border-[#24483A] shadow-md ring-1 ring-[#24483A]/15 hover:shadow-md"
             : "border-[#EAE8E3] hover:border-[#D1CEC7] hover:shadow-md"
         }`}
@@ -82,11 +79,11 @@ export default function PropertyCard({
             onError={() => setImgError(true)}
           />
 
-          {/* 0. Reserved Overlay Badge */}
+          {/* 0. Reserved Badge */}
           {property.isReserved && (
-            <div className="absolute inset-0 bg-black/30 flex items-center justify-center rounded-[13px]">
-              <span className="bg-white/95 text-[#171717] text-[12px] font-semibold px-3 py-1.5 rounded-full shadow-md border border-white/60 backdrop-blur-sm">
-                Already Reserved
+            <div className="absolute top-3 left-3 z-10 pointer-events-none">
+              <span className="bg-stone-900/80 text-white text-[11px] font-semibold px-2.5 py-1 rounded-full shadow-md backdrop-blur-sm border border-white/20">
+                Booked Today
               </span>
             </div>
           )}

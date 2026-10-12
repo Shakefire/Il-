@@ -23,31 +23,27 @@ export async function GET(
     allowUnpublished = true;
   }
 
+  // 1. Check live database first
   try {
-    // 1. Check live database first
     const dbProperty = await getPropertyBySlug(slug, allowUnpublished);
     if (dbProperty) {
       return NextResponse.json({ property: dbProperty });
     }
-
-    // 2. Check static curated mock properties as graceful fallback
-    const staticProperty = PROPERTIES.find(
-      (p) => p.slug === slug || p.id === slug
-    );
-
-    if (staticProperty) {
-      return NextResponse.json({ property: staticProperty });
-    }
-
-    return NextResponse.json(
-      { error: "Property not found or not published" },
-      { status: 404 }
-    );
   } catch (err: any) {
-    console.error("[API] Failed to fetch property by slug:", err);
-    return NextResponse.json(
-      { error: err.message || "Failed to load property details" },
-      { status: 500 }
-    );
+    console.warn("[API] DB query failed in getPropertyBySlug, falling back to static:", err?.message || err);
   }
+
+  // 2. Check static curated mock properties as graceful fallback
+  const staticProperty = PROPERTIES.find(
+    (p) => p.slug === slug || p.id === slug
+  );
+
+  if (staticProperty) {
+    return NextResponse.json({ property: staticProperty });
+  }
+
+  return NextResponse.json(
+    { error: "Property not found or not published" },
+    { status: 404 }
+  );
 }
