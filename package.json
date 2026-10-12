@@ -12,8 +12,7 @@
     "db:studio": "drizzle-kit studio",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "postinstall": "node scripts/patch-next.js"
+    "lint": "next lint"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1139.0",
