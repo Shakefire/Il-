@@ -6,26 +6,28 @@ export const dynamic = "force-dynamic";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } | Promise<{ id: string }> }
 ) {
   const session = requireAdminSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized or not an admin" }, { status: 401 });
   }
 
-  const clientIp = req.headers.get("x-forwarded-for") || req.ip || undefined;
+  const { id } = await Promise.resolve(params);
+  const clientIp = req.headers.get("x-forwarded-for") || undefined;
   const body = await req.json().catch(() => ({}));
-  const reason = body?.reason || "Additional verification documents required.";
+  const instructions = body?.instructions || body?.reason || body?.feedback || "Additional verification documents required.";
 
   try {
-    const host = await adminService.requestHostInfo(
-      params.id,
-      reason,
+    const result = await adminService.requestHostInfo(
+      id,
+      instructions,
       session.userId,
       clientIp
     );
-    return NextResponse.json({ success: true, message: "Host requested for updated documents.", host });
+    return NextResponse.json(result);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Failed to request info from host" }, { status: 404 });
+    console.error("[Admin API] Failed to request info from host:", err);
+    return NextResponse.json({ error: err.message || "Failed to request info from host" }, { status: err.statusCode || 400 });
   }
 }

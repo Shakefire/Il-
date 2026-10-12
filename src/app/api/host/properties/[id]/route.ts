@@ -4,29 +4,33 @@ import { hostsService } from "@/../backend/src/modules/hosts/hosts.service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
   const session = authenticateNextRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { id } = await Promise.resolve(params);
+
   try {
-    const result = await hostsService.getHostProperty(session.userId, params.id);
+    const result = await hostsService.getHostProperty(session.userId, id);
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Property not found" }, { status: err.statusCode || 404 });
   }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
   const session = authenticateNextRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { id } = await Promise.resolve(params);
+
   try {
     const body = await req.json();
-    const result = await hostsService.updateProperty(session.userId, params.id, body);
+    const result = await hostsService.updateProperty(session.userId, id, body);
     return NextResponse.json(result);
   } catch (err: any) {
     if (err.issues) {
@@ -36,14 +40,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } | Promise<{ id: string }> }) {
   const session = authenticateNextRequest(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { id } = await Promise.resolve(params);
+
   try {
-    const result = await hostsService.deleteProperty(session.userId, params.id);
+    const result = await hostsService.deleteProperty(session.userId, id);
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Failed to delete property listing" }, { status: err.statusCode || 400 });

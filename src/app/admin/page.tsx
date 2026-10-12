@@ -217,6 +217,15 @@ export default function AdminPortalPage() {
     try {
       const res = await api.getAdminHost(host.id);
       setSelectedHostDossier(res);
+      if (res) {
+        setSelectedHost((prev: any) => ({
+          ...prev,
+          ...(res.host || {}),
+          profile: res.profile || res.host?.profile || prev?.profile,
+          verificationLogs: res.verificationLogs || res.host?.verificationLogs || [],
+          properties: res.properties || res.host?.properties || [],
+        }));
+      }
     } catch {
       setSelectedHostDossier(null);
     } finally {

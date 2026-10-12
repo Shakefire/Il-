@@ -6,18 +6,19 @@ export const dynamic = "force-dynamic";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } | Promise<{ id: string }> }
 ) {
   const session = requireAdminSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized or not an admin" }, { status: 401 });
   }
 
-  const clientIp = req.headers.get("x-forwarded-for") || req.ip || undefined;
+  const { id } = await Promise.resolve(params);
+  const clientIp = req.headers.get("x-forwarded-for") || undefined;
 
   try {
     const property = await adminService.updatePropertyStatus(
-      params.id,
+      id,
       "PUBLISHED",
       null,
       session.userId,
@@ -25,6 +26,7 @@ export async function POST(
     );
     return NextResponse.json({ success: true, message: "Property approved and published.", property });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Failed to approve property" }, { status: 404 });
+    console.error("[Admin API] Failed to approve property:", err);
+    return NextResponse.json({ error: err.message || "Failed to approve property" }, { status: err.statusCode || 400 });
   }
 }

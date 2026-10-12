@@ -6,17 +6,18 @@ export const dynamic = "force-dynamic";
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } | Promise<{ id: string }> }
 ) {
   const session = requireAdminSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized or not an admin" }, { status: 401 });
   }
 
-  const clientIp = req.headers.get("x-forwarded-for") || req.ip || undefined;
+  const { id } = await Promise.resolve(params);
+  const clientIp = req.headers.get("x-forwarded-for") || undefined;
 
   try {
-    const result = await adminService.deleteProperty(params.id, session.userId, clientIp);
+    const result = await adminService.deleteProperty(id, session.userId, clientIp);
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json(

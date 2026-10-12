@@ -397,26 +397,60 @@ export const adminService = {
     const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
     if (!host) throw new Error("Host user not found");
 
+    let validAdminId: string | null = null;
+    if (adminId) {
+      const [adminUser] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, adminId)).limit(1);
+      if (adminUser) validAdminId = adminUser.id;
+    }
+
     const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
     const prevStatus = profile?.verificationStatus || "REGISTERED";
 
-    const [updatedProfile] = await db
-      .update(schema.profiles)
+    let updatedProfile;
+    if (profile) {
+      const [p] = await db
+        .update(schema.profiles)
+        .set({
+          isVerified: true,
+          verificationStatus: "APPROVED",
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          reviewFeedback: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.profiles.userId, hostId))
+        .returning();
+      updatedProfile = p;
+    } else {
+      const [p] = await db
+        .insert(schema.profiles)
+        .values({
+          id: `prof_${crypto.randomUUID()}`,
+          userId: hostId,
+          isVerified: true,
+          verificationStatus: "APPROVED",
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          reviewFeedback: null,
+        })
+        .returning();
+      updatedProfile = p;
+    }
+
+    // Ensure host role & active status on users table
+    await db
+      .update(schema.users)
       .set({
-        isVerified: true,
-        verificationStatus: "APPROVED",
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        reviewFeedback: null,
+        role: "host",
+        status: "ACTIVE",
         updatedAt: new Date(),
       })
-      .where(eq(schema.profiles.userId, hostId))
-      .returning();
+      .where(eq(schema.users.id, hostId));
 
     await db.insert(schema.verificationLogs).values({
       id: `vlog_${crypto.randomUUID()}`,
       hostId,
-      adminId,
+      adminId: validAdminId,
       previousStatus: prevStatus,
       newStatus: "APPROVED",
       action: "APPROVE",
@@ -425,7 +459,7 @@ export const adminService = {
 
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
-      userId: adminId,
+      userId: validAdminId || adminId,
       action: "HOST_APPROVED",
       entityType: "host",
       entityId: hostId,
@@ -456,26 +490,50 @@ export const adminService = {
     const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
     if (!host) throw new Error("Host user not found");
 
+    let validAdminId: string | null = null;
+    if (adminId) {
+      const [adminUser] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, adminId)).limit(1);
+      if (adminUser) validAdminId = adminUser.id;
+    }
+
     const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
     const prevStatus = profile?.verificationStatus || "REGISTERED";
 
-    const [updatedProfile] = await db
-      .update(schema.profiles)
-      .set({
-        isVerified: false,
-        verificationStatus: "REJECTED",
-        reviewFeedback: reason,
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.profiles.userId, hostId))
-      .returning();
+    let updatedProfile;
+    if (profile) {
+      const [p] = await db
+        .update(schema.profiles)
+        .set({
+          isVerified: false,
+          verificationStatus: "REJECTED",
+          reviewFeedback: reason,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.profiles.userId, hostId))
+        .returning();
+      updatedProfile = p;
+    } else {
+      const [p] = await db
+        .insert(schema.profiles)
+        .values({
+          id: `prof_${crypto.randomUUID()}`,
+          userId: hostId,
+          isVerified: false,
+          verificationStatus: "REJECTED",
+          reviewFeedback: reason,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+        })
+        .returning();
+      updatedProfile = p;
+    }
 
     await db.insert(schema.verificationLogs).values({
       id: `vlog_${crypto.randomUUID()}`,
       hostId,
-      adminId,
+      adminId: validAdminId,
       previousStatus: prevStatus,
       newStatus: "REJECTED",
       action: "REJECT",
@@ -485,7 +543,7 @@ export const adminService = {
 
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
-      userId: adminId,
+      userId: validAdminId || adminId,
       action: "HOST_REJECTED",
       entityType: "host",
       entityId: hostId,
@@ -517,25 +575,48 @@ export const adminService = {
     const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
     if (!host) throw new Error("Host user not found");
 
+    let validAdminId: string | null = null;
+    if (adminId) {
+      const [adminUser] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, adminId)).limit(1);
+      if (adminUser) validAdminId = adminUser.id;
+    }
+
     const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
     const prevStatus = profile?.verificationStatus || "REGISTERED";
 
-    const [updatedProfile] = await db
-      .update(schema.profiles)
-      .set({
-        verificationStatus: "ACTION_REQUIRED",
-        reviewFeedback: instructions,
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.profiles.userId, hostId))
-      .returning();
+    let updatedProfile;
+    if (profile) {
+      const [p] = await db
+        .update(schema.profiles)
+        .set({
+          verificationStatus: "ACTION_REQUIRED",
+          reviewFeedback: instructions,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.profiles.userId, hostId))
+        .returning();
+      updatedProfile = p;
+    } else {
+      const [p] = await db
+        .insert(schema.profiles)
+        .values({
+          id: `prof_${crypto.randomUUID()}`,
+          userId: hostId,
+          verificationStatus: "ACTION_REQUIRED",
+          reviewFeedback: instructions,
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+        })
+        .returning();
+      updatedProfile = p;
+    }
 
     await db.insert(schema.verificationLogs).values({
       id: `vlog_${crypto.randomUUID()}`,
       hostId,
-      adminId,
+      adminId: validAdminId,
       previousStatus: prevStatus,
       newStatus: "ACTION_REQUIRED",
       action: "REQUEST_INFO",
@@ -544,7 +625,7 @@ export const adminService = {
 
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
-      userId: adminId,
+      userId: validAdminId || adminId,
       action: "HOST_INFO_REQUESTED",
       entityType: "host",
       entityId: hostId,
@@ -576,22 +657,46 @@ export const adminService = {
     const [host] = await db.select().from(schema.users).where(eq(schema.users.id, hostId)).limit(1);
     if (!host) throw new Error("Host user not found");
 
+    let validAdminId: string | null = null;
+    if (adminId) {
+      const [adminUser] = await db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, adminId)).limit(1);
+      if (adminUser) validAdminId = adminUser.id;
+    }
+
     const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, hostId)).limit(1);
     const prevStatus = profile?.verificationStatus || "REGISTERED";
 
     // 1. Update user profile to SUSPENDED & isVerified to false
-    const [updatedProfile] = await db
-      .update(schema.profiles)
-      .set({
-        isVerified: false,
-        verificationStatus: "SUSPENDED",
-        reviewFeedback: reason || "Account suspended by platform administration.",
-        reviewedBy: adminId,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.profiles.userId, hostId))
-      .returning();
+    let updatedProfile;
+    if (profile) {
+      const [p] = await db
+        .update(schema.profiles)
+        .set({
+          isVerified: false,
+          verificationStatus: "SUSPENDED",
+          reviewFeedback: reason || "Account suspended by platform administration.",
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.profiles.userId, hostId))
+        .returning();
+      updatedProfile = p;
+    } else {
+      const [p] = await db
+        .insert(schema.profiles)
+        .values({
+          id: `prof_${crypto.randomUUID()}`,
+          userId: hostId,
+          isVerified: false,
+          verificationStatus: "SUSPENDED",
+          reviewFeedback: reason || "Account suspended by platform administration.",
+          reviewedBy: adminId,
+          reviewedAt: new Date(),
+        })
+        .returning();
+      updatedProfile = p;
+    }
 
     // 2. Mark user status as SUSPENDED
     await db
@@ -615,7 +720,7 @@ export const adminService = {
     await db.insert(schema.verificationLogs).values({
       id: `vlog_${crypto.randomUUID()}`,
       hostId,
-      adminId,
+      adminId: validAdminId,
       previousStatus: prevStatus,
       newStatus: "SUSPENDED",
       action: "SUSPEND",
@@ -626,7 +731,7 @@ export const adminService = {
     // 5. Record in audit logs
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
-      userId: adminId,
+      userId: validAdminId || adminId,
       action: "HOST_SUSPENDED",
       entityType: "host",
       entityId: hostId,

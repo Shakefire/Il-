@@ -6,23 +6,25 @@ export const dynamic = "force-dynamic";
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } | Promise<{ id: string }> }
 ) {
   const session = requireAdminSession(req);
   if (!session) {
     return NextResponse.json({ error: "Unauthorized or not an admin" }, { status: 401 });
   }
 
-  const clientIp = req.headers.get("x-forwarded-for") || req.ip || undefined;
+  const { id } = await Promise.resolve(params);
+  const clientIp = req.headers.get("x-forwarded-for") || undefined;
 
   try {
-    const host = await adminService.approveHostApplication(
-      params.id,
+    const result = await adminService.approveHostApplication(
+      id,
       session.userId,
       clientIp
     );
-    return NextResponse.json({ success: true, message: "Host approved.", host });
+    return NextResponse.json(result);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Failed to approve host" }, { status: 404 });
+    console.error("[Admin API] Failed to approve host:", err);
+    return NextResponse.json({ error: err.message || "Failed to approve host" }, { status: err.statusCode || 400 });
   }
 }
