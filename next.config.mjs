@@ -30,7 +30,11 @@ const nextConfig = {
     missingSuspenseWithCSRBailout: false,
   },
   async rewrites() {
-    const backendUrl = process.env.BACKEND_URL || "http://127.0.0.1:4000";
+    const backendUrl =
+      process.env.BACKEND_URL ||
+      (process.env.NODE_ENV === "production"
+        ? "https://il-production.up.railway.app"
+        : "http://127.0.0.1:4000");
     return {
       // beforeFiles: runs BEFORE Next.js checks its own file system.
       // This means ALL /api/* requests proxy to Railway first,

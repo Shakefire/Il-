@@ -22,10 +22,12 @@ export async function propertiesRoutes(fastify: FastifyInstance) {
 
     let allowUnpublished = false;
     const authHeader = request.headers.authorization;
-    if (authHeader) {
+    const cookieToken = (request as any).cookies?.session_token;
+    const token = authHeader ? authHeader.replace(/^Bearer\s+/i, "") : cookieToken;
+
+    if (token) {
       try {
         const { verifySessionToken } = await import("../../lib/security");
-        const token = authHeader.replace(/^Bearer\s+/i, "");
         const payload = verifySessionToken(token);
         if (payload && (payload.role === "admin" || payload.role === "host")) {
           allowUnpublished = true;
