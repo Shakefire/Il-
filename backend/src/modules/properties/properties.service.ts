@@ -20,6 +20,7 @@ export function enrichProperty(
     title: prop.title,
     tagline: prop.tagline,
     description: prop.description,
+    status: prop.status,
     propertyType: prop.propertyType,
     spaceType: prop.spaceType,
     bedrooms: prop.bedrooms,

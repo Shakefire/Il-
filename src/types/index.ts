@@ -67,6 +67,7 @@ export interface Property {
   featured?: boolean;
   isReserved?: boolean;
   distanceKm?: number;
+  status?: string;
 }
 
 export interface SearchFilters {

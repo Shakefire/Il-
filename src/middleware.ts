@@ -34,52 +34,43 @@ export function middleware(request: NextRequest) {
   const userRole = sessionToken ? parseJwtRole(sessionToken) : null;
 
   const isAdminRoute = pathname.startsWith("/admin");
-  const isHostDashboard = pathname === "/host/dashboard";
-  const isAuthRoute = ["/login", "/register", "/signup"].includes(pathname);
+  const isHostRoute = pathname.startsWith("/host/") || pathname === "/become-a-host";
+  const isUserAccountRoute = ["/trips", "/messages", "/profile"].some((p) => pathname.startsWith(p));
+  const isMarketplaceRoute = pathname === "/" || pathname.startsWith("/search") || pathname.startsWith("/stay/");
 
-  // 1. Admin isolation: Admins are strictly contained in /admin
-  if (userRole === "admin") {
-    if (!pathname.startsWith("/admin")) {
-      return NextResponse.redirect(new URL("/admin", request.url));
+  // 1. Admin route protection: Only admins can access /admin and subroutes
+  if (isAdminRoute) {
+    if (userRole !== "admin") {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("next", pathname);
+      return NextResponse.redirect(loginUrl);
     }
     return NextResponse.next();
   }
 
-  // 2. Unauthenticated access attempting to reach /admin
-  if (isAdminRoute && userRole !== "admin") {
-    const loginUrl = new URL("/login", request.url);
-    loginUrl.searchParams.set("next", "/admin");
-    return NextResponse.redirect(loginUrl);
+  // 2. Public marketplace routes: /stay/*, /search, / are open to all (including admin inspection)
+  if (isMarketplaceRoute) {
+    return NextResponse.next();
   }
 
-  // 3. Host isolation: Non-admin users are strictly contained in the Host Workspace
-  // Completely isolated from consumer pages (/ , /search, /stay/*, /trips, /messages, etc.)
-  if (userRole && userRole !== "admin") {
-    const isHostAllowed =
-      pathname.startsWith("/host/dashboard") ||
-      pathname.startsWith("/host/onboarding") ||
-      pathname === "/become-a-host";
-
-    if (!isHostAllowed) {
-      return NextResponse.redirect(new URL("/host/dashboard", request.url));
+  // 3. Host Workspace protection: Requires authentication
+  if (isHostRoute) {
+    if (!sessionToken) {
+      const signupUrl = new URL("/signup", request.url);
+      signupUrl.searchParams.set("next", pathname);
+      return NextResponse.redirect(signupUrl);
     }
     return NextResponse.next();
   }
 
-  // 4. Unauthenticated access attempting to access Host Workspace or legacy guest pages
-  // Routes directly to host account creation page (/signup), NOT admin login
-  if (
-    !userRole &&
-    (pathname.startsWith("/host/dashboard") ||
-      pathname.startsWith("/host/onboarding") ||
-      pathname === "/become-a-host" ||
-      pathname === "/trips" ||
-      pathname === "/messages" ||
-      pathname === "/profile")
-  ) {
-    const signupUrl = new URL("/signup", request.url);
-    signupUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(signupUrl);
+  // 4. Private consumer account pages protection
+  if (isUserAccountRoute) {
+    if (!sessionToken) {
+      const loginUrl = new URL("/login", request.url);
+      loginUrl.searchParams.set("next", pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+    return NextResponse.next();
   }
 
   return NextResponse.next();

@@ -35,14 +35,14 @@ export default function StayDetailClient({ slug }: { slug: string }) {
     let active = true;
 
     async function loadProperty() {
-      // If already matched statically, we still verify with backend if needed, or stick with static
+      // Show static match immediately if available, while refreshing with live database
       if (staticMatch) {
         setProperty(staticMatch);
         setLoading(false);
-        return;
+      } else {
+        setLoading(true);
       }
 
-      setLoading(true);
       try {
         const res = await api.getProperty(slug);
         if (active && res && res.property) {
@@ -88,6 +88,7 @@ export default function StayDetailClient({ slug }: { slug: string }) {
             coordinates: raw.coordinates || { lat: 9.0765, lng: 7.3986 },
             reviews: Array.isArray(raw.reviews) ? raw.reviews : [],
             isReserved: raw.isReserved ?? false,
+            status: raw.status || "PUBLISHED",
           };
           setProperty(normalized);
         }
@@ -169,6 +170,27 @@ export default function StayDetailClient({ slug }: { slug: string }) {
 
       {/* Main Content Area */}
       <article className="max-w-7xl mx-auto px-4 sm:px-8 lg:px-12 space-y-6 sm:space-y-8">
+        {/* Admin/Host Inspection Preview Banner */}
+        {property.status && property.status !== "PUBLISHED" && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3">
+              <Shield className="text-amber-700 shrink-0" size={22} />
+              <div>
+                <span className="font-bold text-sm block">Inspection Preview Mode</span>
+                <span className="text-xs text-amber-850">
+                  This listing is currently in <strong>{property.status}</strong> status and is not yet visible in public marketplace search.
+                </span>
+              </div>
+            </div>
+            <Link
+              href="/admin"
+              className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-amber-200/90 hover:bg-amber-300 text-amber-950 text-xs font-semibold transition-colors shrink-0"
+            >
+              Back to Admin Portal →
+            </Link>
+          </div>
+        )}
+
         {/* Title & Metadata Header */}
         <header className="space-y-2">
           <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-4">
