@@ -48,6 +48,7 @@ ehthumbs.db
 # Local scratch / test files
 .turbo/
 scratch/
+artifacts/
 
 # Ilé — Embedded database & uploads
 .data/

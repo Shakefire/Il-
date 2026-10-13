@@ -414,7 +414,13 @@ export const bookingsService = {
 
       const [host] = property?.hostId
         ? await db
-            .select({ phone: schema.users.phone, firstName: schema.users.firstName, lastName: schema.users.lastName })
+            .select({
+              phone: schema.users.phone,
+              firstName: schema.users.firstName,
+              lastName: schema.users.lastName,
+              email: schema.users.email,
+              avatarUrl: schema.users.avatarUrl,
+            })
             .from(schema.users)
             .where(eq(schema.users.id, property.hostId))
             .limit(1)
@@ -438,23 +444,49 @@ export const bookingsService = {
         bookingConfirmationEmail({
           guestName,
           guestEmail: booking.guestEmail,
+          guestPhone: booking.guestPhone || undefined,
           propertyTitle: propTitle,
           propertyType: property?.propertyType || "Serviced Residence",
+          spaceType: property?.spaceType || "Entire place",
+          propertyImage: property?.coverImage || undefined,
+          propertyTagline: property?.tagline || undefined,
+          propertyDescription: property?.description || undefined,
+          bedrooms: property?.bedrooms,
+          bathrooms: property?.bathrooms,
+          beds: property?.beds,
+          maxGuests: property?.maxGuests,
           guestCount: booking.guestCount || 1,
+          neighborhood: property?.neighborhood || undefined,
+          city,
+          state,
+          powerType: property?.powerType || undefined,
           referenceCode: booking.referenceCode,
           checkIn: booking.checkInDate,
           checkOut: booking.checkOutDate,
+          numberOfNights: booking.numberOfNights,
+          nightlyPrice: booking.nightlyPrice,
+          cleaningFee: booking.cleaningFee,
+          serviceFee: booking.serviceFee,
           totalAmount: booking.totalAmount,
+          amountPaid: booking.totalAmount,
+          outstandingBalance: 0,
+          currency: booking.currency || "NGN",
+          paymentMethod: method || "CARD",
+          paymentReference: paymentRef,
+          paymentStatus: "SUCCESS",
+          paidAt: new Date(),
+          bookingStatus: "CONFIRMED",
           accessToken: booking.accessToken,
           address: exactAddress,
           unitNumber,
-          city,
-          state,
           latitude,
           longitude,
           accessGateCode: gateCode,
+          accessInstructions: privateDetails?.checkInInstructions || undefined,
+          houseRules: privateDetails?.houseRulesPrivate || undefined,
           hostName: hostFullName,
           hostPhone,
+          hostEmail: privateDetails?.contactEmail || host?.email || undefined,
         })
       );
 
@@ -468,6 +500,7 @@ export const bookingsService = {
           checkOut: booking.checkOutDate,
           address: exactAddress,
           unitNumber,
+          neighborhood: property?.neighborhood || undefined,
           city,
           state,
           latitude,
@@ -476,8 +509,26 @@ export const bookingsService = {
             privateDetails?.checkInInstructions ||
             "Present your reservation reference to estate security guards for swift clearance.",
           accessGateCode: gateCode,
+          propertyImage: property?.coverImage || undefined,
+          propertyType: property?.propertyType || "Serviced Residence",
+          spaceType: property?.spaceType || "Entire place",
+          propertyTagline: property?.tagline || undefined,
+          propertyDescription: property?.description || undefined,
+          bedrooms: property?.bedrooms,
+          bathrooms: property?.bathrooms,
+          guestCount: booking.guestCount || 1,
+          numberOfNights: booking.numberOfNights,
           hostName: hostFullName,
           hostPhone,
+          hostEmail: privateDetails?.contactEmail || host?.email || undefined,
+          hostAvatar: host?.avatarUrl || undefined,
+          hostRole: "Your accommodation host & arrival concierge",
+          parkingDescription: property?.parkingDescription || undefined,
+          powerDescription: property?.powerDescription || property?.powerType || undefined,
+          securityDescription: property?.securityDescription || undefined,
+          waterDescription: property?.waterDescription || undefined,
+          houseRules: privateDetails?.houseRulesPrivate || undefined,
+          accessToken: booking.accessToken,
         })
       );
     } catch (emailErr) {

@@ -277,6 +277,8 @@ export async function processSuccessfulPayment(data: {
         phone: schema.users.phone,
         firstName: schema.users.firstName,
         lastName: schema.users.lastName,
+        email: schema.users.email,
+        avatarUrl: schema.users.avatarUrl,
       })
       .from(schema.users)
       .where(eq(schema.users.id, property?.hostId || ""))
@@ -296,32 +298,58 @@ export async function processSuccessfulPayment(data: {
     const latitude = property?.latitude || undefined;
     const longitude = property?.longitude || undefined;
 
-    // A. Send Booking Confirmation (Now with apartment category, guest count, guest name, map pin & address)
+    // A. Send Booking Confirmation (Enriched with apartment image, rooms, breakdown, payment ledger & map clearance)
     await sendEmail(
       bookingConfirmationEmail({
         guestName,
         guestEmail: booking.guestEmail,
+        guestPhone: booking.guestPhone || undefined,
         propertyTitle: propTitle,
         propertyType: property?.propertyType || "Serviced Residence",
+        spaceType: property?.spaceType || "Entire place",
+        propertyImage: property?.coverImage || undefined,
+        propertyTagline: property?.tagline || undefined,
+        propertyDescription: property?.description || undefined,
+        bedrooms: property?.bedrooms,
+        bathrooms: property?.bathrooms,
+        beds: property?.beds,
+        maxGuests: property?.maxGuests,
         guestCount: booking.guestCount || 1,
+        neighborhood: property?.neighborhood || undefined,
+        city,
+        state,
+        powerType: property?.powerType || undefined,
         referenceCode: booking.referenceCode,
         checkIn: booking.checkInDate,
         checkOut: booking.checkOutDate,
+        numberOfNights: booking.numberOfNights,
+        nightlyPrice: booking.nightlyPrice,
+        cleaningFee: booking.cleaningFee,
+        serviceFee: booking.serviceFee,
         totalAmount: booking.totalAmount,
+        amountPaid: data.paidAmountNaira || booking.totalAmount,
+        outstandingBalance: Math.max(0, booking.totalAmount - (data.paidAmountNaira || booking.totalAmount)),
+        currency: booking.currency || data.currency || "NGN",
+        paymentMethod: data.method || payment.method || "CARD",
+        paymentReference: payment.reference || data.reference,
+        paymentStatus: "SUCCESS",
+        paidAt: payment.paidAt || new Date(),
+        bookingStatus: "CONFIRMED",
         accessToken: booking.accessToken,
         address: exactAddress,
         unitNumber,
-        city,
-        state,
         latitude,
         longitude,
         accessGateCode: gateCode,
+        accessInstructions: privateDetails?.checkInInstructions || undefined,
+        houseRules: privateDetails?.houseRulesPrivate || undefined,
         hostName: hostFullName,
         hostPhone,
+        hostEmail: privateDetails?.contactEmail || host?.email || undefined,
       })
     );
 
-    // B. Send Private Gate Clearance / Access Pass (ALWAYS dispatched with full map pin, address, gate pass)
+    // B. Send Private Gate Clearance / Access Pass (Enriched arrival guide)
     await sendEmail(
       bookingAccessPassEmail({
         guestName,
@@ -332,14 +360,33 @@ export async function processSuccessfulPayment(data: {
         checkOut: booking.checkOutDate,
         address: exactAddress,
         unitNumber,
+        neighborhood: property?.neighborhood || undefined,
         city,
         state,
         latitude,
         longitude,
         accessInstructions: privateDetails?.checkInInstructions || "Present your reservation reference to estate security guards for swift clearance.",
         accessGateCode: gateCode,
+        propertyImage: property?.coverImage || undefined,
+        propertyType: property?.propertyType || "Serviced Residence",
+        spaceType: property?.spaceType || "Entire place",
+        propertyTagline: property?.tagline || undefined,
+        propertyDescription: property?.description || undefined,
+        bedrooms: property?.bedrooms,
+        bathrooms: property?.bathrooms,
+        guestCount: booking.guestCount || 1,
+        numberOfNights: booking.numberOfNights,
         hostName: hostFullName,
         hostPhone,
+        hostEmail: privateDetails?.contactEmail || host?.email || undefined,
+        hostAvatar: host?.avatarUrl || undefined,
+        hostRole: "Your accommodation host & arrival concierge",
+        parkingDescription: property?.parkingDescription || undefined,
+        powerDescription: property?.powerDescription || property?.powerType || undefined,
+        securityDescription: property?.securityDescription || undefined,
+        waterDescription: property?.waterDescription || undefined,
+        houseRules: privateDetails?.houseRulesPrivate || undefined,
+        accessToken: booking.accessToken,
       })
     );
   } catch (emailErr) {
