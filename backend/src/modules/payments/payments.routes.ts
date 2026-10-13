@@ -64,9 +64,9 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
     }
 
     // Handle raw string or JSON parsed body
-    const rawBody = typeof request.body === "string"
-      ? request.body
-      : JSON.stringify(request.body);
+    const rawBody =
+      (request as any).rawBody ||
+      (typeof request.body === "string" ? request.body : JSON.stringify(request.body));
 
     try {
       const res = await handlePaystackWebhook(rawBody, signature);

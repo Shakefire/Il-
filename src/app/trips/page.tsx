@@ -67,11 +67,14 @@ function TripsPageContent() {
   const [accessError, setAccessError] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  const paymentRef = searchParams.get("ref") || searchParams.get("reference") || searchParams.get("trxref");
+
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    // Only redirect unauthenticated visitors if they are NOT handling an external payment return
+    if (!isLoading && !isAuthenticated && !paymentRef) {
       router.push("/login?next=/trips");
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, router, paymentRef]);
 
   const loadBookings = useCallback(async () => {
     try {
@@ -91,32 +94,40 @@ function TripsPageContent() {
   // Check for Paystack redirect parameters and auto-verify
   useEffect(() => {
     const paymentStatus = searchParams.get("payment");
-    const ref = searchParams.get("ref") || searchParams.get("reference") || searchParams.get("trxref");
 
-    if (ref && (paymentStatus === "success" || paymentStatus === "mock" || searchParams.has("trxref"))) {
+    if (paymentRef && (paymentStatus === "success" || paymentStatus === "mock" || searchParams.has("trxref"))) {
+      let isMounted = true;
       const verifyAndRefresh = async () => {
         try {
-          const verifyRes = await api.verifyPayment(ref);
+          const verifyRes = await api.verifyPayment(paymentRef);
+          if (!isMounted) return;
           if (verifyRes && verifyRes.verified) {
             setPaymentNotice({
               type: "success",
-              message: `Payment verified successfully (Ref: ${ref})! Your stay is confirmed and access details are unlocked.`,
+              message: `Payment verified successfully (Ref: ${paymentRef})! Your stay is confirmed and access details are unlocked.`,
             });
             const updated = await loadBookings();
-            // Try to match the booking
-            const matched = updated.find((b: any) => ref.includes(b.referenceCode) || b.id === ref);
-            if (matched) {
+            // Match from user bookings or fallback to booking returned from verify
+            const matched =
+              updated.find((b: any) => paymentRef.includes(b.referenceCode) || b.id === paymentRef) ||
+              verifyRes.booking;
+            if (matched && isMounted) {
               handleOpenAccessModal(matched);
             }
           }
         } catch (err: any) {
-          console.warn("Payment auto-verification error:", err);
+          if (isMounted) {
+            console.warn("Payment auto-verification error:", err);
+          }
         }
       };
 
       verifyAndRefresh();
+      return () => {
+        isMounted = false;
+      };
     }
-  }, [searchParams, loadBookings]);
+  }, [searchParams, loadBookings, paymentRef]);
 
   useEffect(() => {
     if (isAuthenticated) {

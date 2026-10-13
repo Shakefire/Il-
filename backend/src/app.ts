@@ -28,6 +28,22 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
 
+  // ─── Raw Body Capture for Webhooks & HMAC Verification ───
+  fastify.addContentTypeParser(
+    "application/json",
+    { parseAs: "string" },
+    (req, body, done) => {
+      try {
+        (req as any).rawBody = body;
+        const json = body ? JSON.parse(body as string) : {};
+        done(null, json);
+      } catch (err: any) {
+        err.statusCode = 400;
+        done(err, undefined);
+      }
+    }
+  );
+
   // ─── CORS ───
   await fastify.register(cors, {
     origin: (origin, cb) => {
@@ -62,6 +78,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     service: "ile-backend-api",
     timestamp: new Date().toISOString(),
     env: env.NODE_ENV,
+    templateVersion: "2.0.0-boutique",
   }));
   await fastify.register(healthRoutes, { prefix: "/api/health" });
 

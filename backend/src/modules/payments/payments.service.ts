@@ -36,6 +36,7 @@ export interface PaymentVerifyResult {
   paidAt: Date;
   rawPayload?: string;
   error?: string;
+  booking?: any;
 }
 
 // ─── Initialize Booking Payment ───
@@ -498,7 +499,7 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
     const amountNaira = Math.round(tx.amount / 100);
 
     // Process & confirm in database
-    await processSuccessfulPayment({
+    const processResult = await processSuccessfulPayment({
       reference,
       gatewayReference: String(tx.id),
       paidAmountNaira: amountNaira,
@@ -517,6 +518,7 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
       gatewayProvider: "PAYSTACK",
       paidAt: new Date(tx.paid_at),
       rawPayload: JSON.stringify(body),
+      booking: processResult.booking,
     };
   } catch (err: any) {
     console.error("[Paystack] Verify error:", err);
