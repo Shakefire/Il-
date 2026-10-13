@@ -31,7 +31,7 @@ const envSchema = z.object({
 
   // ─── Email (Transactional) ───
   EMAIL_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().email().default("noreply@ile.ng"),
+  EMAIL_FROM: z.string().email().default("noreply@notifications.9jaroommate.com"),
   EMAIL_PROVIDER: z.enum(["resend", "sendgrid", "console"]).default("console"),
   RESEND_DOMAIN: z.string().default("notifications.9jaroommate.com"),
 

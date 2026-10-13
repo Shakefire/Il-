@@ -4,6 +4,11 @@ import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
 import { BOOKING_STATUS } from "../../config/constants";
 import { parsePagination, paginatedResponse } from "../../lib/pagination";
+import {
+  sendEmail,
+  bookingConfirmationEmail,
+  bookingAccessPassEmail,
+} from "../notifications/notifications.service";
 
 const CreateBookingSchema = z.object({
   propertyId: z.string().min(1, "Property ID is required"),
@@ -392,6 +397,92 @@ export const bookingsService = {
       .set({ status: BOOKING_STATUS.CONFIRMED, updatedAt: new Date() })
       .where(eq(schema.bookings.id, bookingId))
       .returning();
+
+    // Dispatch confirmation + gate pass emails (non-blocking, never throws)
+    try {
+      const [property] = await db
+        .select()
+        .from(schema.properties)
+        .where(eq(schema.properties.id, booking.propertyId))
+        .limit(1);
+
+      const [privateDetails] = await db
+        .select()
+        .from(schema.propertyPrivateDetails)
+        .where(eq(schema.propertyPrivateDetails.propertyId, booking.propertyId))
+        .limit(1);
+
+      const [host] = property?.hostId
+        ? await db
+            .select({ phone: schema.users.phone, firstName: schema.users.firstName, lastName: schema.users.lastName })
+            .from(schema.users)
+            .where(eq(schema.users.id, property.hostId))
+            .limit(1)
+        : [undefined];
+
+      const propTitle = property?.title || "Shortlet Stay";
+      const guestName = `${booking.guestFirstName || ""} ${booking.guestLastName || ""}`.trim() || "Valued Guest";
+      const hostFullName = host
+        ? `${host.firstName} ${host.lastName}`.trim()
+        : privateDetails?.contactName || "Dedicated Ilé Stay Guide";
+      const hostPhone = privateDetails?.contactPhone || host?.phone || "+234 912 202 9904";
+      const exactAddress = privateDetails?.exactAddress || `${property?.neighborhood || "Maitama"}, ${property?.city || "Abuja"}`;
+      const unitNumber = privateDetails?.unitNumber || undefined;
+      const gateCode = privateDetails?.accessGateCode || "GATE-CLEARED";
+      const city = property?.city || "Abuja";
+      const state = property?.state || "FCT";
+      const latitude = property?.latitude || undefined;
+      const longitude = property?.longitude || undefined;
+
+      await sendEmail(
+        bookingConfirmationEmail({
+          guestName,
+          guestEmail: booking.guestEmail,
+          propertyTitle: propTitle,
+          propertyType: property?.propertyType || "Serviced Residence",
+          guestCount: booking.guestCount || 1,
+          referenceCode: booking.referenceCode,
+          checkIn: booking.checkInDate,
+          checkOut: booking.checkOutDate,
+          totalAmount: booking.totalAmount,
+          accessToken: booking.accessToken,
+          address: exactAddress,
+          unitNumber,
+          city,
+          state,
+          latitude,
+          longitude,
+          accessGateCode: gateCode,
+          hostName: hostFullName,
+          hostPhone,
+        })
+      );
+
+      await sendEmail(
+        bookingAccessPassEmail({
+          guestName,
+          guestEmail: booking.guestEmail,
+          propertyTitle: propTitle,
+          referenceCode: booking.referenceCode,
+          checkIn: booking.checkInDate,
+          checkOut: booking.checkOutDate,
+          address: exactAddress,
+          unitNumber,
+          city,
+          state,
+          latitude,
+          longitude,
+          accessInstructions:
+            privateDetails?.checkInInstructions ||
+            "Present your reservation reference to estate security guards for swift clearance.",
+          accessGateCode: gateCode,
+          hostName: hostFullName,
+          hostPhone,
+        })
+      );
+    } catch (emailErr) {
+      console.warn("[Bookings] Failed to dispatch booking confirmation emails:", emailErr);
+    }
 
     return updatedBooking;
   },
