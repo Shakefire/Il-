@@ -299,7 +299,7 @@ export async function processSuccessfulPayment(data: {
     const latitude = property?.latitude || undefined;
     const longitude = property?.longitude || undefined;
 
-    // A. Send Booking Confirmation (Enriched with apartment image, rooms, breakdown, payment ledger & map clearance)
+    // A. Send Booking Confirmation (property summary, reservation details, financial breakdown — NO exact address or host contact)
     await sendEmail(
       bookingConfirmationEmail({
         guestName,
@@ -337,16 +337,6 @@ export async function processSuccessfulPayment(data: {
         paidAt: payment.paidAt || new Date(),
         bookingStatus: "CONFIRMED",
         accessToken: booking.accessToken,
-        address: exactAddress,
-        unitNumber,
-        latitude,
-        longitude,
-        accessGateCode: gateCode,
-        accessInstructions: privateDetails?.checkInInstructions || undefined,
-        houseRules: privateDetails?.houseRulesPrivate || undefined,
-        hostName: hostFullName,
-        hostPhone,
-        hostEmail: privateDetails?.contactEmail || host?.email || undefined,
       })
     );
 

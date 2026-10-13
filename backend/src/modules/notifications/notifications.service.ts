@@ -144,13 +144,7 @@ export interface BookingConfirmationData {
   state?: string;
   powerType?: string;
 
-  // Exact Location & Gate Clearance
-  address?: string;
-  unitNumber?: string;
-  latitude?: number;
-  longitude?: number;
-  accessGateCode?: string;
-  accessInstructions?: string;
+  // Stay timing (no exact address — address is in the arrival guide email only)
   checkInTime?: string;
   checkOutTime?: string;
 
@@ -314,23 +308,7 @@ export function bookingConfirmationEmail(data: BookingConfirmationData): EmailPa
     outstandingBalance = Math.max(0, totalAmount - amountPaid);
   }
 
-  // Address and Map Pin
-  const fullAddress = [
-    data.address,
-    data.unitNumber ? `Unit / Apt ${data.unitNumber}` : "",
-    data.neighborhood,
-    data.city || "Abuja",
-    data.state || "FCT",
-    "Nigeria",
-  ].filter(Boolean).join(", ");
-
-  const mapQuery = data.latitude && data.longitude
-    ? `${data.latitude},${data.longitude}`
-    : encodeURIComponent(fullAddress || `${data.city || "Abuja"}, Nigeria`);
-
-  const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${mapQuery}`;
-  const cleanPhone = (data.hostPhone || "+234 912 202 9904").replace(/[^\d+]/g, "");
-  const waLink = cleanPhone ? `https://wa.me/${cleanPhone.replace("+", "")}` : "";
+  // No address computed here — exact address is only in the arrival guide email
 
   // Call to action URL
   const bookingUrl = data.manageUrl || (
@@ -776,88 +754,30 @@ export function bookingConfirmationEmail(data: BookingConfirmationData): EmailPa
                 </tr>
               </table>
 
-              <!-- ARRIVAL CLEARANCE, EXACT ADDRESS & GATE PASS (Unlocked for Confirmed Bookings) -->
+              <!-- ARRIVAL GUIDE NOTICE (Confirmed bookings only) -->
               ${isConfirmed ? `
               <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="background-color: #FFFFFF; border: 1.5px solid #0B5D45; border-radius: 12px; margin-bottom: 24px; overflow: hidden;">
-                <!-- Header Banner -->
                 <tr>
-                  <td style="background-color: #EDF5F2; padding: 14px 20px; border-bottom: 1.5px solid #0B5D45;">
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      <tr>
-                        <td align="left">
-                          <span style="font-size: 11px; font-weight: 800; color: #0B5D45; text-transform: uppercase; letter-spacing: 0.8px;">
-                            📍 Arrival Clearance &amp; Street Address
-                          </span>
-                        </td>
-                        <td align="right">
-                          <span style="font-size: 11px; font-weight: 700; color: #0B5D45; background-color: #FFFFFF; border: 1px solid #D1E5DE; border-radius: 12px; padding: 3px 10px;">
-                            UNLOCKED
-                          </span>
-                        </td>
-                      </tr>
-                    </table>
+                  <td style="background-color: #EDF5F2; padding: 14px 20px; border-bottom: 1px solid #D1E5DE;">
+                    <span style="font-size: 11px; font-weight: 800; color: #0B5D45; text-transform: uppercase; letter-spacing: 0.8px;">
+                      ✈️ Arrival Guide &amp; Access Details
+                    </span>
                   </td>
                 </tr>
-
                 <tr>
                   <td style="padding: 22px;">
-                    <!-- Exact Physical Address -->
-                    <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #8B8B86; margin-bottom: 4px;">
-                      Physical Property Street Address
-                    </div>
-                    <div style="font-size: 16px; font-weight: 800; color: #171717; line-height: 1.45;">
-                      ${escapeHtml(fullAddress)}
-                    </div>
-                    ${data.unitNumber ? `
-                    <div style="font-size: 13.5px; font-weight: 600; color: #0B5D45; margin-top: 4px;">
-                      Unit / Apartment Number: ${escapeHtml(data.unitNumber)}
-                    </div>
-                    ` : ""}
-
-                    <!-- Live Google Maps Navigation Button -->
-                    <div style="margin: 16px 0 20px 0;">
-                      <a href="${googleMapsUrl}" target="_blank" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 700; font-size: 13.5px; padding: 11px 22px; border-radius: 8px; text-decoration: none;">
-                        🗺️ Open Exact Pin in Google Maps &rarr;
-                      </a>
-                    </div>
-
-                    <!-- Estate Gate Clearance Code Box -->
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#FAFAF8" style="background-color: #FAFAF8; border: 1.5px dashed #0B5D45; border-radius: 10px; padding: 14px 18px; margin-bottom: 18px;">
-                      <tr>
-                        <td align="left" valign="middle">
-                          <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #575753; margin-bottom: 2px;">
-                            Estate Security Gate Pass Code
-                          </div>
-                          <div style="font-family: -apple-system, BlinkMacSystemFont, 'SF Mono', Consolas, monospace; font-size: 24px; font-weight: 800; color: #0B5D45; letter-spacing: 3px;">
-                            ${escapeHtml(data.accessGateCode || "GATE-CLEARED")}
-                          </div>
-                          <div style="font-size: 11.5px; color: #6B6B67; margin-top: 2px;">
-                            Show this code or your reservation reference at the estate gate.
-                          </div>
-                        </td>
-                      </tr>
-                    </table>
-
-                    <!-- Dedicated Arrival Guide / Host Contact -->
-                    <div style="padding-top: 14px; border-top: 1px solid #EAE8E2; font-size: 13.5px; color: #171717;">
-                      <div style="font-weight: 700; margin-bottom: 4px;">
-                        Assigned Host / Arrival Concierge: <span style="color: #0B5D45;">${escapeHtml(data.hostName || "Designated Ilé Host")}</span>
-                      </div>
-                      <div style="margin-bottom: 8px; color: #4A4A45;">
-                        Helpline: <a href="tel:${cleanPhone}" style="color: #171717; font-weight: 700; text-decoration: none;">${escapeHtml(data.hostPhone || "+234 912 202 9904")}</a>
-                      </div>
-                      ${waLink ? `
-                      <a href="${waLink}" target="_blank" style="display: inline-block; background-color: #25D366; color: #FFFFFF; font-weight: 700; font-size: 12.5px; padding: 8px 16px; border-radius: 6px; text-decoration: none;">
-                        💬 Chat with Host on WhatsApp
-                      </a>
-                      ` : ""}
-                    </div>
-
-                    ${data.accessInstructions ? `
-                    <div style="margin-top: 14px; padding: 12px 16px; background-color: #FAFAF8; border-left: 3px solid #0B5D45; font-size: 12.5px; line-height: 1.5; color: #4A4A45; border-radius: 4px;">
-                      <strong style="color: #171717;">Check-in Guide:</strong> ${escapeHtml(data.accessInstructions)}
-                    </div>
-                    ` : ""}
+                    <p style="margin: 0 0 10px 0; font-size: 14.5px; font-weight: 600; color: #171717; line-height: 1.5;">
+                      Your complete arrival package has been sent in a separate email.
+                    </p>
+                    <p style="margin: 0 0 18px 0; font-size: 13.5px; color: #575753; line-height: 1.6;">
+                      Check your inbox for the <strong style="color: #0B5D45;">Arrival Guide &amp; Stay Details</strong> email. It contains your <strong>exact street address</strong>, <strong>estate gate pass code</strong>, <strong>host contact</strong>, <strong>check-in instructions</strong>, and <strong>Google Maps directions</strong> — everything you need to arrive smoothly.
+                    </p>
+                    <a href="${safeUrl(bookingUrl)}" target="_blank" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 700; font-size: 13px; padding: 10px 22px; border-radius: 8px; text-decoration: none;">
+                      Open Arrival Guide on My Trips &rarr;
+                    </a>
+                    <p style="margin: 12px 0 0 0; font-size: 12px; color: #8B8B86; line-height: 1.5;">
+                      Can't find the email? Check your spam folder or visit your trips portal above. You can also contact <a href="mailto:support@ile.ng" style="color: #0B5D45; text-decoration: underline;">support@ile.ng</a>.
+                    </p>
                   </td>
                 </tr>
               </table>
@@ -996,12 +916,8 @@ Email: ${data.guestEmail}
 Phone: ${data.guestPhone || "+234 912 202 9904"}
 ${data.payerName && data.payerName !== data.guestName ? `Billing Payer: ${data.payerName} (${data.payerEmail || data.guestEmail})\n` : ""}
 ${isConfirmed ? `
-ARRIVAL CLEARANCE & GATE PASS:
-Physical Address: ${fullAddress}
-${data.unitNumber ? `Unit Number: ${data.unitNumber}\n` : ""}Estate Gate Pass Code: ${data.accessGateCode || "GATE-CLEARED"}
-Google Maps: ${googleMapsUrl}
-Arrival Guide: ${data.hostName || "Designated Ilé Host"} (${data.hostPhone || "+234 912 202 9904"})
-${data.accessInstructions ? `Instructions: ${data.accessInstructions}\n` : ""}
+ARRIVAL GUIDE:
+Your complete arrival details (exact address, host contact, gate pass code, and directions) are in a separate email titled "Arrival Guide & Stay Details". Check your inbox.
 ` : ""}
 MANAGE RESERVATION:
 ${bookingUrl}
@@ -1839,6 +1755,8 @@ export async function sendEmail(payload: EmailPayload): Promise<boolean> {
 async function sendViaResend(payload: EmailPayload): Promise<boolean> {
   try {
     const fromAddress = env.EMAIL_FROM || "noreply@notifications.9jaroommate.com";
+    console.log(`[Email] Sending via Resend → To: ${payload.to} | Subject: ${payload.subject} | From: ${fromAddress}`);
+
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -1854,12 +1772,14 @@ async function sendViaResend(payload: EmailPayload): Promise<boolean> {
       }),
     });
 
+    const resBody = await res.json().catch(() => ({}));
+
     if (!res.ok) {
-      const err = await res.text();
-      console.error(`[Email] Resend error: ${res.status} — ${err}`);
+      console.error(`[Email] Resend error: HTTP ${res.status} — ${JSON.stringify(resBody)}`);
       return false;
     }
 
+    console.log(`[Email] Resend delivered ✓ id=${(resBody as any).id || "unknown"} → ${payload.to}`);
     return true;
   } catch (err) {
     console.error("[Email] Resend network error:", err);
