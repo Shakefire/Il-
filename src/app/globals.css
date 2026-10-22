@@ -20,6 +20,12 @@
     --accent: #0B5D45;
     --accent-hover: #084936;
     --accent-light: #EDF5F2;
+    --brand-primary: #1C3D32;
+    --brand-hover: #152E26;
+    --text-main: #111827;
+    --text-muted: #4B5563;
+    --border-light: #E5E7EB;
+    --placeholder: #9CA3AF;
 
     /* Semantic Status Tokens */
     --status-success-bg: #EDF5F2;
@@ -51,6 +57,38 @@
   ::selection {
     background-color: #EDF3F0;
     color: #24483A;
+  }
+}
+
+@layer components {
+  /* Premium Form Control Tokens */
+  .ile-input {
+    @apply w-full h-11 px-3.5 bg-white border border-[#D1D5DB] rounded-lg text-sm text-[#111827] placeholder:text-[#9CA3AF] outline-none transition-[border-color,box-shadow,background-color] duration-150 ease-out;
+  }
+  .ile-input:hover:not(:disabled):not(:focus) {
+    @apply border-[#9CA3AF];
+  }
+  .ile-input:focus {
+    @apply border-[#065F46] ring-2 ring-[#065F46]/15;
+  }
+  .ile-input-error {
+    @apply border-rose-400 text-rose-900;
+  }
+  .ile-input-error:focus {
+    @apply border-rose-500 ring-2 ring-rose-500/15;
+  }
+  .ile-input:disabled {
+    @apply opacity-50 cursor-not-allowed bg-stone-50;
+  }
+
+  /* Premium Primary Action Button */
+  .ile-btn-primary {
+    @apply h-11 px-6 rounded-lg bg-[#065F46] hover:bg-[#044E39] active:bg-[#044E39] text-white text-sm font-semibold inline-flex items-center justify-center gap-2 transition-[background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#065F46]/25 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-xs cursor-pointer;
+  }
+
+  /* Premium Secondary Action Button */
+  .ile-btn-secondary {
+    @apply h-11 px-5 rounded-lg border border-[#E5E7EB] bg-white hover:border-[#9CA3AF] hover:bg-[#FAFAF8] text-sm font-medium text-[#4B5563] hover:text-[#111827] inline-flex items-center justify-center gap-2 transition-[border-color,background-color,color,transform] duration-150 ease-out active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#065F46]/25 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 cursor-pointer;
   }
 }
 

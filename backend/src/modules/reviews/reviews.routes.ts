@@ -90,6 +90,51 @@ async function createReview(
   // 5. Recalculate property average rating
   await recalculatePropertyRating(booking.propertyId);
 
+  // 6. Notify host of new guest review via Resend
+  import("../notifications/notifications.service").then(async ({ sendEmail, hostNewReviewEmail }) => {
+    try {
+      const [property] = await db
+        .select({ title: schema.properties.title, hostId: schema.properties.hostId })
+        .from(schema.properties)
+        .where(eq(schema.properties.id, booking.propertyId))
+        .limit(1);
+
+      if (property) {
+        const [host] = await db
+          .select({ email: schema.users.email, firstName: schema.users.firstName })
+          .from(schema.users)
+          .where(eq(schema.users.id, property.hostId))
+          .limit(1);
+
+        const [guest] = await db
+          .select({ firstName: schema.users.firstName, lastName: schema.users.lastName })
+          .from(schema.users)
+          .where(eq(schema.users.id, guestId))
+          .limit(1);
+
+        const guestName = guest
+          ? `${guest.firstName} ${guest.lastName}`
+          : `${booking.guestFirstName} ${booking.guestLastName}`.trim() || "A guest";
+
+        if (host?.email) {
+          sendEmail(
+            hostNewReviewEmail({
+              hostName: host.firstName,
+              hostEmail: host.email,
+              propertyTitle: property.title,
+              guestName,
+              rating: data.overallRating,
+              reviewTitle: data.title,
+              reviewBody: data.body,
+            })
+          ).catch((e) => console.warn("[Reviews] Failed to send new review email to host:", e));
+        }
+      }
+    } catch (err) {
+      console.warn("[Reviews] Error dispatching host review notification:", err);
+    }
+  });
+
   return { review, status: 201 };
 }
 

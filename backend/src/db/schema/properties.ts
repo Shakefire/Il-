@@ -40,6 +40,10 @@ export const properties = pgTable("properties", {
 
   coverImage: text("cover_image").notNull(),
   status: varchar("status", { length: 30 }).notNull().default("PENDING_REVIEW"),
+  moderationStatus: varchar("moderation_status", { length: 30 }).notNull().default("NONE"),
+  moderationReason: text("moderation_reason"),
+  moderatedAt: timestamp("moderated_at", { withTimezone: true }),
+  moderatedBy: varchar("moderated_by", { length: 100 }),
   rejectionReason: text("rejection_reason"),
 
   rating: doublePrecision("rating").notNull().default(5.0),

@@ -542,7 +542,7 @@ export default function OwnerOnboardingWizard() {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center">
         <Loader2 className="w-10 h-10 animate-spin text-[#0B5D45] mb-4" />
-        <p className="text-[#6B6B67] font-medium text-[15px]">Loading partner onboarding dossier...</p>
+        <p className="text-[#6B6B67] font-medium text-[15px]">Loading application details...</p>
       </div>
     );
   }
@@ -1602,7 +1602,7 @@ export default function OwnerOnboardingWizard() {
                     onClick={handleSubmitApplication}
                     className="px-8 py-3 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-bold flex items-center gap-2 shadow-md transition-all"
                   >
-                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Submit Dossier for Official Approval →"}
+                    {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Submit application →"}
                   </button>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, or, like, gt, lt, lte, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, like, gt, lt, lte, desc, sql, inArray, isNull } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
 import { BOOKING_STATUS } from "../../config/constants";
@@ -8,6 +8,9 @@ import {
   sendEmail,
   bookingConfirmationEmail,
   bookingAccessPassEmail,
+  bookingInitiatedEmail,
+  bookingCancelledEmail,
+  hostUpcomingArrivalEmail,
 } from "../notifications/notifications.service";
 
 const CreateBookingSchema = z.object({
@@ -77,10 +80,12 @@ export const bookingsService = {
             or(
               eq(schema.properties.id, parsed.propertyId),
               eq(schema.properties.slug, parsed.propertyId),
+              sql`LOWER(${schema.properties.slug}) = LOWER(${parsed.propertyId})`,
               like(schema.properties.id, `%${normalizedPropId}%`),
               like(schema.properties.id, `%${parsed.propertyId}%`)
             ),
-            eq(schema.properties.status, "PUBLISHED")
+            eq(schema.properties.status, "PUBLISHED"),
+            sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
           )
         )
         .limit(1);
@@ -177,20 +182,41 @@ export const bookingsService = {
         throw conflictErr;
       }
 
-      // E. Authoritative Server-side Price Calculation
+      // E. Authoritative Server-side Price Calculation (Phase 1)
       const pricePerNight = property.pricePerNight;
-      const cleaningFee = property.cleaningFee || 0;
-      const serviceFeePct = (property.serviceFeePct || 8) / 100;
+      const accommodationSubtotal = nights * pricePerNight;
 
-      const subtotal = nights * pricePerNight;
-      const serviceFee = Math.floor(subtotal * serviceFeePct);
-      const totalAmount = subtotal + cleaningFee + serviceFee;
+      // Exact Paystack Pass-Through Processing Fee Formula (Local Nigeria)
+      let paystackFee = 0;
+      if (accommodationSubtotal < 2500) {
+        paystackFee = Math.ceil(accommodationSubtotal / 0.985) - accommodationSubtotal;
+      } else {
+        paystackFee = Math.ceil((accommodationSubtotal + 100) / 0.985) - accommodationSubtotal;
+        if (paystackFee > 2000) paystackFee = 2000; // Cap at ₦2,000 per Paystack fee rule
+      }
+
+      // Default platform commission rate (configurable via platform_settings)
+      let commissionPct = 10;
+      try {
+        const [settings] = await tx
+          .select({ pct: schema.platformSettings.defaultHostCommissionPct })
+          .from(schema.platformSettings)
+          .where(eq(schema.platformSettings.id, "default"))
+          .limit(1);
+        if (settings?.pct !== undefined && settings.pct !== null) {
+          commissionPct = settings.pct;
+        }
+      } catch {}
+
+      const hostCommissionAmount = Math.round((accommodationSubtotal * commissionPct) / 100);
+      const hostNetAmount = accommodationSubtotal - hostCommissionAmount;
+      const totalAmount = accommodationSubtotal + paystackFee;
 
       const bookingId = `book_${crypto.randomUUID()}`;
       const referenceCode = `ILE-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
       const accessToken = crypto.randomBytes(32).toString("hex");
 
-      // F. Insert Booking Record
+      // F. Insert Booking Record with Financial Snapshots
       const [booking] = await tx
         .insert(schema.bookings)
         .values({
@@ -207,10 +233,15 @@ export const bookingsService = {
           checkOutDate: outDateStr,
           numberOfNights: nights,
           nightlyPrice: pricePerNight,
-          cleaningFee,
-          serviceFee,
+          cleaningFee: 0, // No cleaning fee in business model
+          serviceFee: paystackFee, // Paystack fee passed to guest
           totalAmount,
           currency: "NGN",
+          accommodationSubtotal,
+          hostCommissionPct: commissionPct,
+          hostCommissionAmount,
+          paystackFeeAmount: paystackFee,
+          hostNetAmount,
           status: BOOKING_STATUS.PAYMENT_PENDING,
           accessToken,
         })
@@ -249,14 +280,33 @@ export const bookingsService = {
         totalNights: booking.numberOfNights,
       };
 
+      // Dispatch transactional reservation initiated email
+      sendEmail(
+        bookingInitiatedEmail({
+          guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+          guestEmail: booking.guestEmail,
+          propertyTitle: property.title,
+          referenceCode: booking.referenceCode,
+          checkIn: booking.checkInDate,
+          checkOut: booking.checkOutDate,
+          totalAmount: booking.totalAmount,
+          currency: booking.currency,
+        })
+      ).catch((e) => console.warn("[Bookings] Failed to dispatch booking initiated email:", e));
+
       return {
         booking: enrichedBooking,
         pricing: {
           nights,
           pricePerNight,
-          subtotal,
-          cleaningFee,
-          serviceFee,
+          subtotal: accommodationSubtotal,
+          accommodationSubtotal,
+          cleaningFee: 0,
+          serviceFee: paystackFee,
+          paystackFee,
+          hostCommissionPct: commissionPct,
+          hostCommissionAmount,
+          hostNetAmount,
           totalAmount,
         },
         accessToken,
@@ -268,7 +318,7 @@ export const bookingsService = {
   /**
    * Cancel an unconfirmed or pending booking and release its availability blocks.
    */
-  async cancelBooking(bookingId: string, authorizedUserIdOrToken: string) {
+  async cancelBooking(bookingId: string, authorizedUserIdOrToken: string, reason?: string) {
     const db = getDb();
 
     const [booking] = await db
@@ -294,18 +344,58 @@ export const bookingsService = {
       throw err;
     }
 
+    const [prop] = await db
+      .select({ title: schema.properties.title })
+      .from(schema.properties)
+      .where(eq(schema.properties.id, booking.propertyId))
+      .limit(1);
+
     return await db.transaction(async (tx) => {
       // 1. Update booking status
       const [updated] = await tx
         .update(schema.bookings)
-        .set({ status: "CANCELLED", updatedAt: new Date() })
+        .set({
+          status: "CANCELLED",
+          cancellationReason: reason || "Cancelled by user request.",
+          cancelledAt: new Date(),
+          updatedAt: new Date(),
+        })
         .where(eq(schema.bookings.id, bookingId))
         .returning();
+
+      // 1B. Neutralize any pending host earnings & scheduled payouts to prevent unauthorized disbursements
+      await tx
+        .update(schema.hostEarnings)
+        .set({
+          status: "CANCELLED",
+        })
+        .where(eq(schema.hostEarnings.bookingId, bookingId));
+
+      await tx
+        .update(schema.payouts)
+        .set({
+          status: "CANCELLED",
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.payouts.bookingId, bookingId));
 
       // 2. Release availability blocks immediately
       await tx
         .delete(schema.availabilityBlocks)
         .where(eq(schema.availabilityBlocks.bookingId, bookingId));
+
+      // 3. Dispatch cancellation email to guest
+      sendEmail(
+        bookingCancelledEmail({
+          guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+          guestEmail: booking.guestEmail,
+          propertyTitle: prop?.title || "Ilé Property",
+          referenceCode: booking.referenceCode,
+          checkIn: booking.checkInDate,
+          checkOut: booking.checkOutDate,
+          cancellationReason: reason || "Cancelled by user request.",
+        })
+      ).catch((e) => console.warn("[Bookings] Failed to dispatch cancellation email:", e));
 
       return { success: true, message: "Booking cancelled and dates released.", booking: updated };
     });
@@ -325,6 +415,7 @@ export const bookingsService = {
         or(
           eq(schema.properties.id, propertyId),
           eq(schema.properties.slug, propertyId),
+          sql`LOWER(${schema.properties.slug}) = LOWER(${propertyId})`,
           like(schema.properties.id, `%${normalizedPropId}%`),
           like(schema.properties.id, `%${propertyId}%`)
         )
@@ -627,6 +718,96 @@ export const bookingsService = {
       checkInInstructions: privateDetails.checkInInstructions,
       accessGateCode: privateDetails.accessGateCode,
       houseRulesPrivate: privateDetails.houseRulesPrivate,
+    };
+  },
+
+  /**
+   * Scan for confirmed bookings checking in on a specific date (defaults to tomorrow)
+   * and dispatch arrival reminder emails to property hosts with durable tracking.
+   */
+  async processUpcomingArrivalReminders(targetDateStr?: string) {
+    const db = getDb();
+
+    // Default to tomorrow in UTC
+    let dateStr = targetDateStr;
+    if (!dateStr) {
+      const tomorrow = new Date();
+      tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+      dateStr = tomorrow.toISOString().split("T")[0];
+    }
+
+    // Find confirmed bookings for target check-in date where reminder has not been sent yet
+    const upcomingBookings = await db
+      .select()
+      .from(schema.bookings)
+      .where(
+        and(
+          eq(schema.bookings.status, BOOKING_STATUS.CONFIRMED),
+          eq(schema.bookings.checkInDate, dateStr),
+          isNull(schema.bookings.hostArrivalReminderSentAt)
+        )
+      );
+
+    const sent: Array<{ bookingId: string; referenceCode: string; hostEmail: string }> = [];
+
+    for (const b of upcomingBookings) {
+      const [property] = await db
+        .select()
+        .from(schema.properties)
+        .where(eq(schema.properties.id, b.propertyId))
+        .limit(1);
+
+      if (!property) continue;
+
+      const [host] = await db
+        .select({
+          email: schema.users.email,
+          firstName: schema.users.firstName,
+          lastName: schema.users.lastName,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, property.hostId))
+        .limit(1);
+
+      if (!host?.email) continue;
+
+      // Dispatch reminder email
+      await sendEmail(
+        hostUpcomingArrivalEmail({
+          hostName: host.firstName,
+          hostEmail: host.email,
+          propertyTitle: property.title,
+          referenceCode: b.referenceCode,
+          guestName: `${b.guestFirstName} ${b.guestLastName}`,
+          guestPhone: b.guestPhone || undefined,
+          guestEmail: b.guestEmail,
+          checkIn: b.checkInDate,
+          checkInTime: "2:00 PM",
+          checkOut: b.checkOutDate,
+          guestCount: b.guestCount,
+        })
+      );
+
+      // Durably record timestamp to guarantee exactly-once delivery
+      await db
+        .update(schema.bookings)
+        .set({
+          hostArrivalReminderSentAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.bookings.id, b.id));
+
+      sent.push({
+        bookingId: b.id,
+        referenceCode: b.referenceCode,
+        hostEmail: host.email,
+      });
+    }
+
+    return {
+      processedDate: dateStr,
+      remindersSentCount: sent.length,
+      sent,
     };
   },
 };

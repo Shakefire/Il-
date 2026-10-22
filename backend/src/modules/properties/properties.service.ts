@@ -1,4 +1,4 @@
-import { eq, inArray, count, and, asc, or, gte, lte } from "drizzle-orm";
+import { eq, inArray, count, and, asc, or, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
 import { PROPERTY_STATUS } from "../../config/constants";
@@ -71,7 +71,12 @@ export async function getPublishedProperties(pagination: { limit: number; offset
   const [totalResult] = await db
     .select({ total: count(schema.properties.id) })
     .from(schema.properties)
-    .where(eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED));
+    .where(
+      and(
+        eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
+        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+      )
+    );
 
   const total = Number(totalResult?.total) || 0;
 
@@ -79,7 +84,12 @@ export async function getPublishedProperties(pagination: { limit: number; offset
   const properties = await db
     .select()
     .from(schema.properties)
-    .where(eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED))
+    .where(
+      and(
+        eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
+        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+      )
+    )
     .limit(pagination.limit)
     .offset(pagination.offset);
 
@@ -171,6 +181,7 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
 
   const matchCondition = or(
     eq(schema.properties.slug, slugOrId),
+    sql`LOWER(${schema.properties.slug}) = LOWER(${slugOrId})`,
     eq(schema.properties.id, slugOrId)
   );
 
@@ -180,7 +191,11 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
     .where(
       allowUnpublished
         ? matchCondition
-        : and(matchCondition, eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED))
+        : and(
+            matchCondition,
+            eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
+            sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+          )
     )
     .limit(1);
 

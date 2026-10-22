@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import LocationAutocomplete, { SelectedLocation } from "@/components/LocationAutocomplete";
+import StepMotion from "@/components/onboarding/StepMotion";
 import { formatNaira } from "@/lib/utils";
 import { api } from "@/lib/api";
 
@@ -67,6 +68,7 @@ export default function BecomeAHostPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submittedSlug, setSubmittedSlug] = useState<string | null>(null);
 
   // Form State
   const [title, setTitle] = useState("");
@@ -321,6 +323,7 @@ export default function BecomeAHostPage() {
         throw new Error(data.error || "Submission failed. Please complete all required sections.");
       }
 
+      setSubmittedSlug(data.property?.slug || null);
       setIsSubmitted(true);
       await refreshUser();
     } catch (err: any) {
@@ -387,21 +390,21 @@ export default function BecomeAHostPage() {
               <div className="flex flex-col gap-2.5">
                 <Link
                   href="/host/dashboard"
-                  className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
+                  className="w-full py-3 px-4 rounded-xl bg-[#065F46] text-white hover:bg-[#044E39] active:scale-[0.99] text-sm font-semibold transition-all shadow-xs text-center"
                 >
                   Go to Host Dashboard
                 </Link>
                 <Link
                   href="/host/onboarding/status"
-                  className="w-full py-2.5 px-4 rounded-xl border border-[#E7E5E0] bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold transition-colors text-center"
+                  className="w-full py-2.5 px-4 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-stone-700 text-xs font-semibold transition-all text-center"
                 >
-                  View Verification Dossier
+                  View Application Status
                 </Link>
               </div>
             ) : status === "SUSPENDED" ? (
               <a
                 href="mailto:support@ile.ng"
-                className="w-full py-3 px-4 rounded-xl bg-stone-900 text-white hover:bg-black text-sm font-semibold transition-colors text-center"
+                className="w-full py-3 px-4 rounded-xl bg-stone-900 text-white hover:bg-black active:scale-[0.99] text-sm font-semibold transition-all text-center"
               >
                 Contact Support
               </a>
@@ -409,7 +412,7 @@ export default function BecomeAHostPage() {
               <div className="flex flex-col gap-2.5">
                 <Link
                   href="/host/onboarding"
-                  className="w-full py-3 px-4 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-xs text-center"
+                  className="w-full py-3 px-4 rounded-xl bg-[#065F46] text-white hover:bg-[#044E39] active:scale-[0.99] text-sm font-semibold transition-all shadow-xs text-center"
                 >
                   {status === "ACTION_REQUIRED" || status === "REJECTED"
                     ? "Update Host Documents & Resubmit →"
@@ -417,7 +420,7 @@ export default function BecomeAHostPage() {
                 </Link>
                 <Link
                   href="/host/dashboard"
-                  className="w-full py-2.5 px-4 rounded-xl border border-[#E7E5E0] bg-white hover:bg-stone-50 text-stone-700 text-xs font-semibold transition-colors text-center"
+                  className="w-full py-2.5 px-4 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-stone-700 text-xs font-semibold transition-all text-center"
                 >
                   Go to Host Dashboard
                 </Link>
@@ -484,7 +487,7 @@ export default function BecomeAHostPage() {
             <button
               type="button"
               onClick={() => setStep(1)}
-              className="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-[15px] font-semibold transition-all shadow-md hover:shadow-lg"
+              className="inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-[#065F46] text-white hover:bg-[#044E39] active:scale-[0.99] text-[15px] font-semibold transition-all shadow-md hover:shadow-lg"
             >
               <span>Get started</span>
               <ChevronRight size={18} />
@@ -500,19 +503,31 @@ export default function BecomeAHostPage() {
     return (
       <div className="min-h-screen bg-[#FAFAF8] py-16 px-4 flex items-center justify-center">
         <div className="bg-white border border-[#E7E5E0] rounded-2xl max-w-md w-full p-8 text-center space-y-5 shadow-sm">
-          <div className="w-16 h-16 rounded-full bg-[#EDF3F0] text-[#0B5D45] flex items-center justify-center mx-auto">
+          <div className="w-16 h-16 rounded-full bg-[#EDF3F0] text-[#065F46] flex items-center justify-center mx-auto">
             <CheckCircle2 size={32} />
           </div>
           <h2 className="text-2xl font-bold font-display text-[#171717]">
-            Listing Submitted for Review!
+            Listing Published Successfully!
           </h2>
           <p className="text-sm text-[#6B6B67] leading-relaxed">
-            Your listing &ldquo;{title}&rdquo; is now in <strong>PENDING_REVIEW</strong>. Our team reviews submissions to verify continuous power, security, and accuracy before publishing.
+            Your listing &ldquo;{title}&rdquo; is now live on Ilé! Travelers across Nigeria can now discover and book your residence.
           </p>
-          <div className="pt-3">
+          <div className="pt-3 flex flex-col sm:flex-row gap-3">
+            {submittedSlug && (
+              <Link
+                href={`/stay/${submittedSlug}`}
+                className="flex-1 py-3 rounded-xl bg-[#065F46] text-white hover:bg-[#044E39] active:scale-[0.99] text-sm font-semibold transition-all shadow-sm text-center block"
+              >
+                View Live Stay →
+              </Link>
+            )}
             <Link
               href="/host/dashboard"
-              className="w-full py-3 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-sm text-center block"
+              className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all text-center block ${
+                submittedSlug
+                  ? "border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-stone-700 hover:bg-stone-50"
+                  : "bg-[#065F46] text-white hover:bg-[#044E39] shadow-sm"
+              }`}
             >
               Go to Host Dashboard
             </Link>
@@ -531,7 +546,7 @@ export default function BecomeAHostPage() {
           <div className="flex items-center justify-between text-xs font-semibold text-[#8B8B86]">
             <span>STEP {step} OF 7</span>
             {isSaving ? (
-              <span className="text-[#0B5D45] flex items-center gap-1">
+              <span className="text-[#065F46] flex items-center gap-1">
                 <Loader2 size={12} className="animate-spin" /> Saving draft...
               </span>
             ) : propertyId ? (
@@ -542,7 +557,7 @@ export default function BecomeAHostPage() {
           {/* Progress Bar */}
           <div className="w-full h-2 bg-[#F0EFEB] rounded-full overflow-hidden">
             <div
-              className="h-full bg-[#0B5D45] transition-all duration-300 rounded-full"
+              className="h-full bg-[#065F46] transition-all duration-300 rounded-full"
               style={{ width: `${(step / 7) * 100}%` }}
             />
           </div>
@@ -567,6 +582,7 @@ export default function BecomeAHostPage() {
 
         {/* Step Contents */}
         <div className="bg-white border border-[#E7E5E0] rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
+          <StepMotion key={step}>
           {/* ── STEP 1: Property Basics ── */}
           {step === 1 && (
             <div className="space-y-5">
@@ -587,7 +603,7 @@ export default function BecomeAHostPage() {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder="e.g., The Cedar Loft in Wuse 2"
-                    className="w-full px-4 py-3 rounded-xl border border-[#E7E5E0] text-[15px] focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                    className="w-full px-4 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-[15px] outline-none transition-all"
                   />
                 </div>
 
@@ -600,7 +616,7 @@ export default function BecomeAHostPage() {
                     value={tagline}
                     onChange={(e) => setTagline(e.target.value)}
                     placeholder="e.g., Sunlit terrace flat with fiber internet & 24/7 power"
-                    className="w-full px-4 py-3 rounded-xl border border-[#E7E5E0] text-[15px] focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                    className="w-full px-4 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-[15px] outline-none transition-all"
                   />
                 </div>
 
@@ -612,7 +628,7 @@ export default function BecomeAHostPage() {
                     <select
                       value={propertyType}
                       onChange={(e) => setPropertyType(e.target.value)}
-                      className="w-full px-3.5 py-3 rounded-xl border border-[#E7E5E0] bg-white text-[15px] focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                      className="w-full px-3.5 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 bg-white text-[15px] outline-none transition-all"
                     >
                       {PROPERTY_TYPES.map((t) => (
                         <option key={t} value={t}>
@@ -629,7 +645,7 @@ export default function BecomeAHostPage() {
                     <select
                       value={spaceType}
                       onChange={(e) => setSpaceType(e.target.value)}
-                      className="w-full px-3.5 py-3 rounded-xl border border-[#E7E5E0] bg-white text-[15px] focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                      className="w-full px-3.5 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 bg-white text-[15px] outline-none transition-all"
                     >
                       {SPACE_TYPES.map((s) => (
                         <option key={s} value={s}>
@@ -649,7 +665,7 @@ export default function BecomeAHostPage() {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Describe the peaceful neighborhood, natural lighting, work environment, and general feel of the space..."
-                    className="w-full px-4 py-3 rounded-xl border border-[#E7E5E0] text-[15px] focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                    className="w-full px-4 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-[15px] outline-none transition-all"
                   />
                 </div>
               </div>
@@ -678,7 +694,7 @@ export default function BecomeAHostPage() {
                     onSelect={(loc) => setSelectedLocation(loc)}
                   />
                   {selectedLocation && (
-                    <div className="mt-2 p-3 bg-[#EDF3F0] rounded-xl text-xs text-[#0B5D45] flex items-center gap-2">
+                    <div className="mt-2 p-3 bg-[#EDF3F0] rounded-xl text-xs text-[#065F46] flex items-center gap-2">
                       <CheckCircle2 size={16} className="shrink-0" />
                       <span>
                         Resolved: <strong>{selectedLocation.name}</strong> ({selectedLocation.city}, {selectedLocation.state}) · Lat: {selectedLocation.latitude.toFixed(4)}, Lng: {selectedLocation.longitude.toFixed(4)}
@@ -705,7 +721,7 @@ export default function BecomeAHostPage() {
                         value={exactAddress}
                         onChange={(e) => setExactAddress(e.target.value)}
                         placeholder="e.g. Plot 412, Crescent Court, Off Ahmadu Bello Way"
-                        className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                        className="w-full px-4 py-2.5 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-sm outline-none transition-all"
                       />
                     </div>
 
@@ -719,7 +735,7 @@ export default function BecomeAHostPage() {
                           value={unitNumber}
                           onChange={(e) => setUnitNumber(e.target.value)}
                           placeholder="e.g. Apt 3B"
-                          className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                          className="w-full px-4 py-2.5 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-sm outline-none transition-all"
                         />
                       </div>
 
@@ -732,7 +748,7 @@ export default function BecomeAHostPage() {
                           value={accessGateCode}
                           onChange={(e) => setAccessGateCode(e.target.value)}
                           placeholder="e.g. GATE-7740"
-                          className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                          className="w-full px-4 py-2.5 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-sm outline-none transition-all"
                         />
                       </div>
                     </div>
@@ -746,7 +762,7 @@ export default function BecomeAHostPage() {
                         value={checkInInstructions}
                         onChange={(e) => setCheckInInstructions(e.target.value)}
                         placeholder="e.g. Show confirmation QR at estate gate. The building manager will hand over keys."
-                        className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                        className="w-full px-4 py-2.5 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-sm outline-none transition-all"
                       />
                     </div>
                   </div>
@@ -776,7 +792,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setMaxGuests((g) => Math.max(1, g - 1))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Minus size={15} />
                     </button>
@@ -784,7 +800,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setMaxGuests((g) => Math.min(20, g + 1))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Plus size={15} />
                     </button>
@@ -801,7 +817,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setBedrooms((b) => Math.max(1, b - 1))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Minus size={15} />
                     </button>
@@ -809,7 +825,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setBedrooms((b) => Math.min(10, b + 1))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Plus size={15} />
                     </button>
@@ -826,7 +842,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setBeds((b) => Math.max(1, b - 1))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Minus size={15} />
                     </button>
@@ -834,7 +850,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setBeds((b) => Math.min(15, b + 1))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Plus size={15} />
                     </button>
@@ -851,7 +867,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setBathrooms((b) => Math.max(1, b - 0.5))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Minus size={15} />
                     </button>
@@ -859,7 +875,7 @@ export default function BecomeAHostPage() {
                     <button
                       type="button"
                       onClick={() => setBathrooms((b) => Math.min(10, b + 0.5))}
-                      className="w-9 h-9 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100"
+                      className="w-9 h-9 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-[#FAFAF8] flex items-center justify-center font-bold text-base hover:bg-neutral-100 active:scale-95 transition-all"
                     >
                       <Plus size={15} />
                     </button>
@@ -887,18 +903,18 @@ export default function BecomeAHostPage() {
                       key={name}
                       type="button"
                       onClick={() => toggleAmenity(name)}
-                      className={`text-left p-3.5 rounded-xl border transition-all flex items-center justify-between ${
+                      className={`text-left p-3.5 rounded-xl border transition-all flex items-center justify-between active:scale-[0.99] cursor-pointer ${
                         isSelected
-                          ? "bg-[#EDF3F0] border-[#0B5D45] text-[#0B5D45] font-semibold"
-                          : "bg-white border-[#E7E5E0] text-[#171717] hover:border-[#8B8B86]"
+                          ? "bg-[#EDF3F0] border-[#065F46] text-[#065F46] font-semibold"
+                          : "bg-white border-[#D1D5DB] text-[#171717] hover:border-[#9CA3AF]"
                       }`}
                     >
                       <span className="text-xs sm:text-sm">{name}</span>
                       <div
                         className={`w-5 h-5 rounded-md flex items-center justify-center border transition-colors ${
                           isSelected
-                            ? "bg-[#0B5D45] border-[#0B5D45] text-white"
-                            : "border-[#C9C7C1]"
+                            ? "bg-[#065F46] border-[#065F46] text-white"
+                            : "border-[#D1D5DB]"
                         }`}
                       >
                         {isSelected && <Check size={12} />}
@@ -921,7 +937,7 @@ export default function BecomeAHostPage() {
               </div>
 
               {/* Upload Input */}
-              <div className="border-2 border-dashed border-[#C9C7C1] hover:border-[#0B5D45] rounded-2xl p-6 sm:p-8 text-center transition-colors">
+              <div className="border-2 border-dashed border-[#D1D5DB] hover:border-[#065F46] hover:bg-[#EDF3F0]/20 rounded-2xl p-6 sm:p-8 text-center transition-all cursor-pointer">
                 <input
                   type="file"
                   id="image-upload"
@@ -934,7 +950,7 @@ export default function BecomeAHostPage() {
                   htmlFor="image-upload"
                   className="cursor-pointer flex flex-col items-center justify-center space-y-2"
                 >
-                  <div className="w-12 h-12 rounded-xl bg-[#EDF3F0] text-[#0B5D45] flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-xl bg-[#EDF3F0] text-[#065F46] flex items-center justify-center">
                     {uploadingImage ? (
                       <Loader2 size={24} className="animate-spin" />
                     ) : (
@@ -954,18 +970,18 @@ export default function BecomeAHostPage() {
                   {images.map((url, idx) => (
                     <div
                       key={url}
-                      className="relative h-28 rounded-xl overflow-hidden bg-neutral-100 group border border-[#E7E5E0]"
+                      className="relative h-28 rounded-xl overflow-hidden bg-neutral-100 group border border-[#D1D5DB]"
                     >
                       <Image src={url} alt={`Listing ${idx + 1}`} fill className="object-cover" />
                       {idx === 0 && (
-                        <span className="absolute bottom-2 left-2 bg-[#0B5D45] text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
+                        <span className="absolute bottom-2 left-2 bg-[#065F46] text-white text-[10px] font-bold px-2 py-0.5 rounded shadow">
                           Cover
                         </span>
                       )}
                       <button
                         type="button"
                         onClick={() => removeImage(idx)}
-                        className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 text-white hover:bg-black transition-colors"
+                        className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 text-white hover:bg-black active:scale-95 transition-all cursor-pointer"
                       >
                         <X size={12} />
                       </button>
@@ -1001,12 +1017,20 @@ export default function BecomeAHostPage() {
                       min={5000}
                       value={pricePerNight}
                       onChange={(e) => setPricePerNight(Number(e.target.value))}
-                      className="w-full pl-9 pr-4 py-3 rounded-xl border border-[#E7E5E0] text-lg font-bold focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                      className="w-full pl-9 pr-4 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-lg font-bold outline-none transition-all"
                     />
                   </div>
-                  <p className="text-xs text-[#8B8B86] mt-1">
-                    Minimum ₦5,000 / night. Ilé service fee (8%) is handled automatically.
-                  </p>
+                  <div className="mt-2 p-3 rounded-xl bg-[#EDF3F0] text-xs space-y-1">
+                    <div className="flex justify-between font-medium text-[#171717]">
+                      <span>Your Estimated Net Payout:</span>
+                      <span className="font-bold text-[#0B5D45] text-sm">
+                        {formatNaira(Math.round(pricePerNight * 0.9))} / night
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#6B6B67]">
+                      Ilé platform fee is a flat 10% on the nightly accommodation subtotal. You receive 90% net settlement directly to your Nigerian bank account.
+                    </p>
+                  </div>
                 </div>
 
                 <div className="border-t border-[#F2F0EB] pt-4 space-y-3">
@@ -1021,7 +1045,7 @@ export default function BecomeAHostPage() {
                     <select
                       value={powerType}
                       onChange={(e) => setPowerType(e.target.value)}
-                      className="w-full px-3.5 py-3 rounded-xl border border-[#E7E5E0] bg-white text-[15px] focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                      className="w-full px-3.5 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 bg-white text-[15px] outline-none transition-all"
                     >
                       <option value="Solar + Inverter with Generator Backup">
                         Solar + Inverter with Generator Backup (24/7)
@@ -1042,7 +1066,7 @@ export default function BecomeAHostPage() {
                       rows={2}
                       value={powerDescription}
                       onChange={(e) => setPowerDescription(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:ring-2 focus:ring-[#0B5D45]"
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-sm outline-none transition-all"
                     />
                   </div>
                 </div>
@@ -1056,7 +1080,7 @@ export default function BecomeAHostPage() {
               <div>
                 <h2 className="text-xl font-bold text-[#171717]">Review &amp; Submit</h2>
                 <p className="text-sm text-[#6B6B67] mt-0.5">
-                  Confirm your listing details before submitting to the administration team.
+                  Confirm your listing details before publishing directly to the Ilé marketplace.
                 </p>
               </div>
 
@@ -1080,9 +1104,12 @@ export default function BecomeAHostPage() {
                 </div>
 
                 <div className="pt-3 space-y-1">
-                  <span className="text-xs uppercase font-semibold text-[#8B8B86]">Pricing</span>
-                  <p className="text-base font-bold text-[#0B5D45]">
+                  <span className="text-xs uppercase font-semibold text-[#8B8B86]">Pricing &amp; Payout</span>
+                  <p className="text-base font-bold text-[#065F46]">
                     {formatNaira(pricePerNight)} / night
+                  </p>
+                  <p className="text-xs text-[#6B6B67]">
+                    You receive: <strong className="text-[#0B5D45]">{formatNaira(Math.round(pricePerNight * 0.9))} / night</strong> net (90% payout)
                   </p>
                 </div>
 
@@ -1094,14 +1121,15 @@ export default function BecomeAHostPage() {
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-[#EDF3F0] text-xs text-[#0B5D45] flex items-start gap-2.5">
+              <div className="p-4 rounded-xl bg-[#EDF3F0] text-xs text-[#065F46] flex items-start gap-2.5">
                 <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
                 <p className="leading-relaxed">
-                  Upon submission, your property will enter <strong>PENDING_REVIEW</strong>. An administrator will verify the listing before making it active.
+                  As a verified host partner, submitting this listing publishes it directly to <strong>PUBLISHED</strong> and makes it live in search results immediately without routine admin review.
                 </p>
               </div>
             </div>
           )}
+          </StepMotion>
         </div>
 
         {/* Wizard Footer Controls */}
@@ -1110,7 +1138,7 @@ export default function BecomeAHostPage() {
             <button
               type="button"
               onClick={handlePrevStep}
-              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#E7E5E0] bg-white text-sm font-semibold text-[#171717] hover:bg-neutral-50 transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-sm font-semibold text-[#171717] hover:bg-neutral-50 active:scale-[0.99] transition-all cursor-pointer"
             >
               <ChevronLeft size={16} />
               <span>Back</span>
@@ -1124,7 +1152,7 @@ export default function BecomeAHostPage() {
               type="button"
               onClick={saveDraft}
               disabled={isSaving}
-              className="px-4 py-2.5 rounded-xl border border-[#E7E5E0] bg-white text-sm font-semibold text-[#6B6B67] hover:text-[#171717] transition-colors"
+              className="px-4 py-2.5 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-sm font-semibold text-[#6B6B67] hover:text-[#171717] active:scale-[0.99] transition-all cursor-pointer"
             >
               {isSaving ? "Saving..." : "Save Draft"}
             </button>
@@ -1134,7 +1162,7 @@ export default function BecomeAHostPage() {
                 type="button"
                 onClick={handleNextStep}
                 disabled={isSaving}
-                className="inline-flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-sm"
+                className="inline-flex items-center gap-1.5 px-6 py-2.5 rounded-xl bg-[#065F46] text-white hover:bg-[#044E39] active:scale-[0.99] text-sm font-semibold transition-all shadow-sm cursor-pointer"
               >
                 <span>Continue</span>
                 <ChevronRight size={16} />
@@ -1144,7 +1172,7 @@ export default function BecomeAHostPage() {
                 type="button"
                 onClick={handleSubmitForReview}
                 disabled={isSaving}
-                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors shadow-sm"
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-[#065F46] text-white hover:bg-[#044E39] active:scale-[0.99] text-sm font-semibold transition-all shadow-sm cursor-pointer"
               >
                 {isSaving ? (
                   <>

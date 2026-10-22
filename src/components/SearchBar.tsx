@@ -431,7 +431,7 @@ export default function SearchBar({
               }`}
             >
               <div className="flex items-center gap-2.5">
-                <MapPin size={18} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                <MapPin size={18} className="text-[#065F46] shrink-0 mt-0.5" />
                 <div className="overflow-hidden w-full">
                   <div className="text-[11px] font-bold tracking-wider uppercase text-[#6B6B67]">Where</div>
                   <div className="text-[15px] text-[#171717] font-semibold mt-0.5 truncate flex items-center justify-between">
@@ -453,7 +453,7 @@ export default function SearchBar({
                       value={destination === "All Nigeria" ? "" : destination}
                       onChange={(e) => handleDestinationInput(e.target.value)}
                       placeholder="Type district, hotel or landmark..."
-                      className="w-full pl-8 pr-8 py-2 text-[14px] bg-[#F7F6F3] border border-[#E7E5E0] rounded-xl focus:outline-none focus:border-[#0B5D45] text-[#171717] placeholder:text-[#9B9B97]"
+                      className="w-full pl-8 pr-8 py-2 text-[14px] bg-[#F7F6F3] border border-[#D1D5DB] hover:border-[#9CA3AF] rounded-xl focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-[#171717] placeholder:text-[#9B9B97] transition-all"
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           setActiveDropdown("propertyType");
@@ -463,7 +463,7 @@ export default function SearchBar({
                     />
                     <Search size={14} className="absolute left-2.5 top-3 text-[#8B8B86]" />
                     {isSearchingLocation && (
-                      <Loader2 size={14} className="absolute right-2.5 top-3 text-[#0B5D45] animate-spin" />
+                      <Loader2 size={14} className="absolute right-2.5 top-3 text-[#065F46] animate-spin" />
                     )}
                   </div>
                 </div>
@@ -471,7 +471,7 @@ export default function SearchBar({
                 {/* Real Geocoded Suggestions Dropdown */}
                 {locationSuggestions.length > 0 && (
                   <div className="mb-3 px-1">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#0B5D45] mb-1.5 flex items-center gap-1">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[#065F46] mb-1.5 flex items-center gap-1">
                       <span>Matching Locations</span>
                     </div>
                     <div className="max-h-52 overflow-y-auto divide-y divide-[#F2F0EB] bg-[#FAF9F6] rounded-xl border border-[#E7E5E0] p-1">
@@ -480,13 +480,13 @@ export default function SearchBar({
                           key={`${loc.latitude}-${loc.longitude}-${idx}`}
                           type="button"
                           onClick={() => selectRealLocation(loc)}
-                          className="w-full text-left p-2 hover:bg-white rounded-lg transition-colors flex items-start gap-2.5 group"
+                          className="w-full text-left p-2 hover:bg-white rounded-lg transition-colors flex items-start gap-2.5 group cursor-pointer"
                         >
-                          <div className="mt-0.5 w-5 h-5 rounded bg-[#EDF3F0] text-[#0B5D45] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                          <div className="mt-0.5 w-5 h-5 rounded bg-[#EDF3F0] text-[#065F46] flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                             <MapPin size={12} />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-[13px] font-semibold text-[#171717] truncate group-hover:text-[#0B5D45] transition-colors">
+                            <p className="text-[13px] font-semibold text-[#171717] truncate group-hover:text-[#065F46] transition-colors">
                               {loc.name || loc.neighborhood || loc.city}
                             </p>
                             <p className="text-[11px] text-[#6B6B67] truncate">
@@ -513,10 +513,10 @@ export default function SearchBar({
                           setDestination(chip);
                           setActiveDropdown("propertyType");
                         }}
-                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-all active:scale-95 cursor-pointer ${
                           destination === chip
-                            ? "bg-[#0B5D45] text-white border-[#0B5D45]"
-                            : "bg-[#F7F6F3] text-[#4A4A45] border-[#E7E5E0] hover:border-[#171717]"
+                            ? "bg-[#065F46] text-white border-[#065F46]"
+                            : "bg-[#F7F6F3] text-[#4A4A45] border-[#D1D5DB] hover:border-[#9CA3AF]"
                         }`}
                       >
                         {chip}
@@ -889,7 +889,7 @@ export default function SearchBar({
             <button
               type="button"
               onClick={handleSearch}
-              className="bg-[#0B5D45] hover:bg-[#084936] text-white px-4 lg:px-5 py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all font-semibold text-[14px] lg:text-[15px] shrink-0 shadow-md hover:shadow-lg"
+              className="bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white px-4 lg:px-5 py-3.5 rounded-xl flex items-center justify-center gap-2 transition-all font-semibold text-[14px] lg:text-[15px] shrink-0 shadow-md hover:shadow-lg cursor-pointer"
               aria-label="Search stays"
             >
               <Search size={16} strokeWidth={2.5} />

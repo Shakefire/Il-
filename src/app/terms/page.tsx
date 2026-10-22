@@ -94,7 +94,7 @@ export default function TermsPage() {
               <strong className="text-[#171717]">Transparent Pricing:</strong> The price per night shown includes all utilities, electricity generator fuel, and estate security levies. No surprise fuel surcharges upon arrival.
             </li>
             <li>
-              <strong className="text-[#171717]">Service Fee:</strong> An 8% platform facilitation fee covers round-the-clock concierge support, estate gate pass coordination, and property inspection audits.
+              <strong className="text-[#171717]">Guaranteed Amenities:</strong> Every listed residence is verified for continuous power, uninterrupted water, and gated security before listing approval.
             </li>
           </ul>
         </section>

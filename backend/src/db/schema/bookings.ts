@@ -25,7 +25,17 @@ export const bookings = pgTable("bookings", {
   totalAmount: integer("total_amount").notNull(),
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
 
+  // Authoritative financial snapshots (Phase 1)
+  accommodationSubtotal: integer("accommodation_subtotal"),
+  hostCommissionPct: integer("host_commission_pct").default(10),
+  hostCommissionAmount: integer("host_commission_amount").default(0),
+  paystackFeeAmount: integer("paystack_fee_amount").default(0),
+  hostNetAmount: integer("host_net_amount").default(0),
+
   status: varchar("status", { length: 30 }).notNull().default("PENDING"),
+  hostArrivalReminderSentAt: timestamp("host_arrival_reminder_sent_at", { withTimezone: true }),
+  cancellationReason: varchar("cancellation_reason", { length: 255 }),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
 
   accessToken: varchar("access_token", { length: 64 }).notNull().unique(),
 

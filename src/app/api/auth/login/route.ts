@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     }
 
     const user = await authService.loginUser(parse.data.email, parse.data.password);
-    const token = createSessionToken(user.id, user.email, user.role);
+    const token = createSessionToken(user.id, user.email, user.role, user.emailVerified);
 
     const response = NextResponse.json({
       success: true,
@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
       maxAge: 30 * 24 * 60 * 60,
     });
 

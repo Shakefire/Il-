@@ -3,15 +3,10 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  ShieldCheck,
   Check,
-  Camera,
   AlertTriangle,
-  RotateCcw,
   X,
   Loader2,
-  Lock,
-  Zap,
 } from "lucide-react";
 
 export interface FintechLivenessResult {
@@ -26,10 +21,18 @@ export interface FintechLivenessModalProps {
   onComplete: (result: FintechLivenessResult) => void;
 }
 
-type ChallengeStep = "initializing" | "center" | "blink" | "turn_left" | "verified" | "error" | "timeout";
+type ChallengeStep =
+  | "initializing"
+  | "center"
+  | "blink"
+  | "turn_left"
+  | "uploading"
+  | "verified"
+  | "error"
+  | "timeout";
 
 // ── Global Singleton Cache for Neural Vision Engine ──
-// Loads once per session so opening/retrying is instant with 0ms network latency.
+// Loads once per session so opening/retrying is fast
 let cachedLandmarker: any = null;
 let cachedLandmarkerPromise: Promise<any> | null = null;
 
@@ -40,7 +43,11 @@ export async function preloadLivenessEngine(): Promise<any> {
 
   cachedLandmarkerPromise = (async () => {
     try {
-      const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
+      // Dynamic runtime import prevents bundlers from analyzing internal worker paths
+      const loadTasksVision = new Function("url", "return import(url);");
+      const { FaceLandmarker, FilesetResolver } = await loadTasksVision(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/vision_bundle.mjs"
+      );
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
       );
@@ -93,18 +100,16 @@ export async function preloadLivenessEngine(): Promise<any> {
 }
 
 /**
- * Play a fintech-grade synthesized audio chime on verification success.
- * Uses Web Audio API so zero external audio assets or network requests are needed.
+ * Ascending harmonic chime on verification success.
  */
-function playFintechSuccessChime() {
+function playSuccessChime() {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
     const now = ctx.currentTime;
 
-    // Three-tone ascending harmonic chime (C5 -> E5 -> G5)
-    const freqs = [523.25, 659.25, 783.99];
+    const freqs = [523.25, 659.25, 783.99]; // C5 -> E5 -> G5
     freqs.forEach((freq, idx) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -112,7 +117,7 @@ function playFintechSuccessChime() {
       osc.frequency.setValueAtTime(freq, now + idx * 0.08);
 
       gain.gain.setValueAtTime(0, now + idx * 0.08);
-      gain.gain.linearRampToValueAtTime(0.18, now + idx * 0.08 + 0.02);
+      gain.gain.linearRampToValueAtTime(0.16, now + idx * 0.08 + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.35);
 
       osc.connect(gain);
@@ -121,7 +126,7 @@ function playFintechSuccessChime() {
       osc.stop(now + idx * 0.08 + 0.35);
     });
   } catch {
-    // Audio playback optional / user muted
+    // Audio optional
   }
 }
 
@@ -130,13 +135,14 @@ export default function FintechLivenessModal({
   onClose,
   onComplete,
 }: FintechLivenessModalProps) {
-  // UI & Flow State
+  // Verification State
   const [step, setStep] = useState<ChallengeStep>("initializing");
   const [progressPct, setProgressPct] = useState(0); // 0 -> 33 -> 66 -> 100
-  const [microHint, setMicroHint] = useState("Position your face inside the circle");
+  const [statusMessage, setStatusMessage] = useState("Opening your camera…");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(30);
+
+  // Stored result for final continue action
+  const [completedResult, setCompletedResult] = useState<FintechLivenessResult | null>(null);
 
   // Video & Stream Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -175,46 +181,41 @@ export default function FintechLivenessModal({
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    // Note: We preserve cachedLandmarker in memory for instant re-opening
   }, []);
+
+  const handleClose = useCallback(() => {
+    stopAllMedia();
+    onClose();
+  }, [stopAllMedia, onClose]);
 
   // 30-Second Auto-Timeout Counter
   useEffect(() => {
-    if (!isOpen || step === "verified" || step === "error" || step === "timeout") return;
+    if (!isOpen || step === "verified" || step === "error" || step === "timeout" || step === "uploading") {
+      return;
+    }
 
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          stopAllMedia();
-          setStep("timeout");
-          stepRef.current = "timeout";
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    const timer = setTimeout(() => {
+      stopAllMedia();
+      setStep("timeout");
+      stepRef.current = "timeout";
+    }, 30000);
 
-    return () => clearInterval(timer);
+    return () => clearTimeout(timer);
   }, [isOpen, step, stopAllMedia]);
 
   /**
-   * Finalize verification capture:
-   * 1. High-Res Snapshot from current canvas frame
-   * 2. Full session video clip from MediaRecorder
-   * 3. Upload to /api/verification/liveness
+   * Finalize verification capture & upload
    */
   const handleLivenessVerified = useCallback(async () => {
     if (isCompletedRef.current) return;
     isCompletedRef.current = true;
 
-    setStep("verified");
-    stepRef.current = "verified";
+    setStep("uploading");
+    stepRef.current = "uploading";
     setProgressPct(100);
-    setMicroHint("Liveness verified! Securing biometric dossier...");
-    playFintechSuccessChime();
+    setStatusMessage("Verifying identity…");
 
-    // 1. Grab millisecond high-res snapshot
+    // 1. Grab snapshot from video
     let snapshotBlob: Blob | null = null;
     if (videoRef.current) {
       const video = videoRef.current;
@@ -223,7 +224,6 @@ export default function FintechLivenessModal({
       canvas.height = video.videoHeight || 480;
       const ctx = canvas.getContext("2d");
       if (ctx) {
-        // Render mirrored natural orientation
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -233,7 +233,7 @@ export default function FintechLivenessModal({
       }
     }
 
-    // 2. Stop recorder & get full video blob
+    // 2. Stop recorder & get video blob
     let videoBlob: Blob | null = null;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       videoBlob = await new Promise<Blob>((resolve) => {
@@ -249,8 +249,6 @@ export default function FintechLivenessModal({
         }
       });
     }
-
-    setIsUploading(true);
 
     try {
       const formData = new FormData();
@@ -268,45 +266,43 @@ export default function FintechLivenessModal({
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Failed to process verification dossier.");
+        throw new Error(data.error || "Failed to process verification.");
       }
 
-      // Brief delay for the emerald badge animation
-      setTimeout(() => {
-        stopAllMedia();
-        onComplete({
-          verificationId: data.verificationId,
-          snapshotUrl: data.snapshotUrl,
-          videoUrl: data.videoUrl,
-        });
-        onClose();
-      }, 900);
+      // Stop camera and release resources immediately on success
+      stopAllMedia();
+      playSuccessChime();
+
+      setCompletedResult({
+        verificationId: data.verificationId,
+        snapshotUrl: data.snapshotUrl,
+        videoUrl: data.videoUrl,
+      });
+
+      setStep("verified");
+      stepRef.current = "verified";
     } catch (err: any) {
       console.error("[Liveness] Upload error:", err);
+      stopAllMedia();
       setErrorMessage(err.message || "Failed to submit verification session. Please retry.");
       stepRef.current = "error";
       setStep("error");
-    } finally {
-      setIsUploading(false);
     }
-  }, [onComplete, onClose, stopAllMedia]);
+  }, [stopAllMedia]);
 
   /**
-   * Main real-time detection loop
-   * Optimized with 65ms frame-skipping (~15 FPS) to eliminate CPU/GPU overheating & lag.
+   * Main real-time face detection loop
    */
   const startDetectionLoop = useCallback(() => {
     let lastVideoTime = -1;
     let lastInferenceTime = 0;
-    const INFERENCE_INTERVAL_MS = 65; // ~15 FPS neural net inference throttler
+    const INFERENCE_INTERVAL_MS = 65; // ~15 FPS throttler
 
     const detect = () => {
       if (!videoRef.current || isCompletedRef.current) return;
       const video = videoRef.current;
-
       const now = performance.now();
 
-      // Only run heavy neural net inference every 65ms to keep CPU/GPU low
       if (now - lastInferenceTime >= INFERENCE_INTERVAL_MS && video.readyState >= 2 && landmarkerRef.current) {
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
@@ -334,35 +330,31 @@ export default function FintechLivenessModal({
                 else if (b.categoryName === "eyeBlinkRight") eyeBlinkRight = b.score;
               }
 
-              // ── STAGE 1: CENTER FACE IN FRAME ──
+              // ── STEP 1: KEEP FACE CENTRED ──
               if (stepRef.current === "center") {
-                const isCenteredX = nose.x >= 0.33 && nose.x <= 0.67;
-                const isCenteredY = nose.y >= 0.25 && nose.y <= 0.75;
-                const isGoodDistance = faceWidth >= 0.15 && faceWidth <= 0.65;
+                const isCenteredX = nose.x >= 0.30 && nose.x <= 0.70;
+                const isCenteredY = nose.y >= 0.20 && nose.y <= 0.80;
+                const isGoodDistance = faceWidth >= 0.16 && faceWidth <= 0.65;
 
                 if (!isGoodDistance) {
                   centerFramesRef.current = 0;
-                  setMicroHint(faceWidth < 0.15 ? "Move slightly closer" : "Move slightly back");
-                } else if (!isCenteredX) {
+                  setStatusMessage(faceWidth < 0.16 ? "Move a little closer." : "Move a little back.");
+                } else if (!isCenteredX || !isCenteredY) {
                   centerFramesRef.current = 0;
-                  setMicroHint(nose.x < 0.33 ? "Move towards your right" : "Move towards your left");
-                } else if (!isCenteredY) {
-                  centerFramesRef.current = 0;
-                  setMicroHint(nose.y < 0.25 ? "Move slightly down" : "Move slightly up");
+                  setStatusMessage("Keep your face centred.");
                 } else {
                   centerFramesRef.current += 1;
-                  setMicroHint("Face aligned! Hold still...");
-                  if (centerFramesRef.current >= 6) {
-                    // Stage 1 passed! Advance to blink challenge
+                  setStatusMessage("Face detected.");
+                  if (centerFramesRef.current >= 5) {
                     stepRef.current = "blink";
                     setStep("blink");
                     setProgressPct(33);
-                    setMicroHint("Blink your eyes now");
+                    setStatusMessage("Blink your eyes naturally.");
                   }
                 }
               }
 
-              // ── STAGE 2: BLINK EYES ──
+              // ── STEP 2: BLINK EYES ──
               else if (stepRef.current === "blink") {
                 const avgBlink = (eyeBlinkLeft + eyeBlinkRight) / 2;
                 const isBlinking = avgBlink > 0.32 || eyeBlinkLeft > 0.40 || eyeBlinkRight > 0.40;
@@ -371,40 +363,41 @@ export default function FintechLivenessModal({
                 if (blinkPhaseRef.current === "open") {
                   if (isBlinking) {
                     blinkPhaseRef.current = "closed";
-                    setMicroHint("Now open your eyes");
+                    setStatusMessage("Blink detected.");
                   }
                 } else if (blinkPhaseRef.current === "closed") {
                   if (isOpen) {
                     blinkPhaseRef.current = "done";
-                    // Stage 2 passed! Advance to turn head left
                     stepRef.current = "turn_left";
                     setStep("turn_left");
                     setProgressPct(66);
-                    setMicroHint("Slowly turn your head to your left");
+                    setStatusMessage("Slowly turn your head to your left.");
                   }
                 }
               }
 
-              // ── STAGE 3: TURN HEAD LEFT ──
+              // ── STEP 3: TURN HEAD LEFT ──
               else if (stepRef.current === "turn_left") {
-                const isTurningLeft = Math.abs(yawOffset) > 0.11;
+                const isTurningLeft = Math.abs(yawOffset) > 0.10;
 
                 if (isTurningLeft) {
                   turnLeftFramesRef.current += 1;
-                  setMicroHint("Great! Hold position...");
+                  setStatusMessage("Holding position…");
                   if (turnLeftFramesRef.current >= 4) {
-                    // All challenges passed!
                     handleLivenessVerified();
                     return;
                   }
                 } else {
                   turnLeftFramesRef.current = Math.max(0, turnLeftFramesRef.current - 1);
-                  setMicroHint("Turn your head slightly more to the left");
+                  setStatusMessage("Slowly turn your head to your left.");
                 }
               }
             } else {
-              if (stepRef.current !== "initializing" && stepRef.current !== "verified") {
-                setMicroHint("Place your face within the camera ring");
+              // No face detected in frame
+              if (stepRef.current === "center") {
+                setStatusMessage("Move into the camera view.");
+              } else if (stepRef.current === "blink" || stepRef.current === "turn_left") {
+                setStatusMessage("Keep your face in view.");
               }
             }
           } catch (detErr) {
@@ -420,8 +413,7 @@ export default function FintechLivenessModal({
   }, [handleLivenessVerified]);
 
   /**
-   * Fast, Parallel Initialization
-   * Loads camera stream (640x480) and pre-warmed neural vision model concurrently.
+   * Initialize Camera & Neural Vision Engine
    */
   const initializeLivenessEngine = useCallback(async () => {
     if (isInitializingRef.current) return;
@@ -430,17 +422,16 @@ export default function FintechLivenessModal({
     setStep("initializing");
     stepRef.current = "initializing";
     setErrorMessage(null);
-    setTimeLeft(30);
-    setProgressPct(5);
-    setMicroHint("Starting camera...");
+    setProgressPct(0);
+    setStatusMessage("Opening your camera…");
     isCompletedRef.current = false;
     centerFramesRef.current = 0;
     blinkPhaseRef.current = "open";
     turnLeftFramesRef.current = 0;
     recordedChunksRef.current = [];
+    setCompletedResult(null);
 
     try {
-      // 1. Parallel Request: 640x480 Camera (fast & low resource) + Model Preload
       const cameraPromise = navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "user",
@@ -456,7 +447,6 @@ export default function FintechLivenessModal({
         preloadLivenessEngine(),
       ]);
 
-      // If user closed modal while awaiting
       if (!isInitializingRef.current) {
         stream.getTracks().forEach((track) => track.stop());
         return;
@@ -473,7 +463,7 @@ export default function FintechLivenessModal({
         }
       }
 
-      // 2. Initialize MediaRecorder (lightweight 600 kbps)
+      // Initialize MediaRecorder
       try {
         const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8")
           ? "video/webm;codecs=vp8"
@@ -498,26 +488,23 @@ export default function FintechLivenessModal({
 
       landmarkerRef.current = landmarker;
 
-      // 3. Immediately ready! Begin Challenge 1
+      // Camera & Model ready: start verification automatically
       stepRef.current = "center";
       setStep("center");
-      setProgressPct(15);
-      setMicroHint("Center your face in the circle");
+      setStatusMessage("Move into the camera view.");
       startDetectionLoop();
     } catch (err: any) {
       if (!isInitializingRef.current) return;
-      console.error("[Liveness] Engine init notice:", err);
+      console.error("[Liveness] Initialization error:", err);
       const isPermissionDenied =
         err.name === "NotAllowedError" ||
         err.name === "PermissionDeniedError" ||
         err.message?.includes("Permission denied");
 
       if (isPermissionDenied) {
-        setErrorMessage("Camera access was denied. Please allow camera permissions in your browser.");
+        setErrorMessage("Camera access was denied. Please allow camera permissions in your browser settings and try again.");
       } else {
-        setErrorMessage(
-          err.message || "Failed to initialize camera. You can also use instant capture below."
-        );
+        setErrorMessage("We couldn't connect to your camera. Please check your camera settings and try again.");
       }
       stepRef.current = "error";
       setStep("error");
@@ -539,255 +526,251 @@ export default function FintechLivenessModal({
     };
   }, [isOpen]);
 
-  // SVG Progress Ring radius (138)
-  const radius = 138;
-  const circumference = 2 * Math.PI * radius;
+  const handleFinalizeSuccess = () => {
+    if (completedResult) {
+      onComplete(completedResult);
+    }
+    handleClose();
+  };
 
-  const getStepBadge = () => {
+  // SVG Progress Ring calculations
+  const ringRadius = 138;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+
+  // Primary dynamic instruction above camera frame
+  const getDynamicInstruction = () => {
     switch (step) {
       case "center":
-        return "STEP 1 OF 3 • FACE ALIGNMENT";
+        return "Keep your face centred.";
       case "blink":
-        return "STEP 2 OF 3 • BLINK EYES";
+        return "Blink your eyes.";
       case "turn_left":
-        return "STEP 3 OF 3 • TURN HEAD LEFT";
-      case "verified":
-        return "VERIFIED • LIVENESS CONFIRMED";
+        return "Turn your head to the left.";
+      case "uploading":
+        return "Verifying…";
       case "initializing":
-        return "CONNECTING • FAST CAMERA";
-      case "timeout":
-        return "TIME EXPIRED";
       default:
-        return "BIOMETRIC CHECK";
+        return "Position your face in the frame.";
     }
   };
 
-  const getInstructionHeadline = () => {
+  // Step badge label
+  const getStepLabel = () => {
     switch (step) {
       case "center":
-        return "Look straight into camera";
+        return "Step 1 of 3";
       case "blink":
-        return "Blink your eyes now";
+        return "Step 2 of 3";
       case "turn_left":
-        return "Slowly turn your head left";
-      case "verified":
-        return "Identity verified!";
-      case "initializing":
-        return "Opening camera...";
-      case "timeout":
-        return "Verification timed out";
-      case "error":
-        return "Camera connection issue";
+        return "Step 3 of 3";
+      default:
+        return null;
     }
   };
+
+  const isScanningActive =
+    step === "initializing" ||
+    step === "center" ||
+    step === "blink" ||
+    step === "turn_left" ||
+    step === "uploading";
 
   return (
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Heavy Blur Backdrop Overlay */}
+          {/* Subtle Dim Backdrop Overlay */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            onClick={() => {
-              stopAllMedia();
-              onClose();
-            }}
-            className="fixed inset-0 bg-black/75 backdrop-blur-xl"
+            transition={{ duration: 0.15 }}
+            onClick={handleClose}
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs"
           />
 
-          {/* Modal Card with Spring Physics */}
+          {/* Modal Container */}
           <motion.div
-            initial={{ scale: 0.95, y: 20, opacity: 0 }}
-            animate={{ scale: 1, y: 0, opacity: 1 }}
-            exit={{ scale: 0.95, y: 20, opacity: 0 }}
-            transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            className="relative w-full max-w-md bg-white border border-[#E7E5E0] rounded-3xl p-6 sm:p-8 shadow-2xl flex flex-col items-center text-center overflow-hidden z-10"
+            initial={{ scale: 0.96, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.96, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="relative w-full max-w-sm sm:max-w-md bg-white rounded-3xl p-6 sm:p-8 shadow-xl flex flex-col items-center text-center overflow-hidden z-10"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="liveness-modal-heading"
           >
-            {/* Ambient Top Glow */}
-            <div className="absolute -top-24 left-1/2 -translate-x-1/2 w-64 h-32 bg-[#0B5D45]/10 rounded-full blur-2xl pointer-events-none" />
-
-            {/* Close Modal Button */}
+            {/* Top Close Control */}
             <button
-              onClick={() => {
-                stopAllMedia();
-                onClose();
-              }}
-              className="absolute top-4 right-4 p-2 rounded-full text-[#6B6B67] hover:text-[#171717] hover:bg-black/5 transition-colors cursor-pointer"
-              aria-label="Close liveness verification"
+              onClick={handleClose}
+              className="absolute top-4 right-4 p-2 rounded-full text-[#64748B] hover:text-[#111827] hover:bg-stone-100 transition-colors cursor-pointer"
+              aria-label="Close verification modal"
             >
-              <X size={20} />
+              <X size={19} />
             </button>
 
-            {/* Header Eyebrow & Brand Trust Badge */}
-            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EDF5F2] text-[#0B5D45] text-[11px] font-bold uppercase tracking-wider mb-2 border border-[#0B5D45]/15">
-              <ShieldCheck size={14} />
-              <span>Biometric Liveness Verification</span>
-            </div>
-
-            {/* Sub-headline */}
-            <h2 className="text-xl sm:text-2xl font-bold text-[#171717] tracking-tight">
-              {getInstructionHeadline()}
-            </h2>
-
-            {/* Challenge Step Badge */}
-            <div className="mt-1 text-xs font-semibold text-[#0B5D45] uppercase tracking-wider">
-              {getStepBadge()}
-            </div>
-
-            {/* Viewfinder Frame with SVG Animated Progress Ring */}
-            <div className="relative my-6 flex items-center justify-center">
-              {/* Circular Viewport */}
-              <div className="relative w-64 h-64 sm:w-72 sm:h-72 rounded-full overflow-hidden border-4 border-white shadow-inner bg-[#1A1A1A]">
-                {/* Live Video Feed (Mirrored Horizontally) */}
-                <video
-                  ref={videoRef}
-                  playsInline
-                  muted
-                  autoPlay
-                  className={`w-full h-full object-cover scale-x-[-1] transition-opacity duration-300 ${
-                    step === "initializing" ? "opacity-30" : "opacity-100"
-                  }`}
-                />
-
-                {/* Subtle Alignment Oval Guide (Dotted) */}
-                {step !== "verified" && step !== "error" && step !== "timeout" && (
-                  <div className="absolute inset-8 rounded-full border-2 border-dashed border-white/35 pointer-events-none animate-pulse" />
-                )}
-
-                {/* Initializing Spinner Overlay */}
-                {step === "initializing" && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 text-white p-4">
-                    <Loader2 size={36} className="animate-spin text-[#0B5D45] mb-3" />
-                    <span className="text-xs font-medium text-white/90">Starting camera feed...</span>
-                  </div>
-                )}
-
-                {/* Live Instruction Ticker (Inside Bottom Edge of Camera Circle) */}
-                {step !== "verified" && step !== "error" && step !== "timeout" && (
-                  <div className="absolute inset-x-0 bottom-0 pt-8 pb-3.5 bg-gradient-to-t from-black/90 via-black/55 to-transparent flex flex-col items-center justify-end pointer-events-none z-10">
-                    <AnimatePresence mode="wait">
-                      <motion.p
-                        key={microHint}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        transition={{ duration: 0.2 }}
-                        className="text-xs sm:text-[13px] font-semibold text-white tracking-wide text-center px-4 drop-shadow-sm"
-                      >
-                        {microHint}
-                      </motion.p>
-                    </AnimatePresence>
-                  </div>
-                )}
-
-                {/* Instant Green Success Overlay Checkmark */}
-                {step === "verified" && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0B5D45]/90 text-white animate-in zoom-in-95 duration-200 z-20">
-                    <div className="w-16 h-16 rounded-full bg-white text-[#0B5D45] flex items-center justify-center shadow-lg mb-2 animate-bounce">
-                      <Check size={36} strokeWidth={3} />
-                    </div>
-                    <span className="text-sm font-bold tracking-tight">Verified</span>
-                    <span className="text-[11px] text-white/80 mt-0.5">Capturing biometric profile</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Dynamic SVG Animated Progress Ring with Framer Motion pathLength */}
-              <svg
-                className="absolute -inset-2.5 w-[calc(100%+20px)] h-[calc(100%+20px)] pointer-events-none"
-                viewBox="0 0 300 300"
-              >
-                {/* Background Ring Track */}
-                <circle
-                  cx="150"
-                  cy="150"
-                  r={radius}
-                  fill="none"
-                  stroke="#E7E5E0"
-                  strokeWidth="5"
-                />
-                {/* Animated Progress Stroke */}
-                <motion.circle
-                  cx="150"
-                  cy="150"
-                  r={radius}
-                  fill="none"
-                  stroke="#0B5D45"
-                  strokeWidth="6"
-                  strokeLinecap="round"
-                  className="-rotate-90 origin-center"
-                  initial={{ pathLength: 0 }}
-                  animate={{ pathLength: progressPct / 100 }}
-                  transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                />
-              </svg>
-            </div>
-
-            {/* Quick Liveness Action Trigger / Escape Hatch */}
-            {step !== "verified" && step !== "error" && step !== "timeout" && !isUploading && (
-              <button
-                type="button"
-                onClick={handleLivenessVerified}
-                className="mt-1 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#FAFAF8] hover:bg-[#F0EFEA] border border-[#E7E5E0] text-[11.5px] font-medium text-[#171717] hover:text-[#0B5D45] cursor-pointer transition-all shadow-xs"
-              >
-                <Zap size={13} className="text-[#0B5D45]" />
-                <span>Start Liveness Scan</span>
-              </button>
-            )}
-
-            {/* 30-Second Timeout / Stall Warning */}
-            {step !== "verified" && step !== "error" && step !== "timeout" && (
-              <div className="mt-3 flex items-center justify-between w-full max-w-xs text-[11px] text-[#8B8B86] px-1">
-                <span className="flex items-center gap-1">
-                  <Lock size={12} />
-                  <span>Encrypted on device</span>
-                </span>
-                <span className="font-mono font-medium">{timeLeft}s remaining</span>
-              </div>
-            )}
-
-            {/* Edge Case 1: Camera Permission Denied / Error Screen */}
-            {step === "error" && (
-              <div className="w-full max-w-xs p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-center space-y-3 mt-2">
-                <AlertTriangle size={24} className="mx-auto text-rose-600" />
-                <p className="text-xs leading-relaxed font-medium">
-                  {errorMessage || "Unable to access front camera. Please check your browser permissions."}
-                </p>
-                <button
-                  onClick={initializeLivenessEngine}
-                  className="w-full h-10 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow cursor-pointer"
+            {/* ────────────────────────────────────────────────────────── */}
+            {/* ACTIVE SCANNING / INITIALIZING STATE                       */}
+            {/* ────────────────────────────────────────────────────────── */}
+            {isScanningActive && (
+              <div className="w-full flex flex-col items-center">
+                {/* 1. Heading */}
+                <h2
+                  id="liveness-modal-heading"
+                  className="font-serif text-2xl sm:text-[26px] font-normal tracking-tight text-[#111827]"
                 >
-                  <RotateCcw size={14} />
-                  <span>Enable Camera &amp; Retry</span>
-                </button>
+                  Verify your identity
+                </h2>
+
+                {/* 2. One Dynamic Instruction (above camera frame) */}
+                <div className="mt-2 min-h-[36px] flex flex-col items-center justify-center">
+                  {getStepLabel() && (
+                    <span className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider block mb-0.5">
+                      {getStepLabel()}
+                    </span>
+                  )}
+                  <p className="text-sm font-medium text-[#111827]">
+                    {getDynamicInstruction()}
+                  </p>
+                </div>
+
+                {/* 3. Circular Camera Frame with Progress Ring */}
+                <div className="relative my-5 flex items-center justify-center">
+                  {/* Circular Viewport (Unobstructed Face Feed) */}
+                  <div className="relative w-60 h-60 sm:w-68 sm:h-68 rounded-full overflow-hidden bg-slate-900 border border-slate-200/80 shadow-inner">
+                    {/* Live Video Feed (Mirrored Horizontally) */}
+                    <video
+                      ref={videoRef}
+                      playsInline
+                      muted
+                      autoPlay
+                      className={`w-full h-full object-cover scale-x-[-1] transition-opacity duration-300 ${
+                        step === "initializing" ? "opacity-20" : "opacity-100"
+                      }`}
+                    />
+
+                    {/* Camera Opening Spinner (only during init) */}
+                    {step === "initializing" && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 text-white p-4">
+                        <Loader2 size={30} className="animate-spin text-slate-300 mb-2" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Circular Progress Ring (Thin, precise SVG) */}
+                  <svg
+                    className="absolute -inset-2.5 w-[calc(100%+20px)] h-[calc(100%+20px)] pointer-events-none"
+                    viewBox="0 0 300 300"
+                  >
+                    {/* Background Ring Track (Neutral slate) */}
+                    <circle
+                      cx="150"
+                      cy="150"
+                      r={ringRadius}
+                      fill="none"
+                      stroke="#E2E8F0"
+                      strokeWidth="3.5"
+                    />
+
+                    {/* Progress Ring Segment (Transitions to deep emerald #065F46) */}
+                    <motion.circle
+                      cx="150"
+                      cy="150"
+                      r={ringRadius}
+                      fill="none"
+                      stroke={step === "initializing" ? "#94A3B8" : "#065F46"}
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                      className="-rotate-90 origin-center"
+                      initial={{ pathLength: 0 }}
+                      animate={{ pathLength: progressPct / 100 }}
+                      transition={{ duration: 0.35, ease: "easeOut" }}
+                    />
+                  </svg>
+                </div>
+
+                {/* 4. One Concise Status Message Below Frame */}
+                <div className="min-h-[24px] flex items-center justify-center">
+                  <p className="text-xs text-[#64748B] font-normal transition-opacity duration-200" role="status">
+                    {statusMessage}
+                  </p>
+                </div>
               </div>
             )}
 
-            {/* Edge Case 2: 30-Second Timeout Screen */}
-            {step === "timeout" && (
-              <div className="w-full max-w-xs p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-center space-y-3 mt-2">
-                <AlertTriangle size={24} className="mx-auto text-amber-600" />
-                <p className="text-xs leading-relaxed font-medium">
-                  Verification session timed out. For security, active liveness challenges must be completed within 30 seconds.
-                </p>
-                <button
-                  onClick={initializeLivenessEngine}
-                  className="w-full h-10 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-bold flex items-center justify-center gap-2 transition-all shadow cursor-pointer"
-                >
-                  <RotateCcw size={14} />
-                  <span>Restart Verification</span>
-                </button>
+            {/* ────────────────────────────────────────────────────────── */}
+            {/* SUCCESS STATE                                              */}
+            {/* ────────────────────────────────────────────────────────── */}
+            {step === "verified" && (
+              <div className="w-full py-4 flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 rounded-full bg-[#EDF5F2] border border-[#065F46]/20 text-[#065F46] flex items-center justify-center">
+                  <Check size={32} strokeWidth={2.5} />
+                </div>
+
+                <div>
+                  <h2
+                    id="liveness-modal-heading"
+                    className="font-serif text-2xl sm:text-[26px] font-normal tracking-tight text-[#111827]"
+                  >
+                    Identity check complete.
+                  </h2>
+                  <p className="text-sm text-[#64748B] mt-1.5 max-w-xs leading-relaxed">
+                    You can continue setting up your host profile.
+                  </p>
+                </div>
+
+                <div className="pt-3 w-full">
+                  <button
+                    type="button"
+                    onClick={handleFinalizeSuccess}
+                    className="w-full h-11 rounded-lg bg-[#065F46] hover:bg-[#044e39] text-white text-sm font-medium transition-colors shadow-xs cursor-pointer"
+                  >
+                    Continue
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* Uploading State Indicator */}
-            {isUploading && (
-              <div className="mt-4 flex items-center gap-2 text-xs font-semibold text-[#0B5D45]">
-                <Loader2 size={16} className="animate-spin" />
-                <span>Encrypting &amp; uploading biometric proof...</span>
+            {/* ────────────────────────────────────────────────────────── */}
+            {/* FAILURE & TIMEOUT RECOVERY STATE                           */}
+            {/* ────────────────────────────────────────────────────────── */}
+            {(step === "error" || step === "timeout") && (
+              <div className="w-full py-4 flex flex-col items-center text-center space-y-4">
+                <div className="w-16 h-16 rounded-full bg-amber-50 border border-amber-200 text-[#B45309] flex items-center justify-center">
+                  <AlertTriangle size={28} />
+                </div>
+
+                <div>
+                  <h2
+                    id="liveness-modal-heading"
+                    className="font-serif text-2xl sm:text-[26px] font-normal tracking-tight text-[#111827]"
+                  >
+                    We couldn&apos;t verify your face.
+                  </h2>
+                  <p className="text-sm text-[#64748B] mt-2 max-w-xs leading-relaxed">
+                    {step === "timeout"
+                      ? "The check took too long. Find a well-lit place and try again."
+                      : errorMessage || "We couldn't connect to your camera. Please check your camera settings and try again."}
+                  </p>
+                </div>
+
+                <div className="pt-3 w-full space-y-2.5">
+                  <button
+                    type="button"
+                    onClick={initializeLivenessEngine}
+                    className="w-full h-11 rounded-lg bg-[#065F46] hover:bg-[#044e39] text-white text-sm font-medium transition-colors shadow-xs cursor-pointer"
+                  >
+                    Try again
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleClose}
+                    className="w-full h-10 rounded-lg text-sm font-medium text-[#64748B] hover:text-[#111827] hover:bg-stone-100 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </motion.div>

@@ -6,8 +6,11 @@ import crypto from "crypto";
 import {
   sendEmail,
   welcomeEmail,
+  hostWelcomeEmail,
+  emailOtpEmail,
   ownerEmailOtpEmail,
   passwordResetEmail,
+  passwordResetSuccessEmail,
 } from "../notifications/notifications.service";
 
 export const RegisterSchema = z.object({
@@ -55,28 +58,39 @@ export const authService = {
     const passwordHash = await hashPassword(data.password);
     const userId = `usr_${crypto.randomUUID()}`;
 
-    // Generate 6-digit OTP code for email verification
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate cryptographically secure 6-digit OTP code for email verification
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
-    // 3. Create user
-    const [newUser] = await db
-      .insert(schema.users)
-      .values({
-        id: userId,
-        email: cleanEmail,
-        passwordHash,
-        firstName: data.firstName.trim(),
-        lastName: data.lastName.trim(),
-        phone: data.phone?.trim() || null,
-        role: "guest",
-        emailVerified: false,
-        emailVerificationCode: otpCode,
-        emailVerificationExpiresAt: otpExpiresAt,
-        phoneVerified: false,
-        status: "ACTIVE",
-      })
-      .returning();
+    let newUser;
+    try {
+      // 3. Create user
+      const [inserted] = await db
+        .insert(schema.users)
+        .values({
+          id: userId,
+          email: cleanEmail,
+          passwordHash,
+          firstName: data.firstName.trim(),
+          lastName: data.lastName.trim(),
+          phone: data.phone?.trim() || null,
+          role: "guest",
+          emailVerified: false,
+          emailVerificationCode: otpCode,
+          emailVerificationExpiresAt: otpExpiresAt,
+          emailVerificationAttempts: 0,
+          emailVerificationSentAt: new Date(),
+          phoneVerified: false,
+          status: "ACTIVE",
+        })
+        .returning();
+      newUser = inserted;
+    } catch (err: any) {
+      if (err?.code === "23505" || err?.message?.includes("unique") || err?.message?.includes("duplicate")) {
+        throw new Error("An account with this email already exists. Please log in.");
+      }
+      throw err;
+    }
 
     // 4. Create profile
     await db.insert(schema.profiles).values({
@@ -102,10 +116,11 @@ export const authService = {
 
     // 6. Send transactional OTP email for verification via Resend
     sendEmail(
-      ownerEmailOtpEmail({
+      emailOtpEmail({
         name: data.firstName.trim(),
         email: cleanEmail,
         code: otpCode,
+        purpose: "account registration",
       })
     ).catch((err) => {
       console.warn("[Auth] Failed to dispatch OTP email:", err);
@@ -131,8 +146,8 @@ export const authService = {
     const passwordHash = await hashPassword(data.password);
     const userId = `usr_${crypto.randomUUID()}`;
 
-    // Generate 6-digit OTP code for email verification
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate cryptographically secure 6-digit OTP code for email verification
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
     let first = data.firstName?.trim() || "";
@@ -147,23 +162,34 @@ export const authService = {
     if (!first) first = "Partner";
     if (!last) last = "Owner";
 
-    const [newUser] = await db
-      .insert(schema.users)
-      .values({
-        id: userId,
-        email: cleanEmail,
-        passwordHash,
-        firstName: first,
-        lastName: last,
-        phone: data.phone?.trim() || null,
-        role: "host",
-        emailVerified: false,
-        emailVerificationCode: otpCode,
-        emailVerificationExpiresAt: otpExpiresAt,
-        phoneVerified: false,
-        status: "ACTIVE",
-      })
-      .returning();
+    let newUser;
+    try {
+      const [inserted] = await db
+        .insert(schema.users)
+        .values({
+          id: userId,
+          email: cleanEmail,
+          passwordHash,
+          firstName: first,
+          lastName: last,
+          phone: data.phone?.trim() || null,
+          role: "host",
+          emailVerified: false,
+          emailVerificationCode: otpCode,
+          emailVerificationExpiresAt: otpExpiresAt,
+          emailVerificationAttempts: 0,
+          emailVerificationSentAt: new Date(),
+          phoneVerified: false,
+          status: "ACTIVE",
+        })
+        .returning();
+      newUser = inserted;
+    } catch (err: any) {
+      if (err?.code === "23505" || err?.message?.includes("unique") || err?.message?.includes("duplicate")) {
+        throw new Error("An account with this email already exists. Please log in to continue your owner onboarding.");
+      }
+      throw err;
+    }
 
     const [newProfile] = await db
       .insert(schema.profiles)
@@ -195,42 +221,87 @@ export const authService = {
     return { user: newUser, profile: newProfile };
   },
 
-  async verifyEmailOtp(userId: string, code: string) {
+  async verifyEmailOtp(identifier: { userId?: string; email?: string } | string, code: string) {
     const db = getDb();
+    const query = typeof identifier === "string" ? { userId: identifier } : identifier;
 
-    const [user] = await db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, userId))
-      .limit(1);
+    let user;
+    if (query.userId) {
+      const [found] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, query.userId))
+        .limit(1);
+      user = found;
+    } else if (query.email) {
+      const cleanEmail = query.email.trim().toLowerCase();
+      const [found] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.email, cleanEmail))
+        .limit(1);
+      user = found;
+    }
 
     if (!user) throw new Error("User account not found");
 
-    const trimmedCode = code.trim();
-    const isMockOrDevMatch = trimmedCode === "123456" || (user.emailVerificationCode && user.emailVerificationCode === trimmedCode);
-
-    if (!isMockOrDevMatch) {
-      if (user.emailVerificationExpiresAt && new Date() > user.emailVerificationExpiresAt) {
-        throw new Error("Verification code has expired. Please request a new one.");
-      }
-      throw new Error("Invalid verification code. Please check and try again.");
+    if (user.emailVerified) {
+      throw new Error("This email is already verified. Please sign in.");
     }
 
+    // Enforce server-side attempt limits (max 5 attempts)
+    if (user.emailVerificationAttempts >= 5) {
+      throw new Error("Too many failed attempts. This verification code has expired. Please request a new one.");
+    }
+
+    // Enforce server-side expiry
+    if (!user.emailVerificationExpiresAt || new Date() > user.emailVerificationExpiresAt) {
+      throw new Error("Verification code has expired. Please request a new one.");
+    }
+
+    const trimmedCode = code.trim();
+    const userCode = user.emailVerificationCode || "";
+
+    // Constant-time comparison to prevent timing attacks
+    const isMatch =
+      userCode.length === 6 &&
+      trimmedCode.length === 6 &&
+      crypto.timingSafeEqual(Buffer.from(userCode), Buffer.from(trimmedCode));
+
+    if (!isMatch) {
+      const updatedAttempts = (user.emailVerificationAttempts || 0) + 1;
+      await db
+        .update(schema.users)
+        .set({
+          emailVerificationAttempts: updatedAttempts,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.users.id, user.id));
+
+      const remaining = Math.max(0, 5 - updatedAttempts);
+      if (remaining === 0) {
+        throw new Error("Too many failed attempts. This verification code has been invalidated. Please request a new one.");
+      }
+      throw new Error(`Invalid verification code. ${remaining} ${remaining === 1 ? "attempt" : "attempts"} remaining.`);
+    }
+
+    // Atomically mark verified and invalidate the challenge to prevent replay attacks
     const [updatedUser] = await db
       .update(schema.users)
       .set({
         emailVerified: true,
         emailVerificationCode: null,
         emailVerificationExpiresAt: null,
+        emailVerificationAttempts: 0,
         updatedAt: new Date(),
       })
-      .where(eq(schema.users.id, userId))
+      .where(eq(schema.users.id, user.id))
       .returning();
 
     const [existingProfile] = await db
       .select()
       .from(schema.profiles)
-      .where(eq(schema.profiles.userId, userId))
+      .where(eq(schema.profiles.userId, user.id))
       .limit(1);
 
     const nextStep = Math.max(existingProfile?.onboardingStep || 1, 2);
@@ -246,24 +317,68 @@ export const authService = {
         verificationStatus: nextStatus,
         updatedAt: new Date(),
       })
-      .where(eq(schema.profiles.userId, userId))
+      .where(eq(schema.profiles.userId, user.id))
       .returning();
+
+    // Dispatch welcome email upon successful email verification
+    if (user.role === "host") {
+      sendEmail(
+        hostWelcomeEmail({
+          name: user.firstName,
+          email: user.email,
+        })
+      ).catch((err) => console.warn("[Auth] Failed to dispatch host welcome email:", err));
+    } else {
+      sendEmail(
+        welcomeEmail({
+          name: user.firstName,
+          email: user.email,
+        })
+      ).catch((err) => console.warn("[Auth] Failed to dispatch welcome email:", err));
+    }
 
     return { user: updatedUser, profile: updatedProfile };
   },
 
-  async resendEmailOtp(userId: string) {
+  async resendEmailOtp(identifier: { userId?: string; email?: string } | string) {
     const db = getDb();
+    const query = typeof identifier === "string" ? { userId: identifier } : identifier;
 
-    const [user] = await db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.id, userId))
-      .limit(1);
+    let user;
+    if (query.userId) {
+      const [found] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.id, query.userId))
+        .limit(1);
+      user = found;
+    } else if (query.email) {
+      const cleanEmail = query.email.trim().toLowerCase();
+      const [found] = await db
+        .select()
+        .from(schema.users)
+        .where(eq(schema.users.email, cleanEmail))
+        .limit(1);
+      user = found;
+    }
 
-    if (!user) throw new Error("User not found");
+    if (!user) throw new Error("User account not found");
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    if (user.emailVerified) {
+      throw new Error("This email is already verified. Please sign in.");
+    }
+
+    // Rate-limiting / resend throttling (minimum 60-second cooldown)
+    if (user.emailVerificationSentAt) {
+      const elapsedMs = Date.now() - new Date(user.emailVerificationSentAt).getTime();
+      const cooldownMs = 60 * 1000;
+      if (elapsedMs < cooldownMs) {
+        const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+        throw new Error(`Please wait ${remainingSec} seconds before requesting a new code.`);
+      }
+    }
+
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     await db
@@ -271,17 +386,20 @@ export const authService = {
       .set({
         emailVerificationCode: otpCode,
         emailVerificationExpiresAt: otpExpiresAt,
+        emailVerificationAttempts: 0,
+        emailVerificationSentAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(schema.users.id, userId));
+      .where(eq(schema.users.id, user.id));
 
     await sendEmail(
-      ownerEmailOtpEmail({
+      emailOtpEmail({
         name: user.firstName,
         email: user.email,
         code: otpCode,
+        purpose: "email verification",
       })
-    );
+    ).catch((err) => console.warn("[Auth] Failed to send verification code email:", err));
 
     return { success: true, message: "A new 6-digit verification code has been dispatched to your email." };
   },
@@ -504,6 +622,14 @@ export const authService = {
         updatedAt: new Date(),
       })
       .where(eq(schema.users.id, user.id));
+
+    // Send confirmation of password reset for security
+    sendEmail(
+      passwordResetSuccessEmail({
+        name: user.firstName,
+        email: user.email,
+      })
+    ).catch((err) => console.warn("[Auth] Failed to dispatch password reset success email:", err));
 
     return true;
   },

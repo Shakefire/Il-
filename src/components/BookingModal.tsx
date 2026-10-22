@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import { X, Check, ShieldCheck, CreditCard, Building2, Lock, Key, MapPin, Phone, Loader2, AlertCircle, Smartphone, Mail } from "lucide-react";
 import { Property } from "@/types";
-import { formatNaira, calculateNights } from "@/lib/utils";
+import { formatNaira, calculateNights, calculatePaystackFee } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 
@@ -68,8 +68,8 @@ export default function BookingModal({
 
   const nights = calculateNights(checkIn, checkOut);
   const clientStayCost = property.pricePerNight * nights;
-  const clientServiceFee = Math.round(clientStayCost * 0.08);
-  const clientTotal = clientStayCost + clientServiceFee;
+  const clientProcessingFee = calculatePaystackFee(clientStayCost);
+  const clientTotal = clientStayCost + clientProcessingFee;
 
   // Step 2 -> Step 3: Create server reservation
   const handleCreateReservation = async () => {
@@ -253,8 +253,8 @@ export default function BookingModal({
                   <span>{formatNaira(clientStayCost)}</span>
                 </div>
                 <div className="flex justify-between text-[#6B6B67]">
-                  <span>Service &amp; infrastructure verification</span>
-                  <span>{formatNaira(clientServiceFee)}</span>
+                  <span>Payment processing fee (Paystack)</span>
+                  <span>{formatNaira(clientProcessingFee)}</span>
                 </div>
                 <div className="pt-3 border-t border-[#E7E5E0] flex justify-between font-semibold text-[17px] text-[#171717]">
                   <span>Total (NGN)</span>
@@ -266,7 +266,7 @@ export default function BookingModal({
                 <button
                   type="button"
                   onClick={() => setStep(2)}
-                  className="w-full py-3.5 bg-[#24483A] text-white rounded-xl font-medium text-[15px] hover:bg-[#1B372C] transition-colors"
+                  className="w-full py-3.5 bg-[#065F46] text-white rounded-xl font-medium text-[15px] hover:bg-[#044E39] active:scale-[0.99] transition-all cursor-pointer"
                 >
                   Continue to guest details →
                 </button>
@@ -286,7 +286,7 @@ export default function BookingModal({
                   placeholder="e.g. Nnamdi Azikiwe"
                   value={guestName}
                   onChange={(e) => setGuestName(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-[#E7E5E0] text-[15px] focus:outline-none focus:border-[#24483A]"
+                  className="w-full px-4 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-[15px] outline-none transition-all"
                 />
               </div>
 
@@ -299,7 +299,7 @@ export default function BookingModal({
                   placeholder="nnamdi@example.ng"
                   value={guestEmail}
                   onChange={(e) => setGuestEmail(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-[#E7E5E0] text-[15px] focus:outline-none focus:border-[#24483A]"
+                  className="w-full px-4 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-[15px] outline-none transition-all"
                 />
                 <p className="text-[12px] text-[#8B8B86] mt-1">
                   No account required to reserve. If you later create an account with this email, your booking will automatically appear in your trips.
@@ -311,7 +311,7 @@ export default function BookingModal({
                   Phone number (WhatsApp)
                 </label>
                 <div className="flex gap-2">
-                  <span className="inline-flex items-center px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-sm">
+                  <span className="inline-flex items-center px-3.5 rounded-xl border border-[#D1D5DB] bg-[#FAFAF8] text-[#171717] text-sm">
                     +234
                   </span>
                   <input
@@ -319,13 +319,13 @@ export default function BookingModal({
                     placeholder="803 123 4567"
                     value={guestPhone}
                     onChange={(e) => setGuestPhone(e.target.value)}
-                    className="flex-1 px-4 py-3 rounded-xl border border-[#E7E5E0] text-[15px] focus:outline-none focus:border-[#24483A]"
+                    className="flex-1 px-4 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 text-[15px] outline-none transition-all"
                   />
                 </div>
               </div>
 
               <div className="flex items-center gap-3 pt-2 text-[13px] text-[#6B6B67]">
-                <ShieldCheck size={18} className="text-[#24483A] shrink-0" />
+                <ShieldCheck size={18} className="text-[#065F46] shrink-0" />
                 <span>Your reservation confirmation, exact address, estate gate pass, and host contact will be sent to your email immediately after payment.</span>
               </div>
 
@@ -333,7 +333,7 @@ export default function BookingModal({
                 <button
                   type="button"
                   onClick={() => setStep(1)}
-                  className="px-5 py-3 border border-[#E7E5E0] text-[#171717] rounded-xl hover:bg-[#FAFAF8]"
+                  className="px-5 py-3 border border-[#D1D5DB] hover:border-[#9CA3AF] text-[#171717] rounded-xl hover:bg-[#FAFAF8] active:scale-[0.99] transition-all cursor-pointer"
                 >
                   Back
                 </button>
@@ -341,7 +341,7 @@ export default function BookingModal({
                   type="button"
                   onClick={handleCreateReservation}
                   disabled={!guestName || !guestEmail || isProcessing}
-                  className="flex-1 py-3 bg-[#24483A] disabled:opacity-50 text-white rounded-xl font-medium hover:bg-[#1B372C] transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-3 bg-[#065F46] disabled:opacity-50 text-white rounded-xl font-medium hover:bg-[#044E39] active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {isProcessing ? (
                     <>
@@ -368,7 +368,7 @@ export default function BookingModal({
                   </div>
                   <div className="text-[12px] text-[#6B6B67]">{nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}</div>
                 </div>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/15">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/15">
                   <ShieldCheck size={13} />
                   <span>Paystack Secured</span>
                 </span>
@@ -385,17 +385,17 @@ export default function BookingModal({
                     onClick={() => setPaymentMethod("card")}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${
                       paymentMethod === "card"
-                        ? "border-[#24483A] bg-[#EDF3F0]/50 ring-1 ring-[#24483A]/40 shadow-xs"
-                        : "border-[#E7E5E0] hover:border-[#BFBFBA] bg-white"
+                        ? "border-[#065F46] bg-[#EDF3F0]/50 ring-2 ring-[#065F46]/15 shadow-xs"
+                        : "border-[#D1D5DB] hover:border-[#9CA3AF] bg-white"
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3.5">
                         {/* Authentic Card Icon with EMV Chip & Brand Accents */}
-                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#0B5D45]/15 flex items-center justify-center shrink-0">
+                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#065F46]/15 flex items-center justify-center shrink-0">
                           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="2" y="5" width="20" height="14" rx="3" stroke="#0B5D45" strokeWidth="1.8" />
-                            <path d="M2 9.5H22" stroke="#0B5D45" strokeWidth="1.8" />
+                            <rect x="2" y="5" width="20" height="14" rx="3" stroke="#065F46" strokeWidth="1.8" />
+                            <path d="M2 9.5H22" stroke="#065F46" strokeWidth="1.8" />
                             <rect x="4.5" y="12.5" width="3.5" height="2.5" rx="0.5" fill="#D97706" />
                             <circle cx="15" cy="14" r="2.2" fill="#EB001B" />
                             <circle cx="17.2" cy="14" r="2.2" fill="#F79E1B" fillOpacity="0.9" />
@@ -411,7 +411,7 @@ export default function BookingModal({
                           </div>
                         </div>
                       </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "card" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "card" ? "border-[#065F46] bg-[#065F46]" : "border-[#D1D5DB]"}`}>
                         {paymentMethod === "card" && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
                     </div>
@@ -422,19 +422,19 @@ export default function BookingModal({
                     onClick={() => setPaymentMethod("transfer")}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${
                       paymentMethod === "transfer"
-                        ? "border-[#24483A] bg-[#EDF3F0]/50 ring-1 ring-[#24483A]/40 shadow-xs"
-                        : "border-[#E7E5E0] hover:border-[#BFBFBA] bg-white"
+                        ? "border-[#065F46] bg-[#EDF3F0]/50 ring-2 ring-[#065F46]/15 shadow-xs"
+                        : "border-[#D1D5DB] hover:border-[#9CA3AF] bg-white"
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3.5">
                         {/* Authentic Nigerian Banking Vault Icon */}
-                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#0B5D45]/15 flex items-center justify-center shrink-0">
+                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#065F46]/15 flex items-center justify-center shrink-0">
                           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3 9.5L12 4L21 9.5H3Z" stroke="#0B5D45" strokeWidth="1.8" strokeLinejoin="round" fill="#0B5D45" fillOpacity="0.12" />
-                            <path d="M5.5 10.5V17M9.8 10.5V17M14.2 10.5V17M18.5 10.5V17" stroke="#0B5D45" strokeWidth="1.8" strokeLinecap="round" />
-                            <path d="M2.5 17.5H21.5" stroke="#0B5D45" strokeWidth="1.8" strokeLinecap="round" />
-                            <path d="M4 20H20" stroke="#0B5D45" strokeWidth="1.8" strokeLinecap="round" />
+                            <path d="M3 9.5L12 4L21 9.5H3Z" stroke="#065F46" strokeWidth="1.8" strokeLinejoin="round" fill="#065F46" fillOpacity="0.12" />
+                            <path d="M5.5 10.5V17M9.8 10.5V17M14.2 10.5V17M18.5 10.5V17" stroke="#065F46" strokeWidth="1.8" strokeLinecap="round" />
+                            <path d="M2.5 17.5H21.5" stroke="#065F46" strokeWidth="1.8" strokeLinecap="round" />
+                            <path d="M4 20H20" stroke="#065F46" strokeWidth="1.8" strokeLinecap="round" />
                           </svg>
                         </div>
                         <div>
@@ -447,7 +447,7 @@ export default function BookingModal({
                           </div>
                         </div>
                       </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "transfer" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "transfer" ? "border-[#065F46] bg-[#065F46]" : "border-[#D1D5DB]"}`}>
                         {paymentMethod === "transfer" && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
                     </div>
@@ -458,39 +458,39 @@ export default function BookingModal({
                     onClick={() => setPaymentMethod("ussd")}
                     className={`p-4 rounded-xl border cursor-pointer transition-all ${
                       paymentMethod === "ussd"
-                        ? "border-[#24483A] bg-[#EDF3F0]/50 ring-1 ring-[#24483A]/40 shadow-xs"
-                        : "border-[#E7E5E0] hover:border-[#BFBFBA] bg-white"
+                        ? "border-[#065F46] bg-[#EDF3F0]/50 ring-2 ring-[#065F46]/15 shadow-xs"
+                        : "border-[#D1D5DB] hover:border-[#9CA3AF] bg-white"
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3.5">
                         {/* Authentic Mobile Dialer & Keypad Icon */}
-                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#0B5D45]/15 flex items-center justify-center shrink-0">
+                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#065F46]/15 flex items-center justify-center shrink-0">
                           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="5.5" y="2.5" width="13" height="19" rx="2.5" stroke="#0B5D45" strokeWidth="1.8" />
-                            <circle cx="12" cy="18" r="0.9" fill="#0B5D45" />
-                            <path d="M9 5.5H15" stroke="#0B5D45" strokeWidth="1.5" strokeLinecap="round" />
-                            <circle cx="9" cy="9" r="0.8" fill="#0B5D45" />
-                            <circle cx="12" cy="9" r="0.8" fill="#0B5D45" />
-                            <circle cx="15" cy="9" r="0.8" fill="#0B5D45" />
-                            <circle cx="9" cy="12" r="0.8" fill="#0B5D45" />
-                            <circle cx="12" cy="12" r="0.8" fill="#0B5D45" />
-                            <circle cx="15" cy="12" r="0.8" fill="#0B5D45" />
-                            <circle cx="9" cy="15" r="0.8" fill="#0B5D45" />
-                            <circle cx="12" cy="15" r="0.8" fill="#0B5D45" />
-                            <circle cx="15" cy="15" r="0.8" fill="#0B5D45" />
+                            <rect x="5.5" y="2.5" width="13" height="19" rx="2.5" stroke="#065F46" strokeWidth="1.8" />
+                            <circle cx="12" cy="18" r="0.9" fill="#065F46" />
+                            <path d="M9 5.5H15" stroke="#065F46" strokeWidth="1.5" strokeLinecap="round" />
+                            <circle cx="9" cy="9" r="0.8" fill="#065F46" />
+                            <circle cx="12" cy="9" r="0.8" fill="#065F46" />
+                            <circle cx="15" cy="9" r="0.8" fill="#065F46" />
+                            <circle cx="9" cy="12" r="0.8" fill="#065F46" />
+                            <circle cx="12" cy="12" r="0.8" fill="#065F46" />
+                            <circle cx="15" cy="12" r="0.8" fill="#065F46" />
+                            <circle cx="9" cy="15" r="0.8" fill="#065F46" />
+                            <circle cx="12" cy="15" r="0.8" fill="#065F46" />
+                            <circle cx="15" cy="15" r="0.8" fill="#065F46" />
                           </svg>
                         </div>
                         <div>
                           <div className="text-[14.5px] font-semibold text-[#171717]">USSD &amp; Mobile Banking</div>
                           <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/20">*737# GTB</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/20">*919# UBA</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#0B5D45] border border-[#0B5D45]/20">*901# Access</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/20">*737# GTB</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/20">*919# UBA</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/20">*901# Access</span>
                           </div>
                         </div>
                       </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "ussd" ? "border-[#24483A] bg-[#24483A]" : "border-[#C5C5C0]"}`}>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "ussd" ? "border-[#065F46] bg-[#065F46]" : "border-[#D1D5DB]"}`}>
                         {paymentMethod === "ussd" && <div className="w-2 h-2 rounded-full bg-white" />}
                       </div>
                     </div>
@@ -499,10 +499,10 @@ export default function BookingModal({
               </div>
 
               {/* Post-payment delivery notice */}
-              <div className="p-3.5 bg-[#F5F9F7] rounded-xl border border-[#0B5D45]/20 flex items-start gap-3">
-                <Mail size={15} className="text-[#0B5D45] shrink-0 mt-0.5" />
+              <div className="p-3.5 bg-[#F5F9F7] rounded-xl border border-[#065F46]/20 flex items-start gap-3">
+                <Mail size={15} className="text-[#065F46] shrink-0 mt-0.5" />
                 <div className="text-[12.5px] text-[#4A4A45] leading-relaxed">
-                  <span className="font-semibold text-[#0B5D45]">Instant delivery after payment:</span>{" "}
+                  <span className="font-semibold text-[#065F46]">Instant delivery after payment:</span>{" "}
                   Booking confirmation, exact property address, estate gate pass code, and your host&apos;s direct contact will be emailed to{" "}
                   <span className="font-medium text-[#171717]">{guestEmail || "your email"}</span>{" "}
                   within seconds.
@@ -513,7 +513,7 @@ export default function BookingModal({
                 <button
                   type="button"
                   onClick={() => setStep(2)}
-                  className="px-5 py-3 border border-[#E7E5E0] text-[#171717] rounded-xl hover:bg-[#FAFAF8] text-[14px] font-medium transition-colors"
+                  className="px-5 py-3 border border-[#D1D5DB] hover:border-[#9CA3AF] text-[#171717] rounded-xl hover:bg-[#FAFAF8] active:scale-[0.99] text-[14px] font-medium transition-all cursor-pointer"
                 >
                   Back
                 </button>
@@ -521,7 +521,7 @@ export default function BookingModal({
                   type="button"
                   onClick={() => handlePay("paystack")}
                   disabled={isProcessing}
-                  className="flex-1 py-3.5 bg-[#0B5D45] text-white rounded-xl font-semibold text-[15px] hover:bg-[#084936] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-60"
+                  className="flex-1 py-3.5 bg-[#065F46] text-white rounded-xl font-semibold text-[15px] hover:bg-[#044E39] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-60 cursor-pointer"
                 >
                   {isProcessing ? (
                     <>
@@ -539,7 +539,7 @@ export default function BookingModal({
           {/* Step 4: Confirmation with Quarantined Access Details Unlocked */}
           {step === 4 && (
             <div className="text-center py-2 space-y-5">
-              <div className="w-14 h-14 bg-[#EDF3F0] text-[#24483A] rounded-full flex items-center justify-center mx-auto">
+              <div className="w-14 h-14 bg-[#EDF3F0] text-[#065F46] rounded-full flex items-center justify-center mx-auto">
                 <Check size={28} strokeWidth={2.5} />
               </div>
 
@@ -557,15 +557,15 @@ export default function BookingModal({
 
               {/* Unlocked Private Details Card */}
               {confirmedData?.contactDetails && (
-                <div className="p-4.5 rounded-xl bg-[#EDF3F0]/60 border border-[#24483A]/30 text-left space-y-3.5 text-[14px]">
-                  <div className="flex items-center gap-2 text-[#0B5D45] font-semibold text-xs uppercase tracking-wider">
+                <div className="p-4.5 rounded-xl bg-[#EDF3F0]/60 border border-[#065F46]/30 text-left space-y-3.5 text-[14px]">
+                  <div className="flex items-center gap-2 text-[#065F46] font-semibold text-xs uppercase tracking-wider">
                     <Key size={14} />
                     <span>Your Arrival Details</span>
                   </div>
 
                   <div className="space-y-2">
                     <div className="flex items-start gap-2.5">
-                      <MapPin size={16} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                      <MapPin size={16} className="text-[#065F46] shrink-0 mt-0.5" />
                       <div>
                         <div className="font-semibold text-[#171717]">Exact Property Address:</div>
                         <div className="text-[#4A4A45]">
@@ -577,10 +577,10 @@ export default function BookingModal({
 
                     {confirmedData.contactDetails.accessGateCode && (
                       <div className="flex items-start gap-2.5">
-                        <Key size={16} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                        <Key size={16} className="text-[#065F46] shrink-0 mt-0.5" />
                         <div>
                           <div className="font-semibold text-[#171717]">Estate Gate Pass Code:</div>
-                          <div className="font-mono font-bold text-[#0B5D45] text-base">
+                          <div className="font-mono font-bold text-[#065F46] text-base">
                             {confirmedData.contactDetails.accessGateCode}
                           </div>
                         </div>
@@ -588,7 +588,7 @@ export default function BookingModal({
                     )}
 
                     <div className="flex items-start gap-2.5">
-                      <Phone size={16} className="text-[#0B5D45] shrink-0 mt-0.5" />
+                      <Phone size={16} className="text-[#065F46] shrink-0 mt-0.5" />
                       <div>
                         <div className="font-semibold text-[#171717]">Host Direct Phone / WhatsApp:</div>
                         <div className="text-[#171717] font-medium">
@@ -598,7 +598,7 @@ export default function BookingModal({
                     </div>
 
                     {confirmedData.contactDetails.checkInInstructions && (
-                      <div className="pt-2 border-t border-[#24483A]/20 text-[13px] text-[#4A4A45]">
+                      <div className="pt-2 border-t border-[#065F46]/20 text-[13px] text-[#4A4A45]">
                         <span className="font-medium text-[#171717]">Check-in Note: </span>
                         {confirmedData.contactDetails.checkInInstructions}
                       </div>
@@ -616,7 +616,7 @@ export default function BookingModal({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="w-full py-3 bg-[#171717] text-white rounded-xl font-medium text-[15px] hover:bg-black transition-colors"
+                  className="w-full py-3 bg-[#171717] text-white rounded-xl font-medium text-[15px] hover:bg-black active:scale-[0.99] transition-all cursor-pointer"
                 >
                   Done
                 </button>

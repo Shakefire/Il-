@@ -1,7 +1,7 @@
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { authService, RegisterSchema, RegisterOwnerSchema, LoginSchema } from "./auth.service";
-import { createSessionToken, authenticateRequest } from "../../lib/security";
+import { createSessionToken, authenticateRequest, extractSession } from "../../lib/security";
 import { env } from "../../config/env";
 
 export async function authRoutes(fastify: FastifyInstance) {
@@ -14,18 +14,12 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     try {
       const { user, profile } = await authService.registerOwner(parse.data);
-      const token = createSessionToken(user.id, user.email, user.role);
 
-      reply.setCookie("session_token", token, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        maxAge: env.SESSION_MAX_AGE_DAYS * 24 * 60 * 60,
-      });
-
+      // CRITICAL SECURITY FIX: Do NOT issue a session token or set cookies prior to OTP verification.
       return reply.status(201).send({
         success: true,
-        token,
+        requiresEmailVerification: true,
+        email: user.email,
         user: {
           id: user.id,
           email: user.email,
@@ -41,25 +35,54 @@ export async function authRoutes(fastify: FastifyInstance) {
         message: "Owner account created. Please verify your email with the 6-digit code sent.",
       });
     } catch (err: any) {
-      const status = err.message.includes("already exists") ? 409 : 400;
+      const status =
+        err?.code === "23505" ||
+        err.message.includes("already exists") ||
+        err.message.includes("duplicate")
+          ? 409
+          : 400;
       return reply.status(status).send({ error: err.message });
     }
   });
 
   // POST /api/auth/verify-email
   fastify.post("/verify-email", async (request, reply) => {
-    const session = await authenticateRequest(request, reply);
-    if (!session) return;
+    const session = extractSession(request);
+    const { code, email } = (request.body || {}) as { code?: string; email?: string };
 
-    const { code } = (request.body || {}) as { code?: string };
     if (!code || typeof code !== "string" || code.trim().length !== 6) {
       return reply.status(400).send({ error: "Please provide a valid 6-digit verification code." });
     }
 
+    const targetEmail = typeof email === "string" && email.trim() ? email.trim().toLowerCase() : undefined;
+    const targetUserId = session?.userId;
+
+    if (!targetEmail && !targetUserId) {
+      return reply.status(400).send({
+        error: "Please provide the email address associated with your account or sign in to verify.",
+      });
+    }
+
     try {
-      const result = await authService.verifyEmailOtp(session.userId, code.trim());
+      const result = await authService.verifyEmailOtp(
+        { email: targetEmail, userId: targetUserId },
+        code.trim()
+      );
+
+      // Create session token ONLY upon successful verification
+      const token = createSessionToken(result.user.id, result.user.email, result.user.role, true);
+
+      reply.setCookie("session_token", token, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: env.NODE_ENV === "production",
+        maxAge: env.SESSION_MAX_AGE_DAYS * 24 * 60 * 60,
+      });
+
       return reply.send({
         success: true,
+        token,
         message: "Email successfully verified. You can now proceed with your owner profile.",
         ...result,
       });
@@ -70,11 +93,19 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/resend-email-otp
   fastify.post("/resend-email-otp", async (request, reply) => {
-    const session = await authenticateRequest(request, reply);
-    if (!session) return;
+    const session = extractSession(request);
+    const { email } = (request.body || {}) as { email?: string };
+    const targetEmail = typeof email === "string" && email.trim() ? email.trim().toLowerCase() : undefined;
+    const targetUserId = session?.userId;
+
+    if (!targetEmail && !targetUserId) {
+      return reply.status(400).send({
+        error: "Email address or active session is required to resend verification code.",
+      });
+    }
 
     try {
-      const result = await authService.resendEmailOtp(session.userId);
+      const result = await authService.resendEmailOtp({ email: targetEmail, userId: targetUserId });
       return reply.send(result);
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
@@ -130,18 +161,11 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     try {
       const user = await authService.registerUser(parse.data);
-      const token = createSessionToken(user.id, user.email, user.role);
-
-      reply.setCookie("session_token", token, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        maxAge: env.SESSION_MAX_AGE_DAYS * 24 * 60 * 60,
-      });
 
       return reply.status(201).send({
         success: true,
-        token,
+        requiresEmailVerification: true,
+        email: user.email,
         user: {
           id: user.id,
           email: user.email,
@@ -150,9 +174,15 @@ export async function authRoutes(fastify: FastifyInstance) {
           phone: user.phone,
           role: user.role,
         },
+        message: "Account created. Please verify your email to continue.",
       });
     } catch (err: any) {
-      const status = err.message.includes("already exists") ? 409 : 400;
+      const status =
+        err?.code === "23505" ||
+        err.message.includes("already exists") ||
+        err.message.includes("duplicate")
+          ? 409
+          : 400;
       return reply.status(status).send({ error: err.message });
     }
   });
@@ -166,7 +196,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
     try {
       const user = await authService.loginUser(parse.data.email, parse.data.password);
-      const token = createSessionToken(user.id, user.email, user.role);
+      const token = createSessionToken(user.id, user.email, user.role, user.emailVerified);
 
       reply.setCookie("session_token", token, {
         path: "/",

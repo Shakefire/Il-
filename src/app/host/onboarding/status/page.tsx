@@ -67,7 +67,14 @@ const ID_TYPE_LABELS: Record<string, string> = {
   voters_card: "Voter's Card (INEC PVC)",
 };
 
-type EditSection = "identity" | "bank" | "profile" | "property" | null;
+const RESIDENCE_DOC_LABELS: Record<string, string> = {
+  utility_bill: "Utility Bill (Electricity or Water)",
+  tenancy_agreement: "Tenancy Agreement",
+  estate_letter: "Estate or Resident Letter",
+  bank_statement: "Bank Account Statement",
+};
+
+type EditSection = "identity" | "bank" | "residence" | "profile" | "property" | null;
 
 export default function OnboardingStatusPage() {
   const { data, updateData, refreshStatus } = useOnboarding();
@@ -91,6 +98,11 @@ export default function OnboardingStatusPage() {
     idNumber: data.idNumber || "",
     idFrontUrl: data.idFrontUrl || "",
     idBackUrl: data.idBackUrl || "",
+  });
+
+  const [editResidence, setEditResidence] = useState({
+    authorityDocType: data.authorityDocType || "utility_bill",
+    authorityDocUrl: data.authorityDocUrl || "",
   });
 
   const [editBank, setEditBank] = useState({
@@ -126,7 +138,7 @@ export default function OnboardingStatusPage() {
 
   // File upload state for drawer
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadTargetField, setUploadTargetField] = useState<"idFrontUrl" | "idBackUrl">("idFrontUrl");
+  const [uploadTargetField, setUploadTargetField] = useState<"idFrontUrl" | "idBackUrl" | "authorityDocUrl">("idFrontUrl");
   const [isUploadingFile, setIsUploadingFile] = useState(false);
 
   const handleOpenEdit = (section: EditSection) => {
@@ -139,6 +151,11 @@ export default function OnboardingStatusPage() {
         idNumber: data.idNumber || "",
         idFrontUrl: data.idFrontUrl || "",
         idBackUrl: data.idBackUrl || "",
+      });
+    } else if (section === "residence") {
+      setEditResidence({
+        authorityDocType: data.authorityDocType || "utility_bill",
+        authorityDocUrl: data.authorityDocUrl || "",
       });
     } else if (section === "bank") {
       setEditBank({
@@ -165,7 +182,7 @@ export default function OnboardingStatusPage() {
     setActiveSection(section);
   };
 
-  const handleTriggerUpload = (field: "idFrontUrl" | "idBackUrl") => {
+  const handleTriggerUpload = (field: "idFrontUrl" | "idBackUrl" | "authorityDocUrl") => {
     setUploadTargetField(field);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -188,11 +205,20 @@ export default function OnboardingStatusPage() {
     try {
       const compressedDataUrl = await compressFile(file);
       try {
-        const res = await api.uploadImage(compressedDataUrl, "kyc");
+        const folder = uploadTargetField === "authorityDocUrl" ? "authority" : "kyc";
+        const res = await api.uploadImage(compressedDataUrl, folder);
         const url = res.url || compressedDataUrl;
-        setEditIdentity((prev) => ({ ...prev, [uploadTargetField]: url }));
+        if (uploadTargetField === "authorityDocUrl") {
+          setEditResidence((prev) => ({ ...prev, authorityDocUrl: url }));
+        } else {
+          setEditIdentity((prev) => ({ ...prev, [uploadTargetField]: url }));
+        }
       } catch {
-        setEditIdentity((prev) => ({ ...prev, [uploadTargetField]: compressedDataUrl }));
+        if (uploadTargetField === "authorityDocUrl") {
+          setEditResidence((prev) => ({ ...prev, authorityDocUrl: compressedDataUrl }));
+        } else {
+          setEditIdentity((prev) => ({ ...prev, [uploadTargetField]: compressedDataUrl }));
+        }
       }
     } catch (err: any) {
       setDrawerError(err.message || "Failed to process image.");
@@ -217,6 +243,18 @@ export default function OnboardingStatusPage() {
           selfieUrl: data.selfieUrl,
         });
         updateData(editIdentity);
+      } else if (activeSection === "residence") {
+        if (!editResidence.authorityDocUrl) {
+          throw new Error("Please upload a valid proof of residence document.");
+        }
+        await api.updateHostOnboardingAuthority({
+          authorityDocType: editResidence.authorityDocType,
+          authorityDocUrl: editResidence.authorityDocUrl,
+          bankName: data.bankName,
+          bankAccountNumber: data.bankAccountNumber,
+          bankAccountName: data.bankAccountName,
+        });
+        updateData(editResidence);
       } else if (activeSection === "bank") {
         if (!editBank.bankAccountNumber || editBank.bankAccountNumber.length < 10) {
           throw new Error("Please enter a valid 10-digit NUBAN account number.");
@@ -357,35 +395,54 @@ export default function OnboardingStatusPage() {
 
         <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight">
           {isApproved
-            ? "Your Partner Account is Approved!"
+            ? "Your Host Account is Approved!"
             : isActionRequired
             ? "Action Required on Your Documents"
-            : "Your Verification Dossier is Under Review"}
+            : "Your host application is under review"}
         </h1>
 
         <p className="text-[14.5px] text-[#6B6B67] leading-relaxed max-w-lg mx-auto">
           {isApproved
-            ? "Congratulations! Your account has passed compliance verification. You can now publish listings and accept guest bookings."
+            ? "Your host application has been approved. You can now publish your listings and accept bookings."
             : isActionRequired
             ? data.reviewFeedback ||
-              "Our compliance team requires additional information to approve your account. Please update your submitted documents below."
-            : "Thank you for completing your partner onboarding! Our physical verification team in Abuja and Lagos is auditing your submitted documents and parameters."}
+              "We need a bit more information to approve your account. Please update the requested items below."
+            : "Thank you for submitting your details. Our team is reviewing your documents and will update you within 24 to 48 hours."}
         </p>
 
-        {/* Quick Top Access to Host Dashboard */}
+        {/* Quick Top Access to Host Dashboard & Listing Creation */}
         <div className="pt-3 flex flex-wrap items-center justify-center gap-3">
-          <Link
-            href="/host/dashboard"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-sm font-semibold transition-all shadow-xs"
-          >
-            <Home size={16} />
-            <span>Go to Host Dashboard</span>
-            <ArrowRight size={15} />
-          </Link>
+          {isApproved ? (
+            <>
+              <Link
+                href="/become-a-host"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white text-sm font-semibold transition-all shadow-xs"
+              >
+                <Building2 size={16} />
+                <span>Create Your Property Listing →</span>
+              </Link>
+              <Link
+                href="/host/dashboard"
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-stone-700 text-sm font-semibold transition-all shadow-xs"
+              >
+                <Home size={16} />
+                <span>Go to Host Dashboard</span>
+              </Link>
+            </>
+          ) : (
+            <Link
+              href="/host/dashboard"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white text-sm font-semibold transition-all shadow-xs"
+            >
+              <Home size={16} />
+              <span>Go to Host Dashboard</span>
+              <ArrowRight size={15} />
+            </Link>
+          )}
           {isActionRequired && (
             <Link
               href="/host/onboarding/identity"
-              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-sm font-semibold transition-all"
+              className="inline-flex items-center gap-2 px-5 py-3 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 active:scale-[0.99] text-amber-900 text-sm font-semibold transition-all"
             >
               <span>Update Required Documents →</span>
             </Link>
@@ -393,12 +450,12 @@ export default function OnboardingStatusPage() {
         </div>
       </div>
 
-      {/* Interactive Submitted Dossier Overview Box */}
+      {/* Interactive Submitted Application Overview Box */}
       <div className="p-5 rounded-2xl bg-[#FAFAF8] border border-[#E7E5E0] text-left mb-8 shadow-xs">
         <div className="flex items-center justify-between pb-3 border-b border-[#E7E5E0]/80 mb-3">
           <h4 className="text-[12.5px] font-bold text-[#171717] uppercase tracking-wider flex items-center gap-2">
             <FileCheck size={16} className="text-[#0B5D45]" />
-            <span>Submitted Verification Dossier</span>
+            <span>Application details</span>
           </h4>
           <span className="text-[11px] text-[#8B8B86] font-medium hidden sm:inline-block">
             Editable during review
@@ -526,6 +583,56 @@ export default function OnboardingStatusPage() {
             </button>
           </motion.div>
 
+          {/* Proof of Residence Row */}
+          <motion.div
+            variants={dossierItemVariants}
+            className="flex items-center justify-between gap-3 p-3 rounded-xl bg-white border border-[#E7E5E0] hover:border-stone-300 transition-colors"
+          >
+            <div className="flex items-start gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-stone-100 flex items-center justify-center text-[#6B6B67] shrink-0 mt-0.5">
+                <FileCheck size={15} />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[11px] font-semibold text-[#8B8B86] uppercase tracking-wider block">
+                  Proof of Residence
+                </span>
+                <div className="text-xs font-semibold text-[#171717] truncate mt-0.5">
+                  {RESIDENCE_DOC_LABELS[data.authorityDocType] || "Utility Bill / Tenancy Agreement"}
+                </div>
+                <div className="flex items-center gap-1.5 mt-1">
+                  {data.authorityDocUrl ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewModal({
+                          isOpen: true,
+                          title: RESIDENCE_DOC_LABELS[data.authorityDocType] || "Proof of Residence",
+                          url: data.authorityDocUrl,
+                        })
+                      }
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 text-[10px] font-medium hover:bg-emerald-100 transition-colors cursor-pointer"
+                    >
+                      <Eye size={10} />
+                      <span>View Document</span>
+                    </button>
+                  ) : (
+                    <span className="text-[10px] text-amber-700 font-medium">Document pending</span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleOpenEdit("residence")}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#0B5D45] hover:bg-[#0B5D45]/8 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+              title="Edit proof of residence"
+            >
+              <Pencil size={12} />
+              <span>Edit</span>
+            </button>
+          </motion.div>
+
           {/* Operating Location Row */}
           <motion.div
             variants={dossierItemVariants}
@@ -600,7 +707,7 @@ export default function OnboardingStatusPage() {
         {isActionRequired && (
           <Link
             href="/host/onboarding/identity"
-            className="w-full sm:w-auto h-[50px] px-8 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-[14.5px] font-semibold flex items-center justify-center gap-2 transition-all shadow-sm"
+            className="w-full sm:w-auto h-[50px] px-8 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 active:scale-[0.99] text-amber-900 text-[14.5px] font-semibold flex items-center justify-center gap-2 transition-all shadow-sm"
           >
             <span>Update Submitted Documents</span>
             <ArrowRight size={16} />
@@ -608,7 +715,7 @@ export default function OnboardingStatusPage() {
         )}
         <Link
           href="/host/dashboard"
-          className="w-full sm:w-auto h-[50px] px-8 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center justify-center gap-2 transition-all shadow-sm"
+          className="w-full sm:w-auto h-[50px] px-8 rounded-xl bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white text-[14.5px] font-medium flex items-center justify-center gap-2 transition-all shadow-sm"
         >
           <Home size={16} />
           <span>Go to Host Dashboard</span>
@@ -628,7 +735,7 @@ export default function OnboardingStatusPage() {
                 Need Help with Verification?
               </h4>
               <p className="text-xs text-[#6B6B67] mt-0.5 leading-relaxed">
-                Our physical compliance officers in Abuja & Lagos are on standby to inspect properties and verify documents.
+                Our team in Abuja and Lagos is available if you need help with your application.
               </p>
             </div>
           </div>
@@ -682,6 +789,7 @@ export default function OnboardingStatusPage() {
                   </span>
                   <h3 className="text-base sm:text-lg font-semibold text-[#171717] mt-0.5">
                     {activeSection === "identity" && "Update Identity Information"}
+                    {activeSection === "residence" && "Update Proof of Residence"}
                     {activeSection === "bank" && "Update Payout Bank Details"}
                     {activeSection === "profile" && "Update Operating Location"}
                     {activeSection === "property" && "Update Property Draft"}
@@ -701,7 +809,7 @@ export default function OnboardingStatusPage() {
                 {/* Notice pill */}
                 <div className="p-3 bg-blue-50/80 border border-blue-200/80 rounded-xl text-blue-900 leading-relaxed">
                   <span className="font-semibold block mb-0.5">Active Queue Protected</span>
-                  Amending these details updates your compliance file immediately without resetting your place in the verification review queue.
+                  Updating your details saves immediately without losing your place in line.
                 </div>
 
                 {drawerError && (
@@ -722,7 +830,7 @@ export default function OnboardingStatusPage() {
                         onChange={(e) =>
                           setEditIdentity((prev) => ({ ...prev, idType: e.target.value }))
                         }
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150 cursor-pointer"
                       >
                         <option value="nin">National Identification Number (NIN)</option>
                         <option value="drivers_license">Driver's Licence (FRSC)</option>
@@ -742,7 +850,7 @@ export default function OnboardingStatusPage() {
                           setEditIdentity((prev) => ({ ...prev, idNumber: e.target.value }))
                         }
                         placeholder="e.g. 11-digit NIN or Licence Number"
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs font-mono focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
 
@@ -765,9 +873,9 @@ export default function OnboardingStatusPage() {
                             type="button"
                             onClick={() => handleTriggerUpload("idFrontUrl")}
                             disabled={isUploadingFile}
-                            className="px-3 py-1.5 rounded-lg border border-[#E7E5E0] bg-white hover:bg-stone-50 text-xs font-semibold text-[#171717] transition-colors flex items-center gap-1.5 cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-xs font-semibold text-[#111827] transition-all flex items-center gap-1.5 cursor-pointer"
                           >
-                            <Upload size={13} className="text-[#0B5D45]" />
+                            <Upload size={13} className="text-[#065F46]" />
                             <span>{editIdentity.idFrontUrl ? "Replace" : "Upload"}</span>
                           </button>
                         </div>
@@ -786,14 +894,60 @@ export default function OnboardingStatusPage() {
                               type="button"
                               onClick={() => handleTriggerUpload("idBackUrl")}
                               disabled={isUploadingFile}
-                              className="px-3 py-1.5 rounded-lg border border-[#E7E5E0] bg-white hover:bg-stone-50 text-xs font-semibold text-[#171717] transition-colors flex items-center gap-1.5 cursor-pointer"
+                              className="px-3 py-1.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-xs font-semibold text-[#111827] transition-all flex items-center gap-1.5 cursor-pointer"
                             >
-                              <Upload size={13} className="text-[#0B5D45]" />
+                              <Upload size={13} className="text-[#065F46]" />
                               <span>{editIdentity.idBackUrl ? "Replace" : "Upload"}</span>
                             </button>
                           </div>
                         )}
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Residence Section */}
+                {activeSection === "residence" && (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="font-semibold text-[#171717] block mb-1.5">
+                        Proof of Residence Document Type
+                      </label>
+                      <select
+                        value={editResidence.authorityDocType}
+                        onChange={(e) =>
+                          setEditResidence((prev) => ({ ...prev, authorityDocType: e.target.value }))
+                        }
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150 cursor-pointer"
+                      >
+                        <option value="utility_bill">Utility Bill (Electricity or Water)</option>
+                        <option value="tenancy_agreement">Tenancy Agreement</option>
+                        <option value="estate_letter">Estate or Resident Letter</option>
+                        <option value="bank_statement">Bank Account Statement</option>
+                      </select>
+                      <p className="text-[11px] text-[#8B8B86] mt-1">
+                        Must show your residential address within Nigeria.
+                      </p>
+                    </div>
+
+                    <div className="p-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] flex items-center justify-between">
+                      <div>
+                        <span className="font-semibold text-[#171717] block">
+                          Document File
+                        </span>
+                        <span className="text-[11px] text-[#8B8B86]">
+                          {editResidence.authorityDocUrl ? "Document on file" : "Not uploaded"}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleTriggerUpload("authorityDocUrl")}
+                        disabled={isUploadingFile}
+                        className="px-3 py-1.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-xs font-semibold text-[#111827] transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Upload size={13} className="text-[#065F46]" />
+                        <span>{editResidence.authorityDocUrl ? "Replace" : "Upload"}</span>
+                      </button>
                     </div>
                   </div>
                 )}
@@ -810,7 +964,7 @@ export default function OnboardingStatusPage() {
                         onChange={(e) =>
                           setEditBank((prev) => ({ ...prev, bankName: e.target.value }))
                         }
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150 cursor-pointer"
                       >
                         {NIGERIAN_BANKS.map((bank) => (
                           <option key={bank} value={bank}>
@@ -835,7 +989,7 @@ export default function OnboardingStatusPage() {
                           }))
                         }
                         placeholder="0123456789"
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs font-mono focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs font-mono focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
 
@@ -850,7 +1004,7 @@ export default function OnboardingStatusPage() {
                           setEditBank((prev) => ({ ...prev, bankAccountName: e.target.value }))
                         }
                         placeholder="Full name as registered on account"
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
                   </div>
@@ -868,7 +1022,7 @@ export default function OnboardingStatusPage() {
                         onChange={(e) =>
                           setEditProfile((prev) => ({ ...prev, operatingCity: e.target.value }))
                         }
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150 cursor-pointer"
                       >
                         <option value="Abuja">Abuja (FCT)</option>
                         <option value="Lagos">Lagos State</option>
@@ -890,7 +1044,7 @@ export default function OnboardingStatusPage() {
                           setEditProfile((prev) => ({ ...prev, operatingAreas: e.target.value }))
                         }
                         placeholder="e.g. Maitama, Wuse 2, Jabi or Ikoyi, Lekki"
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
 
@@ -905,7 +1059,7 @@ export default function OnboardingStatusPage() {
                           setEditProfile((prev) => ({ ...prev, phone: e.target.value }))
                         }
                         placeholder="+234 800 000 0000"
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
 
@@ -920,7 +1074,7 @@ export default function OnboardingStatusPage() {
                           setEditProfile((prev) => ({ ...prev, bio: e.target.value }))
                         }
                         placeholder="Share your hosting experience or background..."
-                        className="w-full p-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white resize-none"
+                        className="w-full p-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150 resize-none"
                       />
                     </div>
                   </div>
@@ -940,7 +1094,7 @@ export default function OnboardingStatusPage() {
                           setEditProperty((prev) => ({ ...prev, propertyTitle: e.target.value }))
                         }
                         placeholder="e.g. Luxurious 2-Bed Serviced Apartment"
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
 
@@ -953,7 +1107,7 @@ export default function OnboardingStatusPage() {
                         onChange={(e) =>
                           setEditProperty((prev) => ({ ...prev, propertyType: e.target.value }))
                         }
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150 cursor-pointer"
                       >
                         <option value="Apartment">Apartment</option>
                         <option value="Duplex">Duplex / Villa</option>
@@ -974,7 +1128,7 @@ export default function OnboardingStatusPage() {
                           setEditProperty((prev) => ({ ...prev, neighborhood: e.target.value }))
                         }
                         placeholder="e.g. Maitama or Victoria Island"
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
 
@@ -991,7 +1145,7 @@ export default function OnboardingStatusPage() {
                             nightlyRate: Number(e.target.value),
                           }))
                         }
-                        className="w-full h-11 px-3.5 rounded-xl border border-[#E7E5E0] bg-[#FAFAF8] text-[#171717] text-xs focus:outline-none focus:border-[#0B5D45] focus:bg-white"
+                        className="w-full h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] text-xs focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150"
                       />
                     </div>
                   </div>
@@ -1004,7 +1158,7 @@ export default function OnboardingStatusPage() {
                   type="button"
                   onClick={() => setActiveSection(null)}
                   disabled={isSaving}
-                  className="px-4 py-2.5 rounded-xl border border-[#E7E5E0] bg-white hover:bg-stone-100 text-xs font-semibold text-[#6B6B67] transition-colors cursor-pointer"
+                  className="px-4 py-2.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-100 active:scale-[0.99] text-xs font-semibold text-[#4B5563] hover:text-[#111827] transition-all cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1013,7 +1167,7 @@ export default function OnboardingStatusPage() {
                   type="button"
                   onClick={handleSaveDrawer}
                   disabled={isSaving || isUploadingFile}
-                  className="px-5 py-2.5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-semibold shadow-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  className="px-5 py-2.5 rounded-lg bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white text-xs font-semibold shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
                 >
                   {isSaving ? (
                     <>

@@ -200,10 +200,10 @@ function LoginForm() {
                 autoComplete="email"
                 disabled={isLoading}
                 required
-                className={`w-full h-[52px] px-4 pr-11 bg-white border rounded-[11px] text-[15px] text-primary placeholder:text-[#9E9E9A] transition-all outline-none font-sans ${
+                className={`w-full h-[52px] px-4 pr-11 bg-white border rounded-[11px] text-[15px] text-[#111827] placeholder:text-[#9CA3AF] transition-colors duration-150 outline-none font-sans ${
                   fieldErrors.email
-                    ? "border-[#DC2626] focus:border-[#DC2626] focus:ring-2 focus:ring-[#DC2626]/10"
-                    : "border-border focus:border-[#0B5D45] focus:ring-2 focus:ring-[#0B5D45]/10"
+                    ? "border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15 text-rose-900"
+                    : "border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15"
                 }`}
               />
               <div className="absolute right-3.5 top-1/2 -translate-y-1/2 flex items-center pointer-events-none text-primary-muted">
@@ -212,7 +212,7 @@ function LoginForm() {
             </div>
 
             {fieldErrors.email && (
-              <p className="text-[12.5px] text-[#DC2626] font-medium leading-tight pt-0.5">
+              <p className="text-[12.5px] text-rose-600 font-medium leading-tight pt-0.5 animate-in fade-in slide-in-from-top-1 duration-150">
                 {fieldErrors.email}
               </p>
             )}
@@ -246,17 +246,17 @@ function LoginForm() {
                 autoComplete="current-password"
                 disabled={isLoading}
                 required
-                className={`w-full h-[52px] px-4 pr-11 bg-white border rounded-[11px] text-[15px] text-primary placeholder:text-[#9E9E9A] transition-all outline-none font-sans ${
+                className={`w-full h-[52px] px-4 pr-11 bg-white border rounded-[11px] text-[15px] text-[#111827] placeholder:text-[#9CA3AF] transition-colors duration-150 outline-none font-sans ${
                   fieldErrors.password
-                    ? "border-[#DC2626] focus:border-[#DC2626] focus:ring-2 focus:ring-[#DC2626]/10"
-                    : "border-border focus:border-[#0B5D45] focus:ring-2 focus:ring-[#0B5D45]/10"
+                    ? "border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15 text-rose-900"
+                    : "border-[#D1D5DB] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15"
                 }`}
               />
               <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="p-1 rounded-md text-primary-muted hover:text-primary focus:outline-none transition-colors"
+                  className="p-1 rounded-md text-primary-muted hover:text-primary focus:outline-none transition-colors cursor-pointer"
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -265,7 +265,7 @@ function LoginForm() {
             </div>
 
             {fieldErrors.password && (
-              <p className="text-[12.5px] text-[#DC2626] font-medium leading-tight pt-0.5">
+              <p className="text-[12.5px] text-rose-600 font-medium leading-tight pt-0.5 animate-in fade-in slide-in-from-top-1 duration-150">
                 {fieldErrors.password}
               </p>
             )}
@@ -279,7 +279,7 @@ function LoginForm() {
                 name="rememberMe"
                 checked={rememberMe}
                 onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 rounded border-border text-[#0B5D45] focus:ring-[#0B5D45]/20 cursor-pointer accent-[#0B5D45]"
+                className="w-4 h-4 rounded border-border text-[#065F46] focus:ring-[#065F46]/20 cursor-pointer accent-[#065F46]"
               />
               <span className="text-primary-secondary group-hover:text-primary transition-colors font-medium">
                 Remember this device
@@ -288,7 +288,7 @@ function LoginForm() {
 
             <Link
               href="/forgot-password"
-              className="text-[13px] font-medium text-[#0B5D45] hover:text-[#084936] hover:underline transition-colors"
+              className="text-[13px] font-medium text-[#065F46] hover:text-[#044E39] hover:underline transition-colors"
             >
               Forgot password?
             </Link>
@@ -299,7 +299,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={isLoading}
-              className="group relative w-full h-[52px] bg-[#0B5D45] hover:bg-[#084936] active:bg-[#063829] text-white rounded-[12px] font-medium text-[15px] flex items-center justify-center gap-2 transition-all duration-150 shadow-sm hover:shadow disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#0B5D45]/20 font-sans"
+              className="group relative w-full h-[52px] bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white rounded-[12px] font-medium text-[15px] flex items-center justify-center gap-2 transition-all duration-150 shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#065F46]/20 font-sans"
             >
               {isLoading ? (
                 <>

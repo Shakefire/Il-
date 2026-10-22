@@ -1,83 +1,85 @@
 "use client";
 
+import React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowLeft } from "lucide-react";
 
 interface AuthLayoutProps {
   children: React.ReactNode;
   heading: string;
   supportingText?: string;
   imageAlt?: string;
+  imageSrc?: string;
 }
 
 export default function AuthLayout({
   children,
   heading,
   supportingText,
-  imageAlt = "Contemporary interior of a curated Nigerian residence",
+  imageAlt = "Curated Ilé Living Exhibition",
+  imageSrc = "/images/auth-partner-showcase.png",
 }: AuthLayoutProps) {
   return (
-    <div className="min-h-screen bg-[#FAFAF8] flex flex-col justify-between text-[#171717]">
-      {/* 1. Subtle Top Bar: Logo on Left, Back to Home on Right */}
-      <header className="w-full max-w-7xl mx-auto px-6 sm:px-10 lg:px-12 h-20 sm:h-24 flex items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 group">
-          <span className="font-display text-2xl sm:text-3xl tracking-tight text-[#171717] font-normal">
-            Ilé
-          </span>
-          <span className="w-1.5 h-1.5 rounded-full bg-[#0B5D45] mt-1 group-hover:scale-125 transition-transform" />
-        </Link>
+    <div className="min-h-screen bg-white text-[#111827] flex flex-col justify-between selection:bg-[#EDF5F2] selection:text-[#1C3D32]">
+      {/* Global Wrapper featuring fluid inner paddings (p-6 scaling smoothly up to p-16 on desktop) */}
+      <div className="w-full max-w-[1400px] mx-auto p-6 sm:p-10 md:p-12 lg:p-16 flex flex-col flex-1">
+        {/* Top Corner Utility Bar: Brand on Left, Back to Home Trigger on Right */}
+        <header className="w-full flex items-center justify-between pb-8 sm:pb-12">
+          {/* Brand Name: Serif typeface followed by bold brand color period token block */}
+          <Link href="/" className="inline-flex items-baseline group" aria-label="Ilé Home">
+            <span className="font-serif text-[28px] sm:text-[32px] font-normal tracking-tight text-[#111827]">
+              Ilé
+            </span>
+            <span className="inline-block w-2 h-2 rounded-full bg-[#1C3D32] ml-1 mb-0.5 group-hover:scale-125 transition-transform" />
+          </Link>
 
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-[14px] font-medium text-[#6B6B67] hover:text-[#171717] transition-colors py-2 px-1"
-        >
-          <ArrowLeft size={16} />
-          <span>Back to home</span>
-        </Link>
-      </header>
+          {/* Explicit Back Navigation Trigger */}
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 text-[14px] font-normal text-[#4B5563] hover:text-[#111827] transition-colors py-1.5 px-1 group"
+          >
+            <span className="text-base group-hover:-translate-x-0.5 transition-transform">&larr;</span>
+            <span>Back to home</span>
+          </Link>
+        </header>
 
-      {/* 2. Main Two-Part Composition: Form on Left, Editorial Image on Right */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-6 sm:px-10 lg:px-12 flex items-center py-6 sm:py-10">
-        <div className="w-full grid grid-cols-1 md:grid-cols-12 gap-10 lg:gap-16 items-center">
-          {/* Form Side (spacious, calm, plenty of breathing room) */}
-          <div className="md:col-span-6 lg:col-span-5 max-w-md w-full mx-auto md:mx-0">
-            {/* Header copy */}
-            <div className="space-y-2 mb-8 sm:mb-10">
-              <h1 className="font-display text-3xl sm:text-4xl text-[#171717] font-normal tracking-tight">
-                {heading}
-              </h1>
-              {supportingText && (
-                <p className="text-[16px] text-[#6B6B67] font-light leading-relaxed">
-                  {supportingText}
-                </p>
-              )}
+        {/* Balanced Two-Column Split Layout on Large Screens: Left 45%, Right 55% */}
+        <main className="flex-1 w-full flex items-center">
+          <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 xl:gap-16 items-center">
+            {/* Left 45%: Form Actions and Branding Context */}
+            <div className="lg:col-span-5 w-full max-w-[480px] mx-auto lg:mx-0">
+              {/* Title & Subtitle */}
+              <div className="mb-7 sm:mb-8">
+                <h1 className="font-serif text-[32px] sm:text-[38px] xl:text-[42px] font-normal tracking-tight text-[#111827] leading-[1.12]">
+                  {heading}
+                </h1>
+                {supportingText && (
+                  <p className="mt-2.5 text-[15px] sm:text-[16px] text-[#4B5563] font-normal leading-relaxed">
+                    {supportingText}
+                  </p>
+                )}
+              </div>
+
+              {/* Form Inputs & Actions Slot */}
+              {children}
             </div>
 
-            {/* Form Content */}
-            {children}
-          </div>
-
-          {/* Editorial Visual Element (Hidden on mobile < 768px) */}
-          <div className="hidden md:block md:col-span-6 lg:col-span-7 pl-0 lg:pl-6">
-            <div className="relative w-full aspect-[4/5] lg:aspect-[16/14] rounded-2xl lg:rounded-3xl overflow-hidden bg-[#E7E5E0] shadow-sm border border-[#E7E5E0]/60">
-              <Image
-                src="https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=85"
-                alt={imageAlt}
-                fill
-                priority
-                sizes="(max-width: 1024px) 50vw, 60vw"
-                className="object-cover"
-              />
+            {/* Right 55%: Immersive Rounded Gallery Exhibition Placeholder Card */}
+            <div className="hidden lg:block lg:col-span-7">
+              <div className="relative w-full aspect-[16/12] xl:aspect-[16/11] rounded-[28px] overflow-hidden bg-[#F7F7F5] shadow-xs border border-[#E5E7EB]/40 group">
+                <Image
+                  src={imageSrc}
+                  alt={imageAlt}
+                  fill
+                  priority
+                  sizes="(max-width: 1024px) 100vw, 55vw"
+                  className="object-cover object-center group-hover:scale-[1.01] transition-transform duration-700 ease-out"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </main>
-
-      {/* 3. Subtle Clean Bottom Space */}
-      <footer className="w-full max-w-7xl mx-auto px-6 sm:px-10 lg:px-12 py-6 text-center md:text-left text-xs text-[#9E9E9A]">
-        © 2026 Ilé Hospitality Ltd.
-      </footer>
+        </main>
+      </div>
     </div>
   );
 }

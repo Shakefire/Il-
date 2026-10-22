@@ -10,6 +10,7 @@ export interface SessionPayload {
   userId: string;
   email: string;
   role: string;
+  emailVerified?: boolean;
   exp: number;
 }
 
@@ -21,12 +22,18 @@ export function comparePassword(plain: string, hash: string): Promise<boolean> {
   return bcrypt.compare(plain, hash);
 }
 
-export function createSessionToken(userId: string, email: string, role: string): string {
+export function createSessionToken(
+  userId: string,
+  email: string,
+  role: string,
+  emailVerified: boolean = true
+): string {
   const maxAge = env.SESSION_MAX_AGE_DAYS * 24 * 60 * 60;
   const payload: SessionPayload = {
     userId,
     email,
     role,
+    emailVerified,
     exp: Math.floor(Date.now() / 1000) + maxAge,
   };
 

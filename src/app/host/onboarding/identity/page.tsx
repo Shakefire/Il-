@@ -1,29 +1,31 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
 import { useOnboarding } from "@/context/OnboardingContext";
 import {
   ArrowRight,
   ArrowLeft,
   Check,
-  CheckCircle2,
   Camera,
   FileText,
   Loader2,
   Eye,
   RotateCw,
   ScanFace,
-  ChevronDown,
   CreditCard,
   FileUp,
+  AlertCircle,
+  ShieldCheck,
+  ChevronDown,
+  Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { compressFile } from "@/lib/imageCompression";
 import DocumentPreviewModal from "@/components/onboarding/DocumentPreviewModal";
 import FintechLivenessModal, { preloadLivenessEngine } from "@/components/FintechLivenessModal";
+import StepMotion from "@/components/onboarding/StepMotion";
 
 interface IdDocConfig {
   id: "nin" | "drivers_license" | "passport" | "voters_card";
@@ -40,84 +42,78 @@ interface IdDocConfig {
 
 const ID_CONFIGS: IdDocConfig[] = [
   {
+    id: "nin",
+    label: "National Identification Number (NIN)",
+    helper: "NIMC NIN Slip or Digital NIN Card",
+    icon: FileText,
+    inputLabel: "11-Digit National Identification Number (NIN)",
+    inputPlaceholder: "e.g. 12345678901",
+    inputHelp: "Enter your 11-digit NIN exactly as registered with NIMC.",
+    frontLabel: "Front of NIN Slip or Card",
+    backLabel: "Back of NIN Card (Optional)",
+    hideBackDoc: false,
+  },
+  {
+    id: "drivers_license",
+    label: "Driver's Licence (FRSC)",
+    helper: "Valid Nigerian Driver's Licence issued by FRSC",
+    icon: CreditCard,
+    inputLabel: "Driver's Licence Number",
+    inputPlaceholder: "e.g. ABC123456789",
+    inputHelp: "Enter your alphanumeric licence number issued by FRSC.",
+    frontLabel: "Front of Driver's Licence",
+    backLabel: "Back of Driver's Licence",
+    hideBackDoc: false,
+  },
+  {
     id: "passport",
     label: "International Passport",
     helper: "Data page of valid Nigerian Passport",
     icon: FileText,
     inputLabel: "Passport Number",
     inputPlaceholder: "e.g. A12345678",
-    inputHelp: "Enter the alphanumeric passport number from the top right of your bio-data page",
-    frontLabel: "Upload Passport Data Page *",
+    inputHelp: "Enter the alphanumeric passport number from top right of bio-data page.",
+    frontLabel: "Passport Bio-Data Page",
+    backLabel: undefined,
     hideBackDoc: true,
-  },
-  {
-    id: "drivers_license",
-    label: "Driver's Licence (FRSC)",
-    helper: "Valid Nigerian Driver's Licence",
-    icon: CreditCard,
-    inputLabel: "Driver's Licence Number",
-    inputPlaceholder: "e.g. ABC123456789",
-    inputHelp: "Enter your valid alphanumeric Federal Road Safety Corps licence number",
-    frontLabel: "Upload Front of Licence *",
-    backLabel: "Upload Back of Licence",
-    hideBackDoc: false,
-  },
-  {
-    id: "nin",
-    label: "National Identification Number (NIN)",
-    helper: "NIN Slip or Digital NIN Card",
-    icon: FileText,
-    inputLabel: "11-Digit National Identification Number (NIN)",
-    inputPlaceholder: "e.g. 12345678901",
-    inputHelp: "Enter your 11-digit NIN exactly as issued by NIMC",
-    frontLabel: "Upload Front of NIN Slip / Card *",
-    backLabel: "Upload Back of NIN (Optional)",
-    hideBackDoc: false,
   },
   {
     id: "voters_card",
     label: "Voter's Card (INEC PVC)",
-    helper: "Permanent Voter's Card",
+    helper: "Permanent Voter's Card issued by INEC",
     icon: CreditCard,
     inputLabel: "Voter Identification Number (VIN)",
     inputPlaceholder: "e.g. 90F1B23456789012345",
-    inputHelp: "Enter the 19-digit VIN located on the front of your voter card",
-    frontLabel: "Upload Front of Voter Card *",
-    backLabel: "Upload Back of Voter Card (Optional)",
+    inputHelp: "Enter the 19-digit VIN located on the front of your card.",
+    frontLabel: "Front of Voter Card",
+    backLabel: "Back of Voter Card (Optional)",
     hideBackDoc: false,
   },
+];
+
+const ONBOARDING_STEPS = [
+  { step: 1, label: "Host Type", href: "/host/onboarding/business-type" },
+  { step: 2, label: "Profile", href: "/host/onboarding/profile" },
+  { step: 3, label: "Identity", href: "/host/onboarding/identity" },
+  { step: 4, label: "Authority & Payout", href: "/host/onboarding/authority" },
+  { step: 5, label: "Listing Draft", href: "/host/onboarding/review" },
 ];
 
 export default function IdentityStepPage() {
   const router = useRouter();
   const { data, updateData, saveStepData } = useOnboarding();
-  const [error, setError] = useState<string | null>(null);
+
   const [isNavigating, setIsNavigating] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
 
-  // Custom Dropdown State
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  // Field validation errors & touched states
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
 
-  // Drag over states for interactive dropzones
+  // Drag over states
   const [isDraggingFront, setIsDraggingFront] = useState(false);
   const [isDraggingBack, setIsDraggingBack] = useState(false);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsDropdownOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // Preload neural vision engine in background for instant camera startup
-  useEffect(() => {
-    preloadLivenessEngine().catch(() => null);
-  }, []);
 
   // Modal preview state
   const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; title: string; url: string }>({
@@ -134,10 +130,79 @@ export default function IdentityStepPage() {
 
   const selectedDocConfig = ID_CONFIGS.find((c) => c.id === data.idType) || ID_CONFIGS[0];
 
+  useEffect(() => {
+    preloadLivenessEngine().catch(() => null);
+  }, []);
+
+  const validateIdNumber = (numStr: string, docType: string): string | null => {
+    const trimmed = numStr.trim();
+    if (!trimmed) return "Document identification number is required.";
+
+    if (docType === "nin") {
+      const digitsOnly = trimmed.replace(/\D/g, "");
+      if (digitsOnly.length !== 11) {
+        return "National Identification Number (NIN) must be exactly 11 digits.";
+      }
+    } else if (docType === "drivers_license") {
+      if (trimmed.length < 8) {
+        return "Please enter a valid driver's license number (minimum 8 characters).";
+      }
+    } else if (docType === "passport") {
+      if (trimmed.length < 7) {
+        return "Please enter a valid passport number (e.g. A12345678).";
+      }
+    } else if (docType === "voters_card") {
+      if (trimmed.length < 10) {
+        return "Please enter a valid voter identification number.";
+      }
+    }
+    return null;
+  };
+
+  const handleBlur = (field: string) => {
+    setTouched((prev) => ({ ...prev, [field]: true }));
+    validateField(field);
+  };
+
+  const validateField = (field: string) => {
+    const newErrors = { ...errors };
+
+    if (field === "idNumber") {
+      const numErr = validateIdNumber(data.idNumber || "", data.idType || "nin");
+      if (numErr) {
+        newErrors.idNumber = numErr;
+      } else {
+        delete newErrors.idNumber;
+      }
+    }
+
+    if (field === "idFrontUrl") {
+      if (!data.idFrontUrl) {
+        newErrors.idFrontUrl = `Please upload the ${selectedDocConfig.frontLabel.toLowerCase()}.`;
+      } else {
+        delete newErrors.idFrontUrl;
+      }
+    }
+
+    if (field === "selfieUrl") {
+      if (!data.selfieUrl) {
+        newErrors.selfieUrl = "Please complete the biometric face verification.";
+      } else {
+        delete newErrors.selfieUrl;
+      }
+    }
+
+    setErrors(newErrors);
+  };
+
   const handleSelectDocType = (docId: IdDocConfig["id"]) => {
-    updateData({ idType: docId });
-    setIsDropdownOpen(false);
-    setError(null);
+    updateData({ idType: docId, idNumber: "" });
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.idNumber;
+      delete next.idFrontUrl;
+      return next;
+    });
   };
 
   const handleTriggerUpload = (field: "idFrontUrl" | "idBackUrl" | "selfieUrl") => {
@@ -149,6 +214,7 @@ export default function IdentityStepPage() {
         fileInputRef.current.accept =
           "image/*,application/pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       }
+      fileInputRef.current.value = "";
       fileInputRef.current.click();
     }
   };
@@ -157,34 +223,36 @@ export default function IdentityStepPage() {
     if (!file) return;
 
     if (file.size > 15 * 1024 * 1024) {
-      setError(
-        `File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 15MB limit. Please upload a file up to 15MB.`
-      );
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      setErrors((prev) => ({
+        ...prev,
+        [field]: `File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds 15MB limit. Please upload a smaller file.`,
+      }));
       return;
     }
 
     setUploadingField(field);
-    setError(null);
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
 
     try {
-      // 1. Process & compress file
       const compressedDataUrl = await compressFile(file);
-
-      // 2. Upload to storage API
       try {
         const res = await api.uploadImage(compressedDataUrl, "kyc");
         const url = res.url || compressedDataUrl;
         updateData({ [field]: url });
       } catch {
-        // Fall back to processed data URL
         updateData({ [field]: compressedDataUrl });
       }
     } catch (err: any) {
-      setError(err.message || "Failed to process file. Please choose another file.");
+      setErrors((prev) => ({
+        ...prev,
+        [field]: err.message || "Failed to process image. Please try again.",
+      }));
     } finally {
       setUploadingField(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -217,33 +285,54 @@ export default function IdentityStepPage() {
     setPreviewModal({ isOpen: true, title, url });
   };
 
+  const handleSkipToDashboard = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsSavingDraft(true);
+    try {
+      await saveStepData(3);
+    } catch {
+      // background save
+    } finally {
+      setIsSavingDraft(false);
+      router.push("/host/dashboard");
+    }
+  };
+
   const handleContinue = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
-    if (!data.idType) {
-      setError("Please select an identity document type.");
-      return;
-    }
+    setTouched({
+      idNumber: true,
+      idFrontUrl: true,
+      selfieUrl: true,
+    });
 
-    if (!data.idNumber.trim()) {
-      setError(`Please provide your ${selectedDocConfig.inputLabel.toLowerCase()}.`);
-      return;
+    const currentErrors: Record<string, string> = {};
+
+    const numErr = validateIdNumber(data.idNumber || "", data.idType || "nin");
+    if (numErr) {
+      currentErrors.idNumber = numErr;
     }
 
     if (!data.idFrontUrl) {
-      setError(`Please upload your ${selectedDocConfig.frontLabel.replace(" *", "").toLowerCase()}.`);
-      return;
+      currentErrors.idFrontUrl = `Please upload the ${selectedDocConfig.frontLabel.toLowerCase()}.`;
     }
 
     if (!data.selfieUrl) {
-      setError("Please complete your facial biometric verification.");
+      currentErrors.selfieUrl = "Please complete face verification.";
+    }
+
+    if (Object.keys(currentErrors).length > 0) {
+      setErrors(currentErrors);
       return;
     }
 
     setIsNavigating(true);
-    // Ensure data is saved to backend before navigating
-    await saveStepData(3).catch(() => null);
+    try {
+      await saveStepData(3);
+    } catch {
+      // background save
+    }
     router.push("/host/onboarding/authority");
   };
 
@@ -259,10 +348,8 @@ export default function IdentityStepPage() {
     );
   };
 
-  const SelectedIcon = selectedDocConfig.icon;
-
   return (
-    <div className="max-w-2xl mx-auto bg-white border border-[#E7E5E0] rounded-2xl sm:rounded-3xl p-6 sm:p-10 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.02),0_12px_24px_-4px_rgba(0,0,0,0.05),0_24px_48px_-12px_rgba(0,0,0,0.07)]">
+    <StepMotion className="w-full">
       {/* Hidden file input */}
       <input
         type="file"
@@ -286,465 +373,543 @@ export default function IdentityStepPage() {
         onClose={() => setIsLivenessModalOpen(false)}
         onComplete={(result) => {
           updateData({ selfieUrl: result.snapshotUrl });
+          setErrors((prev) => {
+            const next = { ...prev };
+            delete next.selfieUrl;
+            return next;
+          });
         }}
       />
 
-      {/* Header Block with Anchored Negative Space */}
-      <div className="mb-10">
-        <h1 className="font-display text-2xl sm:text-3xl text-[#171717] font-normal tracking-tight mb-2">
+      {/* 5-Step Progress Indicator */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between text-xs font-medium text-[#4B5563] mb-2.5">
+          <span className="uppercase tracking-wider text-[11px] font-semibold text-[#065F46]">
+            Step 3 of 5 • Identity Verification
+          </span>
+          <span className="text-[12px] text-[#6B7280]">
+            60% completed
+          </span>
+        </div>
+        <div className="grid grid-cols-5 gap-2" role="progressbar" aria-valuenow={60} aria-valuemin={0} aria-valuemax={100} aria-label="Onboarding Progress">
+          {ONBOARDING_STEPS.map((s) => (
+            <div
+              key={s.step}
+              className={`h-1.5 rounded-full transition-all duration-300 ${
+                s.step <= 3 ? "bg-[#065F46]" : "bg-[#E5E7EB]"
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Page Introduction */}
+      <div className="mb-8 sm:mb-10">
+        <h1 className="font-serif text-[30px] sm:text-[36px] lg:text-[40px] font-normal tracking-tight text-[#111827] leading-[1.15]">
           Verify your identity
         </h1>
-        <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">
-          Select your valid Nigerian identity document, upload clear copies, and complete a real-time biometric check.
+        <p className="mt-2 text-[15px] sm:text-[16px] text-[#4B5563] leading-relaxed max-w-2xl">
+          Select your Nigerian ID, upload clear photos, and complete a quick face verification.
         </p>
       </div>
 
-      {error && (
-        <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-700">
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleContinue} className="space-y-6">
-        {/* 1. Document Selection: The Dropdown Transformation */}
-        <div className="space-y-2" ref={dropdownRef}>
-          <label className="text-[13px] font-semibold text-[#171717] block">
-            Select Identity Document
-          </label>
-
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setIsDropdownOpen((prev) => !prev)}
-              className="w-full min-h-[54px] px-4 py-3 bg-[#FAFAF8] hover:bg-white border border-[#E7E5E0] hover:border-[#D1CEC7] rounded-xl text-left flex items-center justify-between gap-3 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#0B5D45]/15 focus:border-[#0B5D45]"
-              aria-haspopup="listbox"
-              aria-expanded={isDropdownOpen}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-[#0B5D45]/10 text-[#0B5D45] flex items-center justify-center shrink-0">
-                  <SelectedIcon size={17} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <span className="text-[14.5px] font-semibold text-[#171717] block truncate leading-tight">
-                    {selectedDocConfig.label}
-                  </span>
-                  <span className="text-[12px] text-[#8B8B86] block truncate mt-0.5">
-                    {selectedDocConfig.helper}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="w-5 h-5 rounded-full bg-[#EDF5F2] text-[#0B5D45] flex items-center justify-center">
-                  <Check size={12} strokeWidth={3} />
-                </div>
-                <ChevronDown
-                  size={18}
-                  className={`text-[#8B8B86] transition-transform duration-200 ${
-                    isDropdownOpen ? "rotate-180 text-[#171717]" : ""
-                  }`}
-                />
-              </div>
-            </button>
-
-            {/* Rich Dropdown Options Panel */}
-            <AnimatePresence>
-              {isDropdownOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: -6, scale: 0.99 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -6, scale: 0.99 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute top-full mt-2 inset-x-0 bg-white border border-[#E7E5E0] rounded-2xl shadow-xl z-30 p-1.5 space-y-1 overflow-hidden"
-                  role="listbox"
-                >
-                  {ID_CONFIGS.map((doc) => {
-                    const isSelected = doc.id === data.idType;
-                    const Icon = doc.icon;
-
-                    return (
-                      <div
-                        key={doc.id}
-                        onClick={() => handleSelectDocType(doc.id)}
-                        className={`p-3 rounded-xl flex items-center justify-between gap-3 cursor-pointer transition-colors ${
-                          isSelected
-                            ? "bg-[#F4F7F5] text-[#171717]"
-                            : "hover:bg-[#FAFAF8] text-[#171717]"
-                        }`}
-                        role="option"
-                        aria-selected={isSelected}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div
-                            className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                              isSelected
-                                ? "bg-[#0B5D45] text-white"
-                                : "bg-[#F0EFEA] text-[#6B6B67]"
-                            }`}
-                          >
-                            <Icon size={16} />
-                          </div>
-                          <div className="min-w-0">
-                            <span className="text-[13.5px] font-semibold block leading-tight">
-                              {doc.label}
-                            </span>
-                            <span className="text-[12px] text-[#8B8B86] block mt-0.5">
-                              {doc.helper}
-                            </span>
-                          </div>
-                        </div>
-
-                        {isSelected && (
-                          <div className="w-5 h-5 rounded-full bg-[#0B5D45] text-white flex items-center justify-center shrink-0">
-                            <Check size={12} strokeWidth={3} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        </div>
-
-        {/* 2. Refined ID Document Number Input */}
-        <div className="space-y-1">
-          <label className="text-[13px] font-semibold text-[#171717] block">
-            {selectedDocConfig.inputLabel}
-          </label>
-          <input
-            type="text"
-            value={data.idNumber}
-            onChange={(e) => updateData({ idNumber: e.target.value })}
-            placeholder={selectedDocConfig.inputPlaceholder}
-            required
-            className="w-full h-[50px] px-4 bg-[#FAFAF8] focus:bg-white border border-[#E7E5E0] focus:border-[#0B5D45] rounded-xl text-[14.5px] text-[#171717] placeholder:text-[#9E9E9A] focus:ring-2 focus:ring-[#0B5D45]/10 outline-none transition-all font-mono"
-          />
-          <p className="text-[12px] text-[#8B8B86] pt-0.5">
-            {selectedDocConfig.inputHelp}
-          </p>
-        </div>
-
-        {/* 3. Dynamic, Context-Aware Upload Zones */}
-        <div className="space-y-2 pt-1">
-          <div className="flex items-center justify-between">
-            <span className="text-[13px] font-semibold text-[#171717] block">
-              Required Document Upload
-            </span>
-            <span className="text-[11.5px] text-[#8B8B86]">Max 15MB • PDF, JPG, PNG, DOC</span>
-          </div>
-
-          <div
-            className={`grid gap-4 ${
-              selectedDocConfig.hideBackDoc ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"
-            }`}
-          >
-            {/* Front of ID / Passport Data Page Dropzone */}
-            <div className="space-y-1.5">
-              <span className="text-[12px] font-medium text-[#6B6B67] block">
-                {selectedDocConfig.frontLabel}
-              </span>
-              <motion.div
-                whileHover={{ scale: 1.015 }}
-                animate={{
-                  scale: isDraggingFront ? 1.03 : 1,
-                  borderColor: isDraggingFront ? "#0B5D45" : undefined,
-                }}
-                transition={{ duration: 0.15 }}
-                onClick={() => handleTriggerUpload("idFrontUrl")}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setIsDraggingFront(true);
-                }}
-                onDragLeave={() => setIsDraggingFront(false)}
-                onDrop={(e) => handleDrop(e, "idFrontUrl")}
-                className={`h-44 rounded-2xl border transition-all cursor-pointer relative flex flex-col items-center justify-center p-4 text-center overflow-hidden ${
-                  isDraggingFront
-                    ? "border-[#0B5D45] bg-[#0B5D45]/[0.06] ring-2 ring-[#0B5D45]/20"
-                    : data.idFrontUrl
-                    ? "border-[#0B5D45] bg-[#F4F7F5]"
-                    : "border-[#E7E5E0] bg-[#0B5D45]/[0.02] hover:bg-[#0B5D45]/[0.045] hover:border-[#0B5D45]"
-                }`}
-              >
-                {uploadingField === "idFrontUrl" ? (
-                  <div className="flex flex-col items-center justify-center">
-                    <Loader2 size={24} className="animate-spin text-[#0B5D45] mb-2" />
-                    <span className="text-xs text-[#0B5D45] font-medium">Processing &amp; uploading...</span>
-                  </div>
-                ) : data.idFrontUrl ? (
-                  <div className="w-full h-full flex flex-col items-center justify-between">
-                    <div className="relative w-full h-24 rounded-xl overflow-hidden bg-black/5 flex items-center justify-center">
-                      {isDocOrPdf(data.idFrontUrl) ? (
-                        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0B5D45]">
-                          <FileText size={20} />
-                          <span>Document Attached</span>
-                        </div>
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={data.idFrontUrl}
-                          alt="Front of ID"
-                          className="w-full h-full object-cover rounded-xl"
-                        />
-                      )}
-                    </div>
-
-                    <div className="w-full flex items-center justify-between pt-2">
-                      <button
-                        type="button"
-                        onClick={(e) => handleOpenPreview(selectedDocConfig.frontLabel, data.idFrontUrl, e)}
-                        className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1 cursor-pointer"
-                      >
-                        <Eye size={13} />
-                        <span>Preview</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => handleRemoveField("idFrontUrl", e)}
-                        className="text-xs text-[#8B8B86] hover:text-[#171717] underline cursor-pointer"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="w-10 h-10 rounded-xl bg-white border border-[#E7E5E0] text-[#0B5D45] flex items-center justify-center shadow-xs mb-2">
-                      <FileUp size={20} />
-                    </div>
-                    <span className="text-xs font-semibold text-[#171717]">
-                      {selectedDocConfig.frontLabel.replace(" *", "")}
-                    </span>
-                    <span className="text-[11px] text-[#8B8B86] mt-0.5">Click or drag file here</span>
-                  </>
-                )}
-              </motion.div>
+      <form onSubmit={handleContinue} noValidate className="space-y-10">
+        {/* Two-Column Split Workspace */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 xl:gap-14 items-start">
+          
+          {/* ────────────────────────────────────────────────────────── */}
+          {/* Left Column — Identity Details (~42% content width)        */}
+          {/* ────────────────────────────────────────────────────────── */}
+          <div className="lg:col-span-5 space-y-6">
+            <div className="pb-2.5 border-b border-[#E5E7EB]">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-[#111827]">
+                Identity Details
+              </h2>
             </div>
 
-            {/* Back of ID Dropzone (Only shown if document requires back page) */}
-            {!selectedDocConfig.hideBackDoc && (
-              <div className="space-y-1.5">
-                <span className="text-[12px] font-medium text-[#6B6B67] block">
-                  {selectedDocConfig.backLabel || "Upload Back of ID"}
-                </span>
-                <motion.div
-                  whileHover={{ scale: 1.015 }}
-                  animate={{
-                    scale: isDraggingBack ? 1.03 : 1,
-                    borderColor: isDraggingBack ? "#0B5D45" : undefined,
+            {/* 1. Identity Document Selector */}
+            <div>
+              <label htmlFor="idTypeSelect" className="block text-xs font-semibold text-[#111827] mb-1.5">
+                Document Type <span className="text-[#065F46]">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  id="idTypeSelect"
+                  value={data.idType || "nin"}
+                  onChange={(e) => handleSelectDocType(e.target.value as IdDocConfig["id"])}
+                  className="w-full h-11 px-3.5 pr-10 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-sm text-[#111827] font-medium focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 outline-none appearance-none cursor-pointer transition-colors duration-150"
+                >
+                  {ID_CONFIGS.map((doc) => (
+                    <option key={doc.id} value={doc.id}>
+                      {doc.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={16}
+                  className="text-[#6B7280] pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2"
+                />
+              </div>
+              <p className="mt-1.5 text-[12px] text-[#6B7280] leading-relaxed">
+                {selectedDocConfig.helper}
+              </p>
+            </div>
+
+            {/* 2. Document Identification Number */}
+            <div>
+              <label htmlFor="idNumber" className="block text-xs font-semibold text-[#111827] mb-1.5">
+                {selectedDocConfig.inputLabel} <span className="text-[#065F46]">*</span>
+              </label>
+              <input
+                id="idNumber"
+                type="text"
+                value={data.idNumber || ""}
+                onChange={(e) => {
+                  updateData({ idNumber: e.target.value });
+                  if (errors.idNumber) validateField("idNumber");
+                }}
+                onBlur={() => handleBlur("idNumber")}
+                placeholder={selectedDocConfig.inputPlaceholder}
+                aria-required="true"
+                aria-invalid={Boolean(touched.idNumber && errors.idNumber)}
+                aria-describedby={touched.idNumber && errors.idNumber ? "idNumber-error" : "idNumber-helper"}
+                className={`w-full h-11 px-3.5 rounded-lg border text-sm bg-white outline-none font-mono tracking-wider transition-colors duration-150 ${
+                  touched.idNumber && errors.idNumber
+                    ? "border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15 text-rose-900"
+                    : "border-[#D1D5DB] text-[#111827] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15"
+                }`}
+              />
+              {touched.idNumber && errors.idNumber ? (
+                <p id="idNumber-error" role="alert" className="mt-1.5 text-xs text-rose-600 font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <AlertCircle size={13} className="shrink-0" />
+                  <span>{errors.idNumber}</span>
+                </p>
+              ) : (
+                <p id="idNumber-helper" className="mt-1.5 text-[12px] text-[#6B7280] leading-relaxed">
+                  {selectedDocConfig.inputHelp}
+                </p>
+              )}
+            </div>
+
+            {/* Helpful Guidance & Security Commitment */}
+            <div className="pt-4 border-t border-[#E5E7EB]/70">
+              <div className="p-3.5 rounded-lg bg-[#FAFAF8] border border-[#E5E7EB] flex items-start gap-2.5">
+                <ShieldCheck size={18} className="text-[#065F46] shrink-0 mt-0.5" />
+                <p className="text-[12px] text-[#4B5563] leading-relaxed">
+                  We use your ID to verify your identity before you host. Your details are kept private and secure.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* ────────────────────────────────────────────────────────── */}
+          {/* Right Column — Documents & Biometrics (~58% content width) */}
+          {/* ────────────────────────────────────────────────────────── */}
+          <div className="lg:col-span-7 space-y-6">
+            <div className="pb-2.5 border-b border-[#E5E7EB] flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-[#111827]">
+                ID photos &amp; face check
+              </h2>
+              <span className="text-[11px] text-[#6B7280] font-normal">
+                Max 15MB • PDF, JPG, PNG
+              </span>
+            </div>
+
+            {/* A. Document Uploads (Side by side on desktop) */}
+            <div className={`grid gap-4 ${selectedDocConfig.hideBackDoc ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
+              {/* Front ID Dropzone */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-[#111827]">
+                    {selectedDocConfig.frontLabel} <span className="text-[#065F46]">*</span>
+                  </span>
+                  {data.idFrontUrl && (
+                    <span className="text-[11px] font-medium text-[#065F46] flex items-center gap-1">
+                      <Check size={12} strokeWidth={2.5} /> Attached
+                    </span>
+                  )}
+                </div>
+
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleTriggerUpload("idFrontUrl")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleTriggerUpload("idFrontUrl");
+                    }
                   }}
-                  transition={{ duration: 0.15 }}
-                  onClick={() => handleTriggerUpload("idBackUrl")}
                   onDragOver={(e) => {
                     e.preventDefault();
-                    setIsDraggingBack(true);
+                    setIsDraggingFront(true);
                   }}
-                  onDragLeave={() => setIsDraggingBack(false)}
-                  onDrop={(e) => handleDrop(e, "idBackUrl")}
-                  className={`h-44 rounded-2xl border transition-all cursor-pointer relative flex flex-col items-center justify-center p-4 text-center overflow-hidden ${
-                    isDraggingBack
-                      ? "border-[#0B5D45] bg-[#0B5D45]/[0.06] ring-2 ring-[#0B5D45]/20"
-                      : data.idBackUrl
-                      ? "border-[#0B5D45] bg-[#F4F7F5]"
-                      : "border-[#E7E5E0] bg-[#0B5D45]/[0.02] hover:bg-[#0B5D45]/[0.045] hover:border-[#0B5D45]"
+                  onDragLeave={(e) => {
+                    e.preventDefault();
+                    setIsDraggingFront(false);
+                  }}
+                  onDrop={(e) => handleDrop(e, "idFrontUrl")}
+                  className={`h-44 rounded-xl border-2 border-dashed relative flex flex-col items-center justify-center p-3 text-center transition-all duration-150 cursor-pointer overflow-hidden ${
+                    touched.idFrontUrl && errors.idFrontUrl
+                      ? "border-rose-400 bg-rose-50/20"
+                      : isDraggingFront
+                      ? "border-[#065F46] bg-[#F4F7F5]"
+                      : data.idFrontUrl
+                      ? "border-[#065F46]/35 bg-[#FAFAF8]"
+                      : "border-[#D1D5DB] bg-white hover:border-[#9CA3AF] hover:bg-[#FAFAF8]"
                   }`}
                 >
-                  {uploadingField === "idBackUrl" ? (
+                  {uploadingField === "idFrontUrl" ? (
                     <div className="flex flex-col items-center justify-center">
-                      <Loader2 size={24} className="animate-spin text-[#0B5D45] mb-2" />
-                      <span className="text-xs text-[#0B5D45] font-medium">Processing &amp; uploading...</span>
+                      <Loader2 size={22} className="animate-spin text-[#065F46] mb-2" />
+                      <span className="text-xs text-[#065F46] font-medium">Processing &amp; uploading...</span>
                     </div>
-                  ) : data.idBackUrl ? (
-                    <div className="w-full h-full flex flex-col items-center justify-between">
-                      <div className="relative w-full h-24 rounded-xl overflow-hidden bg-black/5 flex items-center justify-center">
-                        {isDocOrPdf(data.idBackUrl) ? (
-                          <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0B5D45]">
-                            <FileText size={20} />
-                            <span>Document Attached</span>
+                  ) : data.idFrontUrl ? (
+                    <div className="w-full h-full flex flex-col items-center justify-between p-1">
+                      <div className="relative w-full h-26 rounded-lg overflow-hidden bg-black/5 flex items-center justify-center">
+                        {isDocOrPdf(data.idFrontUrl) ? (
+                          <div className="flex flex-col items-center justify-center p-2 text-center">
+                            <FileText size={24} className="text-[#065F46] mb-1" />
+                            <span className="text-xs font-semibold text-[#111827]">Document Attached</span>
+                            <span className="text-[10px] text-[#6B7280]">PDF / Word Format</span>
                           </div>
                         ) : (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={data.idBackUrl}
-                            alt="Back of ID"
-                            className="w-full h-full object-cover rounded-xl"
+                            src={data.idFrontUrl}
+                            alt="Front of ID"
+                            className="w-full h-full object-cover rounded-lg"
                           />
                         )}
                       </div>
 
-                      <div className="w-full flex items-center justify-between pt-2">
+                      <div className="w-full flex items-center justify-between pt-1.5 px-0.5 border-t border-[#E5E7EB]/60">
                         <button
                           type="button"
-                          onClick={(e) => handleOpenPreview("Back of ID", data.idBackUrl, e)}
-                          className="text-xs font-semibold text-[#0B5D45] hover:underline flex items-center gap-1 cursor-pointer"
+                          onClick={(e) => handleOpenPreview(selectedDocConfig.frontLabel, data.idFrontUrl, e)}
+                          className="text-xs font-medium text-[#065F46] hover:underline flex items-center gap-1 cursor-pointer transition-colors"
                         >
-                          <Eye size={13} />
+                          <Eye size={12} />
                           <span>Preview</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleRemoveField("idBackUrl", e)}
-                          className="text-xs text-[#8B8B86] hover:text-[#171717] underline cursor-pointer"
-                        >
-                          Remove
-                        </button>
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTriggerUpload("idFrontUrl");
+                            }}
+                            className="text-xs font-medium text-[#4B5563] hover:text-[#111827] flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <RotateCw size={11} />
+                            <span>Replace</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleRemoveField("idFrontUrl", e)}
+                            className="text-xs font-medium text-rose-600 hover:text-rose-700 flex items-center gap-0.5 cursor-pointer transition-colors"
+                          >
+                            <Trash2 size={11} />
+                            <span>Remove</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ) : (
                     <>
-                      <div className="w-10 h-10 rounded-xl bg-white border border-[#E7E5E0] text-[#0B5D45] flex items-center justify-center shadow-xs mb-2">
-                        <FileUp size={20} />
-                      </div>
-                      <span className="text-xs font-semibold text-[#171717]">
-                        {selectedDocConfig.backLabel}
-                      </span>
-                      <span className="text-[11px] text-[#8B8B86] mt-0.5">Click or drag file here</span>
+                      <FileUp size={22} className="text-[#4B5563] mb-1.5" />
+                      <span className="text-xs font-semibold text-[#111827]">Upload Front Photo</span>
+                      <span className="text-[11px] text-[#6B7280] mt-0.5">Click to browse or drag and drop</span>
                     </>
                   )}
-                </motion.div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 4. Restructured Biometric Liveness Verification State */}
-        <div className="pt-2">
-          {data.selfieUrl ? (
-            /* Flattened "Verified" Profile Card without nested bounding boxes */
-            <div className="rounded-2xl bg-[#EDF5F2] border border-[#0B5D45]/20 p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-4 min-w-0">
-                <div className="relative shrink-0">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={data.selfieUrl}
-                    alt="Verified Selfie"
-                    className="w-14 h-14 rounded-full object-cover ring-2 ring-[#0B5D45] ring-offset-2"
-                  />
-                  <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#0B5D45] text-white flex items-center justify-center shadow-xs">
-                    <Check size={11} strokeWidth={3} />
-                  </div>
                 </div>
 
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-[14.5px] font-semibold text-[#171717] leading-tight">
-                      Liveness Proof Confirmed
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full bg-[#0B5D45] text-white text-[10px] font-bold">
-                      Verified
-                    </span>
-                  </div>
-                  <p className="text-[12px] text-[#6B6B67] mt-1">
-                    Captured via encrypted real-time biometric sensor
+                {touched.idFrontUrl && errors.idFrontUrl && (
+                  <p role="alert" className="mt-1.5 text-xs text-rose-600 font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                    <AlertCircle size={13} className="shrink-0" />
+                    <span>{errors.idFrontUrl}</span>
                   </p>
-                </div>
+                )}
               </div>
 
-              <div className="flex items-center gap-3 w-full sm:w-auto justify-end shrink-0">
-                <button
-                  type="button"
-                  onClick={(e) => handleOpenPreview("Headshot Selfie", data.selfieUrl, e)}
-                  className="px-3 py-1.5 rounded-lg border border-[#0B5D45]/20 bg-white hover:bg-[#FAFAF8] text-xs font-semibold text-[#0B5D45] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                >
-                  <Eye size={13} />
-                  <span>Preview</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsLivenessModalOpen(true)}
-                  className="px-3 py-1.5 rounded-lg border border-[#0B5D45]/20 bg-white hover:bg-[#FAFAF8] text-xs font-semibold text-[#171717] hover:text-[#0B5D45] flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                >
-                  <RotateCw size={13} />
-                  <span>Re-scan</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveField("selfieUrl")}
-                  className="text-xs font-medium text-[#6B6B67] hover:text-[#171717] underline cursor-pointer"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          ) : (
-            /* Unverified Initial CTA State */
-            <div className="p-5 sm:p-6 rounded-2xl border border-[#E7E5E0] bg-[#FAFAF8] space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-[#0B5D45]/10 text-[#0B5D45] flex items-center justify-center shrink-0">
-                  <ScanFace size={22} />
-                </div>
+              {/* Back ID Dropzone (Optional) */}
+              {!selectedDocConfig.hideBackDoc && (
                 <div>
-                  <h3 className="text-[14.5px] font-semibold text-[#171717]">
-                    Biometric Liveness Verification
-                  </h3>
-                  <p className="text-[12px] text-[#6B6B67]">
-                    Real-time facial liveness check to verify identity and activate host rights
-                  </p>
-                </div>
-              </div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-semibold text-[#111827]">
+                      {selectedDocConfig.backLabel || "Back of ID"} <span className="text-[#6B7280] font-normal">(Optional)</span>
+                    </span>
+                    {data.idBackUrl && (
+                      <span className="text-[11px] font-medium text-[#065F46] flex items-center gap-1">
+                        <Check size={12} strokeWidth={2.5} /> Attached
+                      </span>
+                    )}
+                  </div>
 
-              {uploadingField === "selfieUrl" ? (
-                <div className="h-28 rounded-xl border border-[#E7E5E0] bg-white flex flex-col items-center justify-center p-4 text-center">
-                  <Loader2 size={24} className="animate-spin text-[#0B5D45] mb-2" />
-                  <span className="text-xs text-[#0B5D45] font-medium">Encrypting &amp; securing selfie...</span>
-                </div>
-              ) : (
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsLivenessModalOpen(true)}
-                    className="flex-1 h-[48px] px-5 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[13.5px] font-semibold flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleTriggerUpload("idBackUrl")}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleTriggerUpload("idBackUrl");
+                      }
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDraggingBack(true);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      setIsDraggingBack(false);
+                    }}
+                    onDrop={(e) => handleDrop(e, "idBackUrl")}
+                    className={`h-44 rounded-xl border-2 border-dashed relative flex flex-col items-center justify-center p-3 text-center transition-all duration-150 cursor-pointer overflow-hidden ${
+                      isDraggingBack
+                        ? "border-[#065F46] bg-[#F4F7F5]"
+                        : data.idBackUrl
+                        ? "border-[#065F46]/35 bg-[#FAFAF8]"
+                        : "border-[#D1D5DB] bg-white hover:border-[#9CA3AF] hover:bg-[#FAFAF8]"
+                    }`}
                   >
-                    <ScanFace size={16} />
-                    <span>Start Liveness Scan (Biometric)</span>
-                  </button>
+                    {uploadingField === "idBackUrl" ? (
+                      <div className="flex flex-col items-center justify-center">
+                        <Loader2 size={22} className="animate-spin text-[#065F46] mb-2" />
+                        <span className="text-xs text-[#065F46] font-medium">Processing &amp; uploading...</span>
+                      </div>
+                    ) : data.idBackUrl ? (
+                      <div className="w-full h-full flex flex-col items-center justify-between p-1">
+                        <div className="relative w-full h-26 rounded-lg overflow-hidden bg-black/5 flex items-center justify-center">
+                          {isDocOrPdf(data.idBackUrl) ? (
+                            <div className="flex flex-col items-center justify-center p-2 text-center">
+                              <FileText size={24} className="text-[#065F46] mb-1" />
+                              <span className="text-xs font-semibold text-[#111827]">Document Attached</span>
+                              <span className="text-[10px] text-[#6B7280]">PDF / Word Format</span>
+                            </div>
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={data.idBackUrl}
+                              alt="Back of ID"
+                              className="w-full h-full object-cover rounded-lg"
+                            />
+                          )}
+                        </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleTriggerUpload("selfieUrl")}
-                    className="h-[48px] px-5 rounded-xl border border-[#E7E5E0] bg-white hover:bg-[#FAFAF8] text-[13px] font-medium text-[#6B6B67] hover:text-[#171717] flex items-center justify-center gap-2 transition-all cursor-pointer"
-                  >
-                    <Camera size={15} />
-                    <span>Upload Photo Instead</span>
-                  </button>
+                        <div className="w-full flex items-center justify-between pt-1.5 px-0.5 border-t border-[#E5E7EB]/60">
+                          <button
+                            type="button"
+                            onClick={(e) => handleOpenPreview(selectedDocConfig.backLabel || "Back of ID", data.idBackUrl, e)}
+                            className="text-xs font-medium text-[#065F46] hover:underline flex items-center gap-1 cursor-pointer transition-colors"
+                          >
+                            <Eye size={12} />
+                            <span>Preview</span>
+                          </button>
+                          <div className="flex items-center gap-2.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleTriggerUpload("idBackUrl");
+                              }}
+                              className="text-xs font-medium text-[#4B5563] hover:text-[#111827] flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <RotateCw size={11} />
+                              <span>Replace</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleRemoveField("idBackUrl", e)}
+                              className="text-xs font-medium text-rose-600 hover:text-rose-700 flex items-center gap-0.5 cursor-pointer transition-colors"
+                            >
+                              <Trash2 size={11} />
+                              <span>Remove</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <FileUp size={22} className="text-[#4B5563] mb-1.5" />
+                        <span className="text-xs font-semibold text-[#111827]">Upload Back Photo</span>
+                        <span className="text-[11px] text-[#6B7280] mt-0.5">Optional for NIN slip / Voter Card</span>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
-          )}
+
+            {/* B. Biometric Liveness Verification (Directly beneath uploads) */}
+            <div className="pt-2">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-[#111827]">
+                  Face verification <span className="text-[#065F46]">*</span>
+                </span>
+                {data.selfieUrl ? (
+                  <span className="px-2 py-0.5 rounded-full bg-[#EDF5F2] text-[#065F46] border border-[#065F46]/20 text-[11px] font-semibold flex items-center gap-1">
+                    <Check size={12} strokeWidth={2.5} /> Verified
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full bg-stone-100 text-[#6B7280] text-[11px] font-medium">
+                    Pending
+                  </span>
+                )}
+              </div>
+
+              {data.selfieUrl ? (
+                /* Verified Biometric Panel */
+                <div className="rounded-xl bg-[#F4F7F5] border border-[#065F46]/25 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <div className="relative shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={data.selfieUrl}
+                        alt="Verified Photo"
+                        className="w-12 h-12 rounded-full object-cover ring-2 ring-[#065F46] ring-offset-2"
+                      />
+                      <div className="absolute -bottom-1 -right-1 w-4.5 h-4.5 rounded-full bg-[#065F46] text-white flex items-center justify-center shadow-xs">
+                        <Check size={10} strokeWidth={3} />
+                      </div>
+                    </div>
+
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-[#111827]">
+                          Face verified
+                        </h3>
+                      </div>
+                      <p className="text-xs text-[#4B5563] mt-0.5">
+                        Your face scan was successful and matches your details.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+                    <button
+                      type="button"
+                      onClick={(e) => handleOpenPreview("Verification Photo", data.selfieUrl, e)}
+                      className="h-9 px-3 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-xs font-medium text-[#065F46] flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Eye size={12} />
+                      <span>Preview</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsLivenessModalOpen(true)}
+                      className="h-9 px-3 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-xs font-medium text-[#111827] flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <RotateCw size={12} />
+                      <span>Rescan</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleRemoveField("selfieUrl", e)}
+                      className="h-9 px-2.5 rounded-lg border border-transparent hover:border-rose-200 text-xs font-medium text-rose-600 hover:bg-rose-50 active:scale-[0.99] flex items-center gap-1 transition-all cursor-pointer"
+                      title="Remove verified selfie"
+                    >
+                      <Trash2 size={12} />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Unverified / Pending Biometric Panel */
+                <div
+                  className={`p-4 sm:p-5 rounded-xl border space-y-3.5 transition-all ${
+                    touched.selfieUrl && errors.selfieUrl ? "border-rose-400 bg-rose-50/10" : "border-[#D1D5DB] bg-white"
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-[#EDF5F2] text-[#065F46] flex items-center justify-center shrink-0 mt-0.5">
+                      <ScanFace size={19} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-[#111827]">
+                        Face verification
+                      </h3>
+                      <p className="text-xs text-[#4B5563] mt-0.5 leading-relaxed">
+                        Take a quick face scan using your camera to confirm you match your ID.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsLivenessModalOpen(true)}
+                      className="flex-1 h-11 px-4 rounded-lg bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white text-xs sm:text-sm font-medium flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                    >
+                      <ScanFace size={16} />
+                      <span>Start face verification</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleTriggerUpload("selfieUrl")}
+                      className="h-11 px-3.5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-xs sm:text-sm font-medium text-[#4B5563] hover:text-[#111827] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      title="Upload headshot if camera is not available"
+                    >
+                      <Camera size={15} />
+                      <span>Upload a photo instead</span>
+                    </button>
+                  </div>
+
+                  {touched.selfieUrl && errors.selfieUrl && (
+                    <p role="alert" className="mt-1 text-xs text-rose-600 font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                      <AlertCircle size={13} className="shrink-0" />
+                      <span>{errors.selfieUrl}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* 5. Sticky Footer Action Bar: Consolidated & Visually Balanced */}
-        <div className="sticky -bottom-6 sm:-bottom-10 bg-white/95 backdrop-blur-md border-t border-[#E7E5E0] py-4 px-6 sm:px-10 mt-10 -mx-6 sm:-mx-10 -mb-6 sm:-mb-10 rounded-b-2xl sm:rounded-b-3xl flex flex-col sm:flex-row items-center justify-between gap-4 z-20">
-          {/* Secondary Actions (Grouped on Left without borders) */}
-          <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto justify-between sm:justify-start">
-            <Link
-              href="/host/onboarding/profile"
-              className="inline-flex items-center gap-1.5 text-[13.5px] font-medium text-[#6B6B67] hover:text-[#171717] transition-colors"
-            >
-              <ArrowLeft size={16} />
-              <span>Back to Profile</span>
-            </Link>
-
-            <Link
-              href="/host/dashboard"
-              className="text-[13.5px] font-medium text-[#8B8B86] hover:text-[#171717] transition-colors"
-            >
-              Skip to Dashboard
-            </Link>
-          </div>
-
-          {/* Primary Action (Strictly on Right with Soft Glowing Brand Shadow) */}
-          <button
-            type="submit"
-            disabled={isNavigating}
-            className="group w-full sm:w-auto h-[50px] px-7 rounded-xl bg-[#0B5D45] hover:bg-[#084936] text-white text-[14.5px] font-medium flex items-center justify-center gap-2 transition-all cursor-pointer shadow-[0_4px_16px_rgba(11,93,69,0.28)] hover:shadow-[0_6px_22px_rgba(11,93,69,0.38)] disabled:opacity-50"
+        {/* ────────────────────────────────────────────────────────── */}
+        {/* Navigation Action Hierarchy                                */}
+        {/* ────────────────────────────────────────────────────────── */}
+        <div className="pt-6 border-t border-[#E5E7EB] flex flex-col-reverse sm:flex-row items-center justify-between gap-3">
+          <Link
+            href="/host/onboarding/profile"
+            className="w-full sm:w-auto h-11 px-5 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white hover:bg-stone-50 active:scale-[0.99] text-sm font-medium text-[#4B5563] hover:text-[#111827] transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
-            <span>Continue to Authority &amp; Payout</span>
-            <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
-          </button>
+            <ArrowLeft size={16} />
+            <span>Back to host details</span>
+          </Link>
+
+          <div className="flex flex-col-reverse sm:flex-row items-center gap-3 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={handleSkipToDashboard}
+              disabled={isSavingDraft || isNavigating}
+              className="w-full sm:w-auto h-11 px-4 rounded-lg text-sm font-medium text-[#4B5563] hover:text-[#111827] hover:bg-stone-100 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+            >
+              {isSavingDraft ? "Saving..." : "Skip for now"}
+            </button>
+
+            <button
+              type="submit"
+              disabled={isNavigating || isSavingDraft}
+              className="w-full sm:w-auto h-11 px-7 rounded-lg bg-[#065F46] hover:bg-[#044E39] active:scale-[0.99] text-white text-sm font-medium flex items-center justify-center gap-2 transition-all shadow-xs hover:shadow cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+            >
+              {isNavigating ? (
+                <>
+                  <Loader2 size={16} className="animate-spin text-white" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <span>Continue to property &amp; payout</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </form>
-    </div>
+    </StepMotion>
   );
 }

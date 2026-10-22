@@ -112,7 +112,7 @@ export default function LocationAutocomplete({
   return (
     <div className={`relative ${className}`} ref={containerRef}>
       <div className="relative flex items-center">
-        <MapPin size={18} className="absolute left-3.5 text-[#0B5D45] pointer-events-none" />
+        <MapPin size={18} className="absolute left-3.5 text-[#065F46] pointer-events-none" />
         <input
           type="text"
           value={query}
@@ -122,7 +122,7 @@ export default function LocationAutocomplete({
           }}
           placeholder={placeholder}
           required={required}
-          className={`w-full pl-10 pr-10 py-3 rounded-xl border border-[#E7E5E0] bg-white text-[#171717] placeholder-[#8B8B86] text-[15px] focus:outline-none focus:ring-2 focus:ring-[#0B5D45] focus:border-transparent transition-all ${inputClassName}`}
+          className={`w-full pl-10 pr-10 py-3 rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#171717] placeholder-[#9CA3AF] text-[15px] focus:outline-none focus:ring-2 focus:ring-[#065F46]/15 focus:border-[#065F46] transition-all ${inputClassName}`}
         />
         {isLoading ? (
           <Loader2 size={16} className="absolute right-3.5 text-[#8B8B86] animate-spin" />
@@ -142,7 +142,7 @@ export default function LocationAutocomplete({
         <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-[#E7E5E0] rounded-xl shadow-xl max-h-72 overflow-y-auto z-50 divide-y divide-[#F2F0EB]">
           {isLoading && suggestions.length === 0 ? (
             <div className="p-4 text-center text-sm text-[#8B8B86] flex items-center justify-center gap-2">
-              <Loader2 size={16} className="animate-spin text-[#0B5D45]" />
+              <Loader2 size={16} className="animate-spin text-[#065F46]" />
               <span>Searching real places across Nigeria...</span>
             </div>
           ) : suggestions.length > 0 ? (
@@ -151,13 +151,13 @@ export default function LocationAutocomplete({
                 key={`${loc.latitude}-${loc.longitude}-${idx}`}
                 type="button"
                 onClick={() => handleSelect(loc)}
-                className="w-full text-left p-3.5 hover:bg-[#F7F6F2] transition-colors flex items-start gap-3 group"
+                className="w-full text-left p-3.5 hover:bg-[#F7F6F2] transition-colors flex items-start gap-3 group cursor-pointer"
               >
-                <div className="mt-0.5 w-6 h-6 rounded-md bg-[#EDF3F0] text-[#0B5D45] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+                <div className="mt-0.5 w-6 h-6 rounded-md bg-[#EDF3F0] text-[#065F46] flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
                   <MapPin size={14} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-semibold text-[#171717] truncate group-hover:text-[#0B5D45] transition-colors">
+                  <p className="text-[14px] font-semibold text-[#171717] truncate group-hover:text-[#065F46] transition-colors">
                     {loc.name || loc.neighborhood || loc.city}
                   </p>
                   <p className="text-[12px] text-[#6B6B67] truncate mt-0.5">

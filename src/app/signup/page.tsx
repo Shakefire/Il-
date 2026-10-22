@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense, useRef, useEffect } from "react";
+import { useState, Suspense, useRef } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthLayout from "@/components/auth/AuthLayout";
@@ -11,13 +11,13 @@ import PrimaryButton from "@/components/auth/PrimaryButton";
 import FormAlert from "@/components/auth/FormAlert";
 import { useAuth } from "@/context/AuthContext";
 import { authApi } from "@/lib/auth";
-import { Mail, CheckCircle2, RotateCw } from "lucide-react";
+import { RotateCw, LogOut, ArrowRight } from "lucide-react";
 
 function SignupForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = searchParams.get("next") || "/host/onboarding";
-  const { user, refreshUser } = useAuth();
+  const { user, refreshUser, logout } = useAuth();
 
   // Phase: "register" | "verify"
   const [phase, setPhase] = useState<"register" | "verify">("register");
@@ -44,16 +44,6 @@ function SignupForm() {
     password?: string;
     otp?: string;
   }>({});
-
-  // Auto-redirect if already logged in and verified
-  useEffect(() => {
-    if (user && user.emailVerified) {
-      router.push("/host/onboarding");
-    } else if (user && !user.emailVerified) {
-      setEmail(user.email);
-      setPhase("verify");
-    }
-  }, [user, router]);
 
   // Handle OTP digit changes
   const handleOtpChange = (index: number, value: string) => {
@@ -121,7 +111,8 @@ function SignupForm() {
         password,
       });
 
-      await refreshUser();
+      // Successfully registered unverified account; OTP has been dispatched.
+      // Transition to verification phase without establishing session until OTP succeeds.
       setPhase("verify");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unable to create partner account. Please try again.";
@@ -143,9 +134,9 @@ function SignupForm() {
 
     setIsLoading(true);
     try {
-      await authApi.verifyEmail(fullCode);
+      await authApi.verifyEmail(fullCode, email.trim().toLowerCase());
       await refreshUser();
-      router.push("/host/onboarding/business-type");
+      router.push(nextUrl || "/host/onboarding/business-type");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Verification code incorrect or expired.";
       setErrorMessage(msg);
@@ -159,7 +150,7 @@ function SignupForm() {
     setResendSuccess(false);
     setErrorMessage(null);
     try {
-      await authApi.resendEmailOtp();
+      await authApi.resendEmailOtp(email.trim().toLowerCase());
       setResendSuccess(true);
       setTimeout(() => setResendSuccess(false), 5000);
     } catch (err: unknown) {
@@ -208,13 +199,15 @@ function SignupForm() {
                     onChange={(e) => handleOtpChange(idx, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(idx, e)}
                     disabled={isLoading}
-                    className="w-12 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-bold rounded-xl border border-[#E7E5E0] bg-white text-[#171717] focus:outline-none focus:border-[#0B5D45] focus:ring-2 focus:ring-[#0B5D45]/10 transition-all shadow-xs"
+                    className="w-12 h-14 sm:w-14 sm:h-16 text-center text-xl sm:text-2xl font-bold rounded-xl border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-[#111827] focus:outline-none focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 transition-colors duration-150 shadow-xs"
                   />
                 ))}
               </div>
 
               {fieldErrors.otp && (
-                <p className="text-[12.5px] text-[#DC2626] font-medium mt-2">{fieldErrors.otp}</p>
+                <p className="text-[12.5px] text-rose-600 font-medium mt-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                  {fieldErrors.otp}
+                </p>
               )}
             </div>
 
@@ -233,7 +226,7 @@ function SignupForm() {
                 type="button"
                 onClick={handleResendOtp}
                 disabled={resending || isLoading}
-                className="font-semibold text-[#0B5D45] hover:underline inline-flex items-center gap-1 disabled:opacity-50"
+                className="font-semibold text-[#065F46] hover:text-[#044E39] hover:underline inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer transition-colors"
               >
                 {resending ? (
                   <>
@@ -247,13 +240,13 @@ function SignupForm() {
             </div>
 
             <div className="pt-3 border-t border-[#E7E5E0]">
-              <Link
-                href="/host/dashboard"
-                className="text-[13px] font-medium text-[#6B6B67] hover:text-[#171717] hover:underline inline-flex items-center gap-1"
+              <button
+                type="button"
+                onClick={() => setPhase("register")}
+                className="text-[13px] font-medium text-[#6B6B67] hover:text-[#171717] hover:underline cursor-pointer"
               >
-                <span>Skip to Host Dashboard</span>
-                <span>→</span>
-              </Link>
+                ← Back to registration details
+              </button>
             </div>
           </div>
         </div>
@@ -266,13 +259,42 @@ function SignupForm() {
     <AuthLayout
       heading="Become an Ilé Property Partner"
       supportingText="Create your account to start listing your property on Ilé."
-      imageAlt="Earthy minimalist Nigerian interior with natural light"
+      imageAlt="Curated Ilé Living Exhibition"
+      imageSrc="/images/auth-partner-showcase.png"
     >
-      <div className="space-y-6">
+      <div className="space-y-4">
+        {/* Active Session Notification (if user already logged in) */}
+        {user && (
+          <div className="p-3.5 rounded-xl bg-[#F0FDF4] border border-[#BBF7D0] flex flex-col gap-2">
+            <div className="text-[13px] text-[#166534]">
+              You are currently signed in as <span className="font-semibold">{user.email}</span>.
+            </div>
+            <div className="flex items-center gap-4 text-[12.5px]">
+              <Link
+                href={nextUrl || "/host/onboarding"}
+                className="font-semibold text-[#065F46] hover:text-[#044E39] inline-flex items-center gap-1 hover:underline"
+              >
+                <span>Continue to Host Workspace</span>
+                <ArrowRight size={13} />
+              </Link>
+              <button
+                type="button"
+                onClick={async () => {
+                  await logout();
+                }}
+                className="text-[#4B5563] hover:text-[#111827] inline-flex items-center gap-1 hover:underline cursor-pointer"
+              >
+                <LogOut size={12} />
+                <span>Sign out to create new account</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {errorMessage && <FormAlert type="error" message={errorMessage} />}
 
         <form onSubmit={handleRegisterSubmit} className="space-y-4" noValidate>
-          {/* Name Fields (Side by Side) */}
+          {/* Name Fields (Side by Side in 2-column inline grid) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
             <AuthInput
               label="First Name"
@@ -305,7 +327,7 @@ function SignupForm() {
             />
           </div>
 
-          {/* Email */}
+          {/* Email Address */}
           <AuthInput
             label="Email Address"
             type="email"
@@ -321,7 +343,7 @@ function SignupForm() {
             required
           />
 
-          {/* Password */}
+          {/* Password with Eye Toggle Mechanism */}
           <div>
             <PasswordInput
               label="Password"
@@ -339,32 +361,33 @@ function SignupForm() {
             {password && <PasswordStrength password={password} />}
           </div>
 
-          <div className="text-[12px] text-[#8B8B86] leading-relaxed pt-1">
+          {/* Clean disclaimer matching corporate terms guidelines */}
+          <div className="text-[12px] text-[#4B5563] leading-relaxed pt-0.5">
             By creating an account, you agree to Ilé&apos;s{" "}
-            <Link href="/terms" className="underline hover:text-[#171717]">
+            <Link href="/terms" className="underline underline-offset-2 hover:text-[#111827]">
               Partner Terms
             </Link>{" "}
             and{" "}
-            <Link href="/privacy" className="underline hover:text-[#171717]">
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-[#111827]">
               Privacy Policy
             </Link>
             .
           </div>
 
-          {/* Primary Submit Button */}
-          <div className="pt-2">
+          {/* Primary CTA Submit Button */}
+          <div className="pt-1">
             <PrimaryButton type="submit" isLoading={isLoading} loadingText="Creating account...">
               Create account →
             </PrimaryButton>
           </div>
         </form>
 
-        {/* Bottom Switcher */}
-        <div className="pt-2 text-center text-[14px] text-[#6B6B67]">
+        {/* Alternative Route: Subtle Bottom Redirect */}
+        <div className="pt-2 text-center text-[13px] text-[#4B5563]">
           Already have an account?{" "}
           <Link
             href="/login"
-            className="font-semibold text-[#171717] hover:text-[#0B5D45] hover:underline transition-colors"
+            className="font-bold text-[#111827] hover:text-[#1C3D32] transition-colors"
           >
             Log in
           </Link>

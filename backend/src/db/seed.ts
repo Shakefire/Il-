@@ -111,6 +111,10 @@ const TABLE_STATEMENTS = [
       parking_description TEXT,
       cover_image TEXT NOT NULL,
       status VARCHAR(30) NOT NULL DEFAULT 'PENDING_REVIEW',
+      moderation_status VARCHAR(30) NOT NULL DEFAULT 'NONE',
+      moderation_reason TEXT,
+      moderated_at TIMESTAMPTZ,
+      moderated_by VARCHAR(100),
       rejection_reason TEXT,
       rating DOUBLE PRECISION NOT NULL DEFAULT 5.0,
       review_count INT NOT NULL DEFAULT 0,
@@ -187,6 +191,9 @@ const TABLE_STATEMENTS = [
       total_amount INT NOT NULL,
       currency VARCHAR(10) NOT NULL DEFAULT 'NGN',
       status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+      host_arrival_reminder_sent_at TIMESTAMPTZ,
+      cancellation_reason VARCHAR(255),
+      cancelled_at TIMESTAMPTZ,
       access_token VARCHAR(64) NOT NULL UNIQUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -262,6 +269,92 @@ const TABLE_STATEMENTS = [
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `,
+  sql`
+    CREATE TABLE IF NOT EXISTS platform_settings (
+      id VARCHAR(50) PRIMARY KEY,
+      default_host_commission_pct INT NOT NULL DEFAULT 10,
+      payout_hold_hours INT NOT NULL DEFAULT 24,
+      updated_by VARCHAR(100) REFERENCES users(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
+  // Phase 2: Double-Entry Ledger Core & Payout/Refund Queues
+  sql`
+    CREATE TABLE IF NOT EXISTS ledger_accounts (
+      id VARCHAR(100) PRIMARY KEY,
+      code VARCHAR(20) NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      type VARCHAR(20) NOT NULL,
+      description TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
+  sql`
+    CREATE TABLE IF NOT EXISTS ledger_journals (
+      id VARCHAR(100) PRIMARY KEY,
+      journal_number VARCHAR(100) NOT NULL UNIQUE,
+      reference VARCHAR(100) NOT NULL,
+      event_type VARCHAR(50) NOT NULL,
+      narration TEXT NOT NULL,
+      posted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by_id VARCHAR(100) REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
+  sql`
+    CREATE TABLE IF NOT EXISTS ledger_entries (
+      id VARCHAR(100) PRIMARY KEY,
+      journal_id VARCHAR(100) NOT NULL REFERENCES ledger_journals(id) ON DELETE CASCADE,
+      account_id VARCHAR(100) NOT NULL REFERENCES ledger_accounts(id) ON DELETE RESTRICT,
+      entry_type VARCHAR(10) NOT NULL,
+      amount INT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
+  sql`
+    CREATE TABLE IF NOT EXISTS payouts (
+      id VARCHAR(100) PRIMARY KEY,
+      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      amount INT NOT NULL,
+      currency VARCHAR(10) NOT NULL DEFAULT 'NGN',
+      bank_code VARCHAR(20),
+      bank_name TEXT,
+      account_number VARCHAR(30),
+      account_name TEXT,
+      status VARCHAR(30) NOT NULL DEFAULT 'HELD',
+      scheduled_for TIMESTAMPTZ,
+      approved_at TIMESTAMPTZ,
+      approved_by VARCHAR(100) REFERENCES users(id) ON DELETE SET NULL,
+      disbursed_at TIMESTAMPTZ,
+      paystack_transfer_code TEXT,
+      paystack_transfer_ref TEXT,
+      receipt_url TEXT,
+      notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
+  sql`
+    CREATE TABLE IF NOT EXISTS refunds (
+      id VARCHAR(100) PRIMARY KEY,
+      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      guest_id VARCHAR(100) REFERENCES users(id) ON DELETE SET NULL,
+      gross_paid INT NOT NULL,
+      non_refundable_processing_fee INT NOT NULL,
+      refundable_amount INT NOT NULL,
+      currency VARCHAR(10) NOT NULL DEFAULT 'NGN',
+      status VARCHAR(30) NOT NULL DEFAULT 'REQUESTED',
+      approved_at TIMESTAMPTZ,
+      approved_by VARCHAR(100) REFERENCES users(id) ON DELETE SET NULL,
+      processed_at TIMESTAMPTZ,
+      paystack_refund_id TEXT,
+      reason TEXT,
+      admin_notes TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
 ];
 
 export async function initAndSeedDb() {
@@ -283,6 +376,8 @@ export async function initAndSeedDb() {
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(100);`,
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires_at TIMESTAMPTZ;`,
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE';`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_attempts INT NOT NULL DEFAULT 0;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TIMESTAMPTZ;`,
 
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_step INT NOT NULL DEFAULT 1;`,
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE;`,
@@ -308,6 +403,31 @@ export async function initAndSeedDb() {
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS review_feedback TEXT;`,
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(100);`,
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;`,
+
+    sql`ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderation_status VARCHAR(30) NOT NULL DEFAULT 'NONE';`,
+    sql`ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderation_reason TEXT;`,
+    sql`ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderated_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE properties ADD COLUMN IF NOT EXISTS moderated_by VARCHAR(100);`,
+
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_arrival_reminder_sent_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_reason VARCHAR(255);`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;`,
+
+    // Phase 1: Authoritative Financial Snapshot Columns
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS accommodation_subtotal INT;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_commission_pct INT DEFAULT 10;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_commission_amount INT DEFAULT 0;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS paystack_fee_amount INT DEFAULT 0;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_net_amount INT DEFAULT 0;`,
+
+    // Phase 1: Concurrency Guard - Unique Booking ID on Host Earnings
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS host_earnings_booking_id_unique ON host_earnings (booking_id);`,
+
+    // Phase 1: Default Platform Settings Row
+    sql`INSERT INTO platform_settings (id, default_host_commission_pct, payout_hold_hours, updated_at) VALUES ('default', 10, 24, NOW()) ON CONFLICT (id) DO NOTHING;`,
+
+    sql`UPDATE properties SET moderation_status = 'SUSPENDED' WHERE status = 'SUSPENDED' AND (moderation_status IS NULL OR moderation_status = 'NONE');`,
+    sql`UPDATE properties SET moderation_status = 'REJECTED' WHERE status = 'REJECTED' AND (moderation_status IS NULL OR moderation_status = 'NONE');`,
   ];
 
   for (const m of MIGRATIONS) {
@@ -319,6 +439,22 @@ export async function initAndSeedDb() {
   }
 
   console.log("✅ Schema initialized & migrations applied. Checking seed data...");
+
+  // Phase 2: Seed Default Chart of Accounts
+  const DEFAULT_LEDGER_ACCOUNTS = [
+    { id: "acc_1010", code: "1010", name: "Paystack Clearing", type: "ASSET", description: "Inflow from Paystack gateway for guest bookings" },
+    { id: "acc_1020", code: "1020", name: "Operating Bank Account", type: "ASSET", description: "Platform primary bank/operating account" },
+    { id: "acc_2010", code: "2010", name: "Advance Guest Deposits", type: "LIABILITY", description: "Escrow liability held for guest reservations until check-in" },
+    { id: "acc_2020", code: "2020", name: "Host Settlement Payable", type: "LIABILITY", description: "Net payout liability owed to hosts awaiting admin disbursement" },
+    { id: "acc_2030", code: "2030", name: "Paystack Processing Fee Escrow", type: "LIABILITY", description: "Pass-through payment processing fees collected from guests" },
+    { id: "acc_4010", code: "4010", name: "Platform Commission Revenue", type: "REVENUE", description: "Earned platform commission on completed bookings" },
+    { id: "acc_5010", code: "5010", name: "Payment Processing Expense", type: "EXPENSE", description: "Paystack domestic gateway transaction charges" },
+    { id: "acc_5020", code: "5020", name: "Payout Transfer Fee", type: "EXPENSE", description: "Bank NIP / payout disbursement transfer fees" },
+  ];
+
+  for (const acc of DEFAULT_LEDGER_ACCOUNTS) {
+    await db.insert(schema.ledgerAccounts).values(acc).onConflictDoNothing();
+  }
 
   const existingUsers = await db.select().from(schema.users);
   const passwordHash = await bcrypt.hash("Password123!", 10);

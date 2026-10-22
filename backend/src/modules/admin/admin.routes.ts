@@ -2,6 +2,8 @@ import { FastifyInstance } from "fastify";
 import { adminService } from "./admin.service";
 import { requireRole } from "../../lib/security";
 import { parsePagination } from "../../lib/pagination";
+import { FinanceService } from "../finance/finance.service";
+import { LedgerService } from "../finance/ledger.service";
 
 export async function adminRoutes(fastify: FastifyInstance) {
   // GET /api/admin/stats
@@ -199,6 +201,166 @@ export async function adminRoutes(fastify: FastifyInstance) {
         request.ip
       );
       return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/settings — Get global platform settings (commission rate, payout hold)
+  fastify.get("/settings", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const settings = await adminService.getSettings();
+    return reply.send({ success: true, settings });
+  });
+
+  // PATCH /api/admin/settings — Update default commission rate and payout hold
+  fastify.patch("/settings", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    try {
+      const settings = await adminService.updateSettings(
+        request.body as { defaultHostCommissionPct?: number; payoutHoldHours?: number },
+        session.userId,
+        request.ip
+      );
+      return reply.send({ success: true, message: "Platform settings updated successfully.", settings });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // Phase 2: Double-Entry Financial Center API
+  // ==========================================
+
+  // GET /api/admin/finance/summary — Key metrics + Trial Balance status
+  fastify.get("/finance/summary", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    try {
+      const summary = await FinanceService.getFinancialSummary();
+      return reply.send({ success: true, ...summary });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/trial-balance — Strict zero-sum balance sheet
+  fastify.get("/finance/trial-balance", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    try {
+      const tb = await LedgerService.getTrialBalance();
+      return reply.send({ success: true, trialBalance: tb });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/journals — Audit journal feed
+  fastify.get("/finance/journals", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const query = request.query as { limit?: string; offset?: string };
+    const limit = query.limit ? parseInt(query.limit, 10) : 50;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+
+    try {
+      const journals = await LedgerService.getJournals(limit, offset);
+      return reply.send({ success: true, journals });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/payouts — Host payout queue
+  fastify.get("/finance/payouts", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const query = request.query as { status?: string; limit?: string; offset?: string };
+    const limit = query.limit ? parseInt(query.limit, 10) : 50;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+
+    try {
+      const queue = await FinanceService.getPayoutQueue({
+        status: query.status,
+        limit,
+        offset,
+      });
+      return reply.send({ success: true, payouts: queue });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/payouts/:id/disburse — Admin manual payout execution
+  fastify.post("/finance/payouts/:id/disburse", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    const body = (request.body as { transferRef?: string; receiptUrl?: string; notes?: string }) || {};
+
+    try {
+      const result = await FinanceService.disbursePayout(session.userId, {
+        payoutId: id,
+        transferRef: body.transferRef,
+        receiptUrl: body.receiptUrl,
+        notes: body.notes,
+      });
+      return reply.send({ message: "Payout successfully marked as disbursed.", ...result });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/refunds — Refund audit history
+  fastify.get("/finance/refunds", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const query = request.query as { status?: string; limit?: string; offset?: string };
+    const limit = query.limit ? parseInt(query.limit, 10) : 50;
+    const offset = query.offset ? parseInt(query.offset, 10) : 0;
+
+    try {
+      const queue = await FinanceService.getRefundQueue({
+        status: query.status,
+        limit,
+        offset,
+      });
+      return reply.send({ success: true, refunds: queue });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/refunds — Admin process booking refund
+  fastify.post("/finance/refunds", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    const body = request.body as {
+      bookingId: string;
+      reason?: string;
+      adminNotes?: string;
+      paystackRefundId?: string;
+    };
+
+    if (!body?.bookingId) {
+      return reply.status(400).send({ error: "bookingId is required" });
+    }
+
+    try {
+      const result = await FinanceService.processRefund(session.userId, body);
+      return reply.send({ message: "Booking refund successfully executed.", ...result });
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
     }

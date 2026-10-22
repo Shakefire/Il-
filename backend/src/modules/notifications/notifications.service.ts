@@ -69,11 +69,102 @@ function emailShell(title: string, subtitle: string, bodyContent: string): strin
   `;
 }
 
+// ─── Shared Utilities for Safe Formatting & Escaping ───
+
+export function escapeHtml(value: any): string {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export function safeUrl(url?: string): string {
+  if (!url) return "";
+  const trimmed = url.trim();
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("mailto:") ||
+    trimmed.startsWith("tel:")
+  ) {
+    return trimmed;
+  }
+  return "";
+}
+
+export function formatCurrency(amount: number | undefined | null, currency: string = "NGN"): string {
+  const val = Number(amount || 0);
+  const cur = (currency || "NGN").toUpperCase().trim();
+  if (cur === "NGN" || cur === "₦") {
+    return `₦${val.toLocaleString("en-NG")}`;
+  }
+  if (cur === "USD" || cur === "$") {
+    return `$${val.toLocaleString("en-US")}`;
+  }
+  if (cur === "EUR" || cur === "€") {
+    return `€${val.toLocaleString("en-IE")}`;
+  }
+  if (cur === "GBP" || cur === "£") {
+    return `£${val.toLocaleString("en-GB")}`;
+  }
+  return `${cur} ${val.toLocaleString()}`;
+}
+
+export function formatDisplayDate(dateStr: string): string {
+  if (!dateStr) return "";
+  try {
+    const parts = dateStr.trim().split("-");
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(Date.UTC(year, month, day));
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString("en-US", {
+          timeZone: "UTC",
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      }
+    }
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toLocaleDateString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+  } catch {
+    // fallback
+  }
+  return dateStr;
+}
+
+export function calculateStayNights(inStr: string, outStr: string, explicitNights?: number): number {
+  if (explicitNights && explicitNights > 0) return explicitNights;
+  try {
+    const inDate = new Date(inStr + (inStr.includes("T") ? "" : "T00:00:00Z"));
+    const outDate = new Date(outStr + (outStr.includes("T") ? "" : "T00:00:00Z"));
+    const diff = Math.round((outDate.getTime() - inDate.getTime()) / (1000 * 60 * 60 * 24));
+    return isNaN(diff) || diff < 1 ? 1 : diff;
+  } catch {
+    return 1;
+  }
+}
+
 // ─── 1. Account Welcome Email ───
 
 export function welcomeEmail(data: { name: string; email: string }): EmailPayload {
+  const safeName = escapeHtml(data.name);
   const content = `
-    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Welcome to Ilé, ${data.name}!</h2>
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Welcome to Ilé, ${safeName}!</h2>
     <p>Your account has been created. You can now discover, reserve, and enjoy verified shortlets across Abuja, Lagos, and throughout Nigeria.</p>
     <div style="margin: 24px 0;">
       <a href="${env.FRONTEND_URL}/search" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Explore Stays</a>
@@ -92,12 +183,14 @@ export function welcomeEmail(data: { name: string; email: string }): EmailPayloa
 // ─── 2. Password Reset Email ───
 
 export function passwordResetEmail(data: { name: string; email: string; resetUrl: string }): EmailPayload {
+  const safeName = escapeHtml(data.name);
+  const safeReset = safeUrl(data.resetUrl);
   const content = `
     <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Password Reset Request</h2>
-    <p>Hello ${data.name},</p>
+    <p>Hello ${safeName},</p>
     <p>We received a request to reset your password for your Ilé account. Click the button below to choose a new password:</p>
     <div style="margin: 24px 0;">
-      <a href="${data.resetUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Reset Password</a>
+      <a href="${safeReset}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Reset Password</a>
     </div>
     <p style="font-size: 13px; color: #8B8B86;">If you did not request this, you can safely ignore this email. The link will expire in 2 hours.</p>
   `;
@@ -144,7 +237,13 @@ export interface BookingConfirmationData {
   state?: string;
   powerType?: string;
 
-  // Stay timing (no exact address — address is in the arrival guide email only)
+  // Stay timing & unit (no exact street address in confirmation email)
+  address?: string;
+  unitNumber?: string;
+  latitude?: number;
+  longitude?: number;
+  accessGateCode?: string;
+  accessInstructions?: string;
   checkInTime?: string;
   checkOutTime?: string;
 
@@ -184,95 +283,6 @@ export interface BookingConfirmationData {
 
   // Custom CTA override
   manageUrl?: string;
-}
-
-// Helper utilities for boutique email rendering
-function escapeHtml(value: any): string {
-  if (value === null || value === undefined) return "";
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function safeUrl(url?: string): string {
-  if (!url) return "";
-  const trimmed = url.trim();
-  if (
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
-    trimmed.startsWith("mailto:") ||
-    trimmed.startsWith("tel:")
-  ) {
-    return trimmed;
-  }
-  return "";
-}
-
-function formatCurrency(amount: number | undefined | null, currency: string = "NGN"): string {
-  const val = Number(amount || 0);
-  const cur = (currency || "NGN").toUpperCase().trim();
-  if (cur === "NGN" || cur === "₦") {
-    return `₦${val.toLocaleString("en-NG")}`;
-  }
-  if (cur === "USD" || cur === "$") {
-    return `$${val.toLocaleString("en-US")}`;
-  }
-  if (cur === "EUR" || cur === "€") {
-    return `€${val.toLocaleString("en-IE")}`;
-  }
-  if (cur === "GBP" || cur === "£") {
-    return `£${val.toLocaleString("en-GB")}`;
-  }
-  return `${cur} ${val.toLocaleString()}`;
-}
-
-function formatDisplayDate(dateStr: string): string {
-  if (!dateStr) return "";
-  try {
-    const parts = dateStr.trim().split("-");
-    if (parts.length === 3) {
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const day = parseInt(parts[2], 10);
-      const d = new Date(Date.UTC(year, month, day));
-      if (!isNaN(d.getTime())) {
-        return d.toLocaleDateString("en-US", {
-          timeZone: "UTC",
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        });
-      }
-    }
-    const parsed = new Date(dateStr);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toLocaleDateString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-    }
-  } catch {
-    // fallback
-  }
-  return dateStr;
-}
-
-function calculateStayNights(inStr: string, outStr: string, explicitNights?: number): number {
-  if (explicitNights && explicitNights > 0) return explicitNights;
-  try {
-    const inDate = new Date(inStr + (inStr.includes("T") ? "" : "T00:00:00Z"));
-    const outDate = new Date(outStr + (outStr.includes("T") ? "" : "T00:00:00Z"));
-    const diff = Math.round((outDate.getTime() - inDate.getTime()) / (1000 * 60 * 60 * 24));
-    return isNaN(diff) || diff < 1 ? 1 : diff;
-  } catch {
-    return 1;
-  }
 }
 
 export function bookingConfirmationEmail(data: BookingConfirmationData): EmailPayload {
@@ -625,11 +635,11 @@ export function bookingConfirmationEmail(data: BookingConfirmationData): EmailPa
                       </tr>
                       ` : ""}
 
-                      <!-- Service Fee -->
+                      <!-- Service Fee / Processing Fee -->
                       ${serviceFee > 0 ? `
                       <tr>
                         <td style="padding: 6px 0; color: #575753;">
-                          Ilé Verified Stay &amp; Infrastructure Support (8%)
+                          Payment Processing Fee (Paystack)
                         </td>
                         <td style="padding: 6px 0; text-align: right; font-weight: 600; color: #171717;">
                           ${formatCurrency(serviceFee, currency)}
@@ -907,7 +917,7 @@ Duration: ${nights} ${nights === 1 ? "Night" : "Nights"}
 
 FINANCIAL SUMMARY (${currency}):
 - Accommodation: ${formatCurrency(subtotal, currency)} (${formatCurrency(nightlyPrice, currency)}/night x ${nights} nights)
-${cleaningFee > 0 ? `- Cleaning Fee: ${formatCurrency(cleaningFee, currency)}\n` : ""}${serviceFee > 0 ? `- Service Fee (8%): ${formatCurrency(serviceFee, currency)}\n` : ""}${discount > 0 ? `- Discount: -${formatCurrency(discount, currency)}\n` : ""}- Total Cost: ${formatCurrency(totalAmount, currency)}
+${cleaningFee > 0 ? `- Cleaning Fee: ${formatCurrency(cleaningFee, currency)}\n` : ""}${serviceFee > 0 ? `- Payment Processing Fee: ${formatCurrency(serviceFee, currency)}\n` : ""}${discount > 0 ? `- Discount: -${formatCurrency(discount, currency)}\n` : ""}- Total Cost: ${formatCurrency(totalAmount, currency)}
 - Total Paid: ${formatCurrency(amountPaid, currency)}
 ${outstandingBalance > 0 ? `- Outstanding Balance: ${formatCurrency(outstandingBalance, currency)}\n` : "- Balance Status: Settled in Full (₦0.00)\n"}${data.paymentReference ? `Payment Method: ${data.paymentMethod || "Paystack"} | Ref: ${data.paymentReference}\n` : ""}
 GUEST & CONTACT:
@@ -1610,11 +1620,11 @@ export function ownerEmailOtpEmail(data: {
 }): EmailPayload {
   const content = `
     <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Verify your email address</h2>
-    <p>Hello ${data.name},</p>
+    <p>Hello ${escapeHtml(data.name)},</p>
     <p>Thank you for partnering with Ilé as a property owner. Please enter the following 6-digit verification code to confirm your email and continue your onboarding:</p>
     <div style="margin: 28px 0; text-align: center;">
       <span style="display: inline-block; background-color: #FAFAF8; border: 2px dashed #0B5D45; border-radius: 12px; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #0B5D45; padding: 16px 32px; font-family: monospace;">
-        ${data.code}
+        ${escapeHtml(data.code)}
       </span>
     </div>
     <p style="font-size: 13.5px; color: #6B6B67;">This code is valid for 15 minutes. If you did not initiate this request, you can safely ignore this email.</p>
@@ -1731,6 +1741,582 @@ export function hostApplicationInfoRequestedEmail(data: {
     subject: `Action Required: Additional info requested for Ilé host onboarding`,
     html: emailShell("Document Request", "Action Required", content),
     text: `Additional information requested: ${data.instructions}. Update at ${env.FRONTEND_URL}/signup`,
+  };
+}
+
+// ─── 12. Host Account Welcome Email ───
+
+export function hostWelcomeEmail(data: { name: string; email: string }): EmailPayload {
+  const safeName = escapeHtml(data.name);
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Welcome to Ilé Hosting, ${safeName}!</h2>
+    <p>Thank you for partnering with Ilé as a host. Ilé connects verified Nigerian shortlets and premium residences with discerning guests looking for trusted, seamless stays across Abuja, Lagos, and nationwide.</p>
+    
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 24px 0;">
+      <h3 style="font-size: 15px; margin: 0 0 12px 0; color: #0B5D45; font-weight: 700;">Next Steps to Publish Your Listings</h3>
+      <ol style="margin: 0; padding-left: 20px; font-size: 14px; color: #374151; line-height: 1.8;">
+        <li><strong>Complete Verification (KYC):</strong> Submit your valid government ID and property ownership or management authority.</li>
+        <li><strong>Add Payout Details:</strong> Enter your Nigerian bank account to receive automated guest payouts.</li>
+        <li><strong>Create &amp; Publish:</strong> Once verified, create and publish your listings immediately without routine per-listing delays.</li>
+      </ol>
+    </div>
+
+    <div style="margin: 28px 0;">
+      <a href="${env.FRONTEND_URL}/host/onboarding/authority" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 13px 26px; border-radius: 8px; text-decoration: none;">Continue Host Verification →</a>
+    </div>
+
+    <p style="font-size: 13px; color: #6B6B67;">Questions about hosting or payout structures? Reach our host concierge team at <a href="mailto:support@ile.ng" style="color: #0B5D45;">support@ile.ng</a>.</p>
+  `;
+
+  return {
+    to: data.email,
+    subject: `Welcome to Ilé Hosting — Complete Your Verification`,
+    html: emailShell("Host Account Welcome", "Partner Onboarding", content),
+    text: `Welcome to Ilé Hosting, ${data.name}!\n\nComplete your identity and property verification to begin publishing listings and receiving payouts: ${env.FRONTEND_URL}/host/onboarding/authority`,
+  };
+}
+
+// ─── 13. Generic Email OTP Verification ───
+
+export function emailOtpEmail(data: { name: string; email: string; code: string; purpose?: string }): EmailPayload {
+  const safeName = escapeHtml(data.name);
+  const purpose = data.purpose ? escapeHtml(data.purpose) : "verification";
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Verify your email address</h2>
+    <p>Hello ${safeName},</p>
+    <p>Please enter the following 6-digit one-time code to complete your ${purpose}:</p>
+    <div style="margin: 28px 0; text-align: center;">
+      <span style="display: inline-block; background-color: #FAFAF8; border: 2px dashed #0B5D45; border-radius: 12px; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #0B5D45; padding: 16px 32px; font-family: monospace;">
+        ${escapeHtml(data.code)}
+      </span>
+    </div>
+    <p style="font-size: 13.5px; color: #6B6B67;">This security code expires in 15 minutes. For your security, never share this code with anyone. Ilé staff will never ask for your code.</p>
+  `;
+
+  return {
+    to: data.email,
+    subject: `${data.code} is your Ilé verification code`,
+    html: emailShell("Email Verification", "Security Code", content),
+    text: `Your Ilé verification code is: ${data.code}. It is valid for 15 minutes.`,
+  };
+}
+
+// ─── 14. Password Reset Success Confirmation ───
+
+export function passwordResetSuccessEmail(data: { name: string; email: string }): EmailPayload {
+  const safeName = escapeHtml(data.name);
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #0B5D45;">Password Changed Successfully</h2>
+    <p>Hello ${safeName},</p>
+    <p>The password for your Ilé account (<strong>${escapeHtml(data.email)}</strong>) was recently updated.</p>
+    <div style="background-color: #FAFAF8; border-left: 4px solid #0B5D45; padding: 14px 18px; margin: 20px 0; border-radius: 4px; font-size: 13.5px; color: #374151;">
+      <p style="margin: 0;"><strong>Security Notice:</strong> If you performed this change, no further action is needed.</p>
+      <p style="margin: 6px 0 0 0; color: #B91C1C;">If you did not initiate this change, please contact Ilé Trust &amp; Safety immediately at <a href="mailto:support@ile.ng" style="color: #B91C1C; font-weight: 700;">support@ile.ng</a> or call our 24/7 Helpline.</p>
+    </div>
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/login" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Sign In to Your Account</a>
+    </div>
+  `;
+
+  return {
+    to: data.email,
+    subject: `Security Alert: Your Ilé Password Has Been Updated`,
+    html: emailShell("Password Changed", "Security Alert", content),
+    text: `Hello ${data.name}, your Ilé password has been updated. If you did not make this change, contact support@ile.ng immediately.`,
+  };
+}
+
+// ─── 15. Listing Published Email (KYC-Approved Instant Publication) ───
+
+export function listingPublishedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  propertyTitle: string;
+  propertyId: string;
+  nightlyPrice: number;
+  city: string;
+  neighborhood: string;
+  currency?: string;
+}): EmailPayload {
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const formattedPrice = formatCurrency(data.nightlyPrice, data.currency || "NGN");
+  const location = `${escapeHtml(data.neighborhood)}, ${escapeHtml(data.city)}`;
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #0B5D45;">Your Listing is Live!</h2>
+    <p>Hello ${escapeHtml(data.hostName)},</p>
+    <p>Great news! Your property <strong>${safeTitle}</strong> is published and now visible to guests on Ilé.</p>
+    
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 24px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67; font-weight: 600; width: 140px;">Property:</td>
+          <td style="padding: 6px 0; font-weight: 700; color: #171717;">${safeTitle}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67; font-weight: 600;">Location:</td>
+          <td style="padding: 6px 0; color: #171717;">${location}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67; font-weight: 600;">Nightly Rate:</td>
+          <td style="padding: 6px 0; font-weight: 700; color: #0B5D45;">${formattedPrice} / night</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67; font-weight: 600;">Status:</td>
+          <td style="padding: 6px 0;"><span style="display: inline-block; background-color: #ECFDF5; color: #065F46; padding: 3px 10px; border-radius: 6px; font-weight: 700; font-size: 12px;">PUBLISHED</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <div style="margin: 28px 0;">
+      <a href="${env.FRONTEND_URL}/properties/${data.propertyId}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none; margin-right: 12px;">View Public Listing</a>
+      <a href="${env.FRONTEND_URL}/host/dashboard" style="display: inline-block; background-color: #FAFAF8; color: #171717; border: 1px solid #D1D5DB; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Host Dashboard</a>
+    </div>
+
+    <p style="font-size: 13.5px; color: #6B6B67;">As a verified host, you can update dates, adjust nightly rates, and manage bookings anytime from your dashboard.</p>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `🎉 Your listing is live: ${data.propertyTitle}`,
+    html: emailShell("Listing Published", "Live on Ilé", content),
+    text: `Congratulations ${data.hostName}! Your property "${data.propertyTitle}" (${location} at ${formattedPrice}/night) is live on Ilé.\n\nView listing: ${env.FRONTEND_URL}/properties/${data.propertyId}`,
+  };
+}
+
+// ─── 16. Listing Suspended Email (Moderation Enforcement) ───
+
+export function listingSuspendedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  propertyTitle: string;
+  reason?: string;
+}): EmailPayload {
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const safeReason = escapeHtml(data.reason || "Administrative policy or documentation review.");
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #B91C1C;">Listing Notice: ${safeTitle} Has Been Suspended</h2>
+    <p>Hello ${escapeHtml(data.hostName)},</p>
+    <p>We are writing to notify you that an Ilé administrator has suspended your listing <strong>${safeTitle}</strong> from public discovery and booking.</p>
+    
+    <div style="background-color: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 10px; padding: 16px; margin: 20px 0; color: #991B1B;">
+      <p style="margin: 0; font-size: 14px;"><strong>Reason for Suspension:</strong><br/>${safeReason}</p>
+    </div>
+
+    <p style="font-size: 14px; color: #4B5563;">While suspended, this property is not visible to guests and cannot receive new reservations. Existing confirmed reservations remain protected under Ilé guarantee terms.</p>
+    <p style="font-size: 14px; color: #4B5563;">To appeal this suspension or submit required clarifications, please contact our Trust &amp; Safety team.</p>
+
+    <div style="margin: 24px 0;">
+      <a href="mailto:support@ile.ng?subject=Listing%20Suspension%20Appeal%20-%20${encodeURIComponent(data.propertyTitle)}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Contact Moderation Team</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `Notice: Listing suspended by moderation — ${data.propertyTitle}`,
+    html: emailShell("Listing Moderation", "Suspension Notice", content),
+    text: `Hello ${data.hostName}, your listing "${data.propertyTitle}" has been suspended by an administrator.\n\nReason: ${data.reason || "Administrative review"}.\n\nContact support@ile.ng to appeal.`,
+  };
+}
+
+// ─── 17. Host Account Suspended Email ───
+
+export function hostAccountSuspendedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  reason?: string;
+}): EmailPayload {
+  const safeReason = escapeHtml(data.reason || "Non-compliance with host standards or failed verification audit.");
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #B91C1C;">Notice: Ilé Host Account Suspended</h2>
+    <p>Hello ${escapeHtml(data.hostName)},</p>
+    <p>Your host privileges on Ilé have been suspended following an administrative review.</p>
+    
+    <div style="background-color: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 10px; padding: 16px; margin: 20px 0; color: #991B1B;">
+      <p style="margin: 0; font-size: 14px;"><strong>Reason:</strong><br/>${safeReason}</p>
+    </div>
+
+    <p style="font-size: 14px; color: #4B5563;">All associated active listings have been withdrawn from search. You will receive separate communication regarding any pending guest stays or outstanding payouts.</p>
+
+    <div style="margin: 24px 0;">
+      <a href="mailto:support@ile.ng?subject=Host%20Account%20Suspension%20Appeal" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Contact Support Concierge</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `Notice: Ilé Host Account Suspended`,
+    html: emailShell("Account Status", "Suspension Notice", content),
+    text: `Hello ${data.hostName}, your host account has been suspended.\n\nReason: ${data.reason || "Administrative review"}.\n\nContact support@ile.ng for inquiries.`,
+  };
+}
+
+// ─── 18. Guest Booking Initiated Email ───
+
+export function bookingInitiatedEmail(data: {
+  guestName: string;
+  guestEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  checkIn: string;
+  checkOut: string;
+  totalAmount: number;
+  currency?: string;
+  paymentUrl?: string;
+}): EmailPayload {
+  const safeName = escapeHtml(data.guestName);
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const formattedTotal = formatCurrency(data.totalAmount, data.currency || "NGN");
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`;
+  const payUrl = safeUrl(data.paymentUrl) || `${env.FRONTEND_URL}/booking/status/${data.referenceCode}`;
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Booking Reservation Initiated</h2>
+    <p>Hello ${safeName},</p>
+    <p>We received your reservation request for <strong>${safeTitle}</strong>. Your reservation reference is <strong>#${escapeHtml(data.referenceCode)}</strong>.</p>
+    
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 24px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67; font-weight: 600; width: 140px;">Stay Dates:</td>
+          <td style="padding: 6px 0; font-weight: 700; color: #171717;">${dates}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67; font-weight: 600;">Total Amount:</td>
+          <td style="padding: 6px 0; font-weight: 700; color: #0B5D45;">${formattedTotal}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67; font-weight: 600;">Status:</td>
+          <td style="padding: 6px 0;"><span style="display: inline-block; background-color: #FEF3C7; color: #92400E; padding: 3px 10px; border-radius: 6px; font-weight: 700; font-size: 12px;">PAYMENT PENDING</span></td>
+        </tr>
+      </table>
+    </div>
+
+    <p style="font-size: 14px; color: #374151;">To secure your stay and receive full gate access details, please complete your payment before the reservation window expires.</p>
+
+    <div style="margin: 28px 0;">
+      <a href="${payUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Complete Payment →</a>
+    </div>
+  `;
+
+  return {
+    to: data.guestEmail,
+    subject: `Reservation Initiated: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Booking Initiated", "Payment Pending", content),
+    text: `Hello ${data.guestName}, your reservation #${data.referenceCode} for ${data.propertyTitle} (${dates}) is awaiting payment (${formattedTotal}). Complete payment: ${payUrl}`,
+  };
+}
+
+// ─── 19. Booking Payment Failed Email ───
+
+export function bookingPaymentFailedEmail(data: {
+  guestName: string;
+  guestEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  amount: number;
+  currency?: string;
+  reason?: string;
+  retryUrl?: string;
+}): EmailPayload {
+  const safeName = escapeHtml(data.guestName);
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const formattedTotal = formatCurrency(data.amount, data.currency || "NGN");
+  const safeReason = escapeHtml(data.reason || "Transaction was declined by your financial institution or timed out.");
+  const retry = safeUrl(data.retryUrl) || `${env.FRONTEND_URL}/booking/status/${data.referenceCode}`;
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #B91C1C;">Payment Not Completed</h2>
+    <p>Hello ${safeName},</p>
+    <p>We were unable to process your payment of <strong>${formattedTotal}</strong> for your stay at <strong>${safeTitle}</strong> (Ref: #${escapeHtml(data.referenceCode)}).</p>
+    
+    <div style="background-color: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 10px; padding: 16px; margin: 20px 0; color: #991B1B;">
+      <p style="margin: 0; font-size: 14px;"><strong>Payment Gateway Notice:</strong><br/>${safeReason}</p>
+    </div>
+
+    <p style="font-size: 14px; color: #374151;">Your reservation has not been confirmed. You can retry with a different debit card, Nigerian bank transfer, or USSD.</p>
+
+    <div style="margin: 28px 0;">
+      <a href="${retry}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Retry Payment</a>
+    </div>
+  `;
+
+  return {
+    to: data.guestEmail,
+    subject: `Payment Issue: Reservation #${data.referenceCode}`,
+    html: emailShell("Payment Failed", "Action Required", content),
+    text: `Hello ${data.guestName}, your payment for #${data.referenceCode} could not be completed (${data.reason || "Declined"}). Retry: ${retry}`,
+  };
+}
+
+// ─── 20. Booking Cancelled Email ───
+
+export function bookingCancelledEmail(data: {
+  guestName: string;
+  guestEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  checkIn: string;
+  checkOut: string;
+  cancellationReason?: string;
+  refundNote?: string;
+}): EmailPayload {
+  const safeName = escapeHtml(data.guestName);
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`;
+  const reason = escapeHtml(data.cancellationReason || "Cancelled at customer or host request.");
+  const refundText = data.refundNote ? `<p style="margin: 8px 0 0 0; font-size: 13.5px; color: #065F46;"><strong>Refund Status:</strong> ${escapeHtml(data.refundNote)}</p>` : "";
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Reservation Cancelled</h2>
+    <p>Hello ${safeName},</p>
+    <p>Your booking for <strong>${safeTitle}</strong> (Ref: <strong>#${escapeHtml(data.referenceCode)}</strong>) scheduled for <strong>${dates}</strong> has been cancelled.</p>
+    
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 18px; margin: 20px 0;">
+      <p style="margin: 0; font-size: 14px; color: #374151;"><strong>Reason:</strong> ${reason}</p>
+      ${refundText}
+    </div>
+
+    <p style="font-size: 13.5px; color: #6B6B67;">If you have any questions or require an adjustment, contact our 24/7 concierge at <a href="mailto:support@ile.ng" style="color: #0B5D45;">support@ile.ng</a>.</p>
+  `;
+
+  return {
+    to: data.guestEmail,
+    subject: `Reservation Cancelled: #${data.referenceCode} — ${data.propertyTitle}`,
+    html: emailShell("Reservation Cancelled", "Booking Update", content),
+    text: `Hello ${data.guestName}, your reservation #${data.referenceCode} for ${data.propertyTitle} (${dates}) has been cancelled. Reason: ${data.cancellationReason || "Cancelled"}`,
+  };
+}
+
+// ─── 21. Booking Refund Update Email ───
+
+export function bookingRefundEmail(data: {
+  guestName: string;
+  guestEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  refundAmount: number;
+  currency?: string;
+  status: string;
+}): EmailPayload {
+  const safeName = escapeHtml(data.guestName);
+  const formattedRefund = formatCurrency(data.refundAmount, data.currency || "NGN");
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #0B5D45;">Refund Update</h2>
+    <p>Hello ${safeName},</p>
+    <p>A refund of <strong>${formattedRefund}</strong> has been processed for your booking at <strong>${escapeHtml(data.propertyTitle)}</strong> (Ref: #${escapeHtml(data.referenceCode)}).</p>
+    
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 18px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 4px 0; color: #6B6B67; font-weight: 600; width: 140px;">Refund Amount:</td>
+          <td style="padding: 4px 0; font-weight: 700; color: #0B5D45;">${formattedRefund}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #6B6B67; font-weight: 600;">Status:</td>
+          <td style="padding: 4px 0; font-weight: 700; color: #171717;">${escapeHtml(data.status)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #6B6B67; font-weight: 600;">Processing Time:</td>
+          <td style="padding: 4px 0; color: #374151;">3 to 5 business days for Nigerian bank crediting</td>
+        </tr>
+      </table>
+    </div>
+
+    <p style="font-size: 13.5px; color: #6B6B67;">Funds will reflect in the originating Nigerian bank account or card used during checkout.</p>
+  `;
+
+  return {
+    to: data.guestEmail,
+    subject: `Refund Notice: ${formattedRefund} for #${data.referenceCode}`,
+    html: emailShell("Refund Processed", "Payment Update", content),
+    text: `Hello ${data.guestName}, a refund of ${formattedRefund} has been processed for booking #${data.referenceCode}. Funds typically arrive in 3-5 business days.`,
+  };
+}
+
+// ─── 22. Host Booking Confirmed Email (Payout & Guest Breakdown) ───
+
+export function hostBookingConfirmedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  guestName: string;
+  guestPhone?: string;
+  guestEmail: string;
+  checkIn: string;
+  checkOut: string;
+  numberOfNights: number;
+  guestCount: number;
+  grossAmount: number;
+  commissionAmount: number;
+  netPayout: number;
+  currency?: string;
+}): EmailPayload {
+  const safeHostName = escapeHtml(data.hostName);
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const safeGuest = escapeHtml(data.guestName);
+  const cur = data.currency || "NGN";
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)} (${data.numberOfNights} night${data.numberOfNights > 1 ? "s" : ""})`;
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #0B5D45;">New Confirmed Reservation!</h2>
+    <p>Hello ${safeHostName},</p>
+    <p>You have a new confirmed reservation for <strong>${safeTitle}</strong> (Ref: <strong>#${escapeHtml(data.referenceCode)}</strong>). Guest payment has been verified.</p>
+    
+    <!-- Stay & Guest Details -->
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <h3 style="font-size: 14px; margin: 0 0 12px 0; color: #0B5D45; text-transform: uppercase; letter-spacing: 0.5px;">Guest &amp; Stay Information</h3>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 5px 0; color: #6B6B67; font-weight: 600; width: 140px;">Guest Name:</td>
+          <td style="padding: 5px 0; font-weight: 700; color: #171717;">${safeGuest}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #6B6B67; font-weight: 600;">Guest Contact:</td>
+          <td style="padding: 5px 0; color: #171717;">
+            ${escapeHtml(data.guestEmail)}${data.guestPhone ? ` &bull; <a href="tel:${escapeHtml(data.guestPhone)}" style="color: #0B5D45; font-weight: 600; text-decoration: none;">${escapeHtml(data.guestPhone)}</a>` : ""}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #6B6B67; font-weight: 600;">Dates:</td>
+          <td style="padding: 5px 0; font-weight: 600; color: #171717;">${dates}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #6B6B67; font-weight: 600;">Guest Count:</td>
+          <td style="padding: 5px 0; color: #171717;">${data.guestCount} guest${data.guestCount > 1 ? "s" : ""}</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Payout Breakdown -->
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <h3 style="font-size: 14px; margin: 0 0 12px 0; color: #0B5D45; text-transform: uppercase; letter-spacing: 0.5px;">Host Payout Breakdown</h3>
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 5px 0; color: #6B6B67;">Gross Booking Total:</td>
+          <td style="padding: 5px 0; text-align: right; font-weight: 600;">${formatCurrency(data.grossAmount, cur)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 5px 0; color: #6B6B67;">Ilé Platform Commission:</td>
+          <td style="padding: 5px 0; text-align: right; color: #6B6B67;">- ${formatCurrency(data.commissionAmount, cur)}</td>
+        </tr>
+        <tr style="border-top: 1.5px solid #E7E5E0;">
+          <td style="padding: 8px 0 0 0; font-weight: 800; color: #0B5D45; font-size: 15px;">Estimated Net Payout:</td>
+          <td style="padding: 8px 0 0 0; text-align: right; font-weight: 800; color: #0B5D45; font-size: 16px;">${formatCurrency(data.netPayout, cur)}</td>
+        </tr>
+      </table>
+      <p style="margin: 12px 0 0 0; font-size: 12px; color: #8B8B86;">Payouts are automatically scheduled to your verified Nigerian bank account after guest check-in verification.</p>
+    </div>
+
+    <div style="margin: 28px 0;">
+      <a href="${env.FRONTEND_URL}/host/dashboard" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">View in Host Dashboard</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `💰 New Booking Confirmed: ${data.propertyTitle} (${formatCurrency(data.netPayout, cur)} net)`,
+    html: emailShell("Booking Confirmed", "Host Notification", content),
+    text: `Hello ${data.hostName}, new confirmed booking for ${data.propertyTitle} from ${data.guestName} (${dates}). Net payout: ${formatCurrency(data.netPayout, cur)}. View dashboard: ${env.FRONTEND_URL}/host/dashboard`,
+  };
+}
+
+// ─── 23. Host Upcoming Arrival Reminder ───
+
+export function hostUpcomingArrivalEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  guestName: string;
+  guestPhone?: string;
+  guestEmail: string;
+  checkIn: string;
+  checkInTime?: string;
+  checkOut: string;
+  guestCount: number;
+}): EmailPayload {
+  const safeHost = escapeHtml(data.hostName);
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const safeGuest = escapeHtml(data.guestName);
+  const checkInDisplay = formatDisplayDate(data.checkIn);
+  const time = data.checkInTime || "2:00 PM";
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Guest Arrival Reminder</h2>
+    <p>Hello ${safeHost},</p>
+    <p>This is a reminder that <strong>${safeGuest}</strong> is scheduled to arrive tomorrow, <strong>${checkInDisplay}</strong> (from ${escapeHtml(time)}) at <strong>${safeTitle}</strong> (Ref: #${escapeHtml(data.referenceCode)}).</p>
+    
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <h3 style="font-size: 14px; margin: 0 0 10px 0; color: #0B5D45; text-transform: uppercase;">Host Readiness Checklist</h3>
+      <ul style="margin: 0; padding-left: 20px; font-size: 13.5px; color: #374151; line-height: 1.8;">
+        <li>Confirm primary and backup power (generator / solar inverter) are operational.</li>
+        <li>Verify water supply and pump functioning.</li>
+        <li>Ensure gate security and estate access codes are active.</li>
+        <li>Inspect unit cleanliness and fresh linens.</li>
+      </ul>
+    </div>
+
+    <div style="background-color: #F8F9FA; border-left: 4px solid #0B5D45; padding: 14px 18px; margin: 20px 0; border-radius: 4px; font-size: 13.5px;">
+      <p style="margin: 0; font-weight: 600; color: #171717;">Guest Contact:</p>
+      <p style="margin: 4px 0 0 0; color: #374151;">${safeGuest} &bull; ${escapeHtml(data.guestEmail)}${data.guestPhone ? ` &bull; <a href="tel:${escapeHtml(data.guestPhone)}" style="color: #0B5D45; font-weight: 600;">${escapeHtml(data.guestPhone)}</a>` : ""}</p>
+    </div>
+
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/host/dashboard" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Open Host Dashboard</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `Arrival Tomorrow: ${data.guestName} checking in to ${data.propertyTitle}`,
+    html: emailShell("Upcoming Arrival", "Guest Check-in Reminder", content),
+    text: `Reminder: ${data.guestName} arrives tomorrow (${checkInDisplay}) at ${data.propertyTitle}. Check dashboard: ${env.FRONTEND_URL}/host/dashboard`,
+  };
+}
+
+// ─── 24. Host New Review Received Email ───
+
+export function hostNewReviewEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  propertyTitle: string;
+  guestName: string;
+  rating: number;
+  reviewTitle?: string;
+  reviewBody?: string;
+}): EmailPayload {
+  const safeHost = escapeHtml(data.hostName);
+  const safeTitle = escapeHtml(data.propertyTitle);
+  const safeGuest = escapeHtml(data.guestName);
+  const stars = "★".repeat(Math.min(5, Math.max(1, Math.round(data.rating)))) + "☆".repeat(Math.max(0, 5 - Math.round(data.rating)));
+  const reviewBody = data.reviewBody ? escapeHtml(data.reviewBody) : "No written comment provided.";
+
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #0B5D45;">New Guest Review Received!</h2>
+    <p>Hello ${safeHost},</p>
+    <p><strong>${safeGuest}</strong> has shared a review for their stay at <strong>${safeTitle}</strong>:</p>
+    
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <div style="color: #F59E0B; font-size: 18px; margin-bottom: 8px; letter-spacing: 2px;">${stars} <span style="font-size: 14px; font-weight: 700; color: #171717;">(${data.rating} / 5)</span></div>
+      ${data.reviewTitle ? `<p style="margin: 0 0 6px 0; font-weight: 700; font-size: 15px; color: #171717;">${escapeHtml(data.reviewTitle)}</p>` : ""}
+      <p style="margin: 0; font-size: 14px; color: #374151; font-style: italic;">&ldquo;${reviewBody}&rdquo;</p>
+    </div>
+
+    <p style="font-size: 13.5px; color: #6B6B67;">Responding promptly to reviews showcases your hospitality and helps attract more verified reservations.</p>
+
+    <div style="margin: 24px 0;">
+      <a href="${env.FRONTEND_URL}/host/dashboard" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Reply to Review in Dashboard</a>
+    </div>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `⭐ New ${data.rating}-Star Review for ${data.propertyTitle}`,
+    html: emailShell("New Review", "Guest Feedback", content),
+    text: `New review for ${data.propertyTitle} by ${data.guestName}: ${data.rating}/5 stars. "${data.reviewBody || ""}". Manage in dashboard: ${env.FRONTEND_URL}/host/dashboard`,
   };
 }
 

@@ -23,8 +23,8 @@ export default function PasswordStrength({ password = "" }: PasswordStrengthProp
     "bg-[#E7E5E0]",
     "bg-[#DC2626]",
     "bg-[#D97706]",
-    "bg-[#0B5D45]",
-    "bg-[#0B5D45]",
+    "bg-[#065F46]",
+    "bg-[#065F46]",
   ];
 
   return (
@@ -48,10 +48,10 @@ export default function PasswordStrength({ password = "" }: PasswordStrengthProp
 
       {/* Natural hints */}
       <div className="flex items-center gap-3 text-[11.5px] text-[#8B8B86] pt-0.5">
-        <span className={hasMinLength ? "text-[#0B5D45] font-medium" : ""}>
+        <span className={hasMinLength ? "text-[#065F46] font-medium" : ""}>
           {hasMinLength ? "✓" : "○"} 8+ characters
         </span>
-        <span className={hasNumber ? "text-[#0B5D45] font-medium" : ""}>
+        <span className={hasNumber ? "text-[#065F46] font-medium" : ""}>
           {hasNumber ? "✓" : "○"} One number
         </span>
       </div>

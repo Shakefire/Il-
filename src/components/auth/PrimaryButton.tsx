@@ -19,7 +19,7 @@ export default function PrimaryButton({
   return (
     <button
       disabled={isLoading || disabled}
-      className={`w-full h-[52px] sm:h-[54px] bg-[#24483A] hover:bg-[#1B372C] active:bg-[#152B22] text-white rounded-[11px] font-medium text-[15px] flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow disabled:opacity-60 disabled:cursor-not-allowed ${className}`}
+      className={`w-full h-11 bg-[#065F46] hover:bg-[#044E39] active:bg-[#044E39] text-white rounded-lg font-medium text-[15px] flex items-center justify-center gap-2 transition-[background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#065F46]/25 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shadow-xs cursor-pointer ${className}`}
       {...props}
     >
       {isLoading ? (

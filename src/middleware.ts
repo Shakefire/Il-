@@ -5,7 +5,15 @@ import { NextResponse, type NextRequest } from "next/server";
  * 
  * Enforces strict routing isolation between Admin, Host, and Consumer roles.
  */
-function parseJwtRole(token: string): string | null {
+interface JwtSessionPayload {
+  userId?: string;
+  email?: string;
+  role?: string;
+  emailVerified?: boolean;
+  exp?: number;
+}
+
+function parseJwtPayload(token: string): JwtSessionPayload | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
@@ -16,7 +24,7 @@ function parseJwtRole(token: string): string | null {
     if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
       return null;
     }
-    return payload.role ? String(payload.role).toLowerCase() : null;
+    return payload;
   } catch {
     return null;
   }
@@ -31,7 +39,8 @@ export function middleware(request: NextRequest) {
   }
 
   const sessionToken = request.cookies.get("session_token")?.value;
-  const userRole = sessionToken ? parseJwtRole(sessionToken) : null;
+  const jwtPayload = sessionToken ? parseJwtPayload(sessionToken) : null;
+  const userRole = jwtPayload?.role ? String(jwtPayload.role).toLowerCase() : null;
 
   const isAdminRoute = pathname.startsWith("/admin");
   const isHostRoute = pathname.startsWith("/host/") || pathname === "/become-a-host";
@@ -53,9 +62,14 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 3. Host Workspace protection: Requires authentication
+  // 3. Host Workspace protection: Requires authenticated and verified session
   if (isHostRoute) {
-    if (!sessionToken) {
+    if (!sessionToken || !jwtPayload) {
+      const signupUrl = new URL("/signup", request.url);
+      signupUrl.searchParams.set("next", pathname);
+      return NextResponse.redirect(signupUrl);
+    }
+    if (jwtPayload.emailVerified === false) {
       const signupUrl = new URL("/signup", request.url);
       signupUrl.searchParams.set("next", pathname);
       return NextResponse.redirect(signupUrl);
@@ -65,7 +79,7 @@ export function middleware(request: NextRequest) {
 
   // 4. Private consumer account pages protection
   if (isUserAccountRoute) {
-    if (!sessionToken) {
+    if (!sessionToken || !jwtPayload) {
       const loginUrl = new URL("/login", request.url);
       loginUrl.searchParams.set("next", pathname);
       return NextResponse.redirect(loginUrl);

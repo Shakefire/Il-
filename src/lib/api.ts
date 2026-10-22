@@ -193,6 +193,15 @@ export const api = {
     return res.json();
   },
 
+  async getHostPayouts() {
+    const res = await fetch("/api/host/payouts", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load host payouts");
+    return res.json();
+  },
+
   async getHostProperties() {
     const res = await fetch("/api/host/properties", {
       headers: getAuthHeader(),
@@ -637,5 +646,83 @@ export const api = {
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "Failed to send test email");
     return body;
+  },
+
+  // ── Admin Financial Center & Ledger ──
+  async getAdminFinancialSummary() {
+    const res = await fetch("/api/admin/finance/summary", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load financial summary");
+    return res.json();
+  },
+
+  async getAdminTrialBalance() {
+    const res = await fetch("/api/admin/finance/trial-balance", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load trial balance");
+    return res.json();
+  },
+
+  async getAdminPayoutQueue(status?: string) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    const res = await fetch(`/api/admin/finance/payouts${query}`, {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load payouts queue");
+    return res.json();
+  },
+
+  async disburseAdminPayout(payoutId: string, data: { transferRef?: string; receiptUrl?: string; notes?: string }) {
+    const res = await fetch(`/api/admin/finance/payouts/${payoutId}/disburse`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to disburse payout");
+    return body;
+  },
+
+  async getAdminRefundQueue(status?: string) {
+    const query = status ? `?status=${encodeURIComponent(status)}` : "";
+    const res = await fetch(`/api/admin/finance/refunds${query}`, {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load refunds");
+    return res.json();
+  },
+
+  async processAdminRefund(data: { bookingId: string; reason?: string; adminNotes?: string; paystackRefundId?: string }) {
+    const res = await fetch("/api/admin/finance/refunds", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to process refund");
+    return body;
+  },
+
+  async getAdminJournals(limit = 50) {
+    const res = await fetch(`/api/admin/finance/journals?limit=${limit}`, {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load journals");
+    return res.json();
   },
 };

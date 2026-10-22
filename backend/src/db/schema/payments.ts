@@ -26,6 +26,7 @@ export const hostEarnings = pgTable("host_earnings", {
     .references(() => users.id, { onDelete: "cascade" }),
   bookingId: varchar("booking_id", { length: 100 })
     .notNull()
+    .unique()
     .references(() => bookings.id, { onDelete: "cascade" }),
   grossAmount: integer("gross_amount").notNull(),
   commissionAmount: integer("commission_amount").notNull(),

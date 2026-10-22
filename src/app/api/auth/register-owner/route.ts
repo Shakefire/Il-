@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authService, RegisterOwnerSchema } from "@/../backend/src/modules/auth/auth.service";
-import { createSessionToken } from "@/../backend/src/lib/security";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +15,14 @@ export async function POST(req: NextRequest) {
     }
 
     const { user, profile } = await authService.registerOwner(parse.data);
-    const token = createSessionToken(user.id, user.email, user.role);
 
-    const response = NextResponse.json(
+    // CRITICAL SECURITY FIX: Do NOT create a session token or set session cookies here.
+    // The session must only be issued after the user verifies their email via OTP.
+    return NextResponse.json(
       {
         success: true,
-        token,
+        requiresEmailVerification: true,
+        email: user.email,
         user: {
           id: user.id,
           email: user.email,
@@ -38,17 +39,12 @@ export async function POST(req: NextRequest) {
       },
       { status: 201 }
     );
-
-    response.cookies.set("session_token", token, {
-      path: "/",
-      httpOnly: true,
-      sameSite: "lax",
-      maxAge: 30 * 24 * 60 * 60,
-    });
-
-    return response;
   } catch (err: any) {
-    const status = err.message?.includes("already exists") ? 409 : 400;
+    const isConflict =
+      err?.code === "23505" ||
+      err?.message?.includes("already exists") ||
+      err?.message?.includes("duplicate");
+    const status = isConflict ? 409 : 400;
     return NextResponse.json({ error: err.message || "Failed to register" }, { status });
   }
 }

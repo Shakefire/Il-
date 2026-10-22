@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Property } from "@/types";
-import { formatNaira, calculateNights, getDefaultDates, getTodayISO } from "@/lib/utils";
+import { formatNaira, calculateNights, getDefaultDates, getTodayISO, calculatePaystackFee } from "@/lib/utils";
 import BookingModal from "./BookingModal";
 import { Shield, Sparkles, ChevronLeft, ChevronRight, Calendar, Users } from "lucide-react";
 
@@ -20,8 +20,8 @@ export default function BookingPanel({ property }: BookingPanelProps) {
   const todayISO = getTodayISO();
   const nights = calculateNights(checkIn, checkOut);
   const stayCost = property.pricePerNight * nights;
-  const serviceFee = Math.round(stayCost * 0.08);
-  const total = stayCost + serviceFee;
+  const processingFee = calculatePaystackFee(stayCost);
+  const total = stayCost + processingFee;
 
   // Fluid Date Step Adjusters (+/- 1 day)
   const shiftDate = (dateStr: string, days: number): string => {
@@ -218,8 +218,8 @@ export default function BookingPanel({ property }: BookingPanelProps) {
             <span>{formatNaira(stayCost)}</span>
           </div>
           <div className="flex justify-between text-[#6B6B67]">
-            <span>Verification &amp; platform service fee</span>
-            <span>{formatNaira(serviceFee)}</span>
+            <span>Payment processing fee (Paystack)</span>
+            <span>{formatNaira(processingFee)}</span>
           </div>
           <div className="pt-2.5 border-t border-[#E7E5E0]/70 flex justify-between font-bold text-[16px] text-[#171717]">
             <span>Total stay price</span>

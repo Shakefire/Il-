@@ -128,16 +128,10 @@ export const authApi = {
         throw new Error(errorMsg);
       }
 
-      if (typeof window !== "undefined" && data.token) {
-        localStorage.setItem("ile_token", data.token);
-        localStorage.setItem("ile_user", JSON.stringify(data.user));
-      }
-
       return {
         success: true,
         user: data.user,
-        token: data.token,
-        message: data.message || "Account created successfully.",
+        message: data.message || "Account created successfully. Please verify your email to continue.",
       };
     } catch (err: any) {
       throw new Error(err.message || "Registration failed. Please try again.");
@@ -182,23 +176,17 @@ export const authApi = {
         throw new Error(errorMsg);
       }
 
-      if (typeof window !== "undefined" && data.token) {
-        localStorage.setItem("ile_token", data.token);
-        localStorage.setItem("ile_user", JSON.stringify(data.user));
-      }
-
       return {
         success: true,
         user: data.user,
-        token: data.token,
-        message: data.message || "Owner account created.",
+        message: data.message || "Owner account created. Please verify your email.",
       };
     } catch (err: any) {
       throw new Error(err.message || "Owner registration failed. Please try again.");
     }
   },
 
-  async verifyEmail(code: string): Promise<any> {
+  async verifyEmail(code: string, email?: string): Promise<any> {
     const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -207,7 +195,7 @@ export const authApi = {
       method: "POST",
       headers,
       credentials: "include",
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, email }),
     });
 
     let data: any = null;
@@ -227,10 +215,16 @@ export const authApi = {
       }
       throw new Error(msg);
     }
+
+    if (typeof window !== "undefined" && data?.token) {
+      localStorage.setItem("ile_token", data.token);
+      localStorage.setItem("ile_user", JSON.stringify(data.user));
+    }
+
     return data;
   },
 
-  async resendEmailOtp(): Promise<any> {
+  async resendEmailOtp(email?: string): Promise<any> {
     const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -239,6 +233,7 @@ export const authApi = {
       method: "POST",
       headers,
       credentials: "include",
+      body: JSON.stringify({ email }),
     });
 
     const data = await res.json();

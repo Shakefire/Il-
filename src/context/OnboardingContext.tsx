@@ -75,7 +75,7 @@ const defaultState: OnboardingState = {
   idBackUrl: "",
   selfieUrl: "",
 
-  authorityDocType: "deed_of_ownership",
+  authorityDocType: "utility_bill",
   authorityDocUrl: "",
   bankName: "Guaranty Trust Bank (GTBank)",
   bankAccountNumber: "",

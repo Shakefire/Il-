@@ -62,7 +62,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatNaira } from "@/lib/utils";
+import { formatNaira, calculatePaystackFee } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 
 type AdminModule = "dashboard" | "compliance" | "properties" | "financials" | "security";
@@ -119,6 +119,28 @@ export default function AdminPortalPage() {
   const [requestInfoText, setRequestInfoText] = useState("");
   const [isRequestInfoPromptOpen, setIsRequestInfoPromptOpen] = useState(false);
   const [downloadSuccessNotice, setDownloadSuccessNotice] = useState<string | null>(null);
+
+  // ── Financial Center States ──
+  const [financeSubTab, setFinanceSubTab] = useState<"overview" | "payouts" | "refunds" | "trial_balance" | "journals" | "bookings">("overview");
+  const [financialSummary, setFinancialSummary] = useState<any>(null);
+  const [trialBalance, setTrialBalance] = useState<any>(null);
+  const [payoutsQueue, setPayoutsQueue] = useState<any[]>([]);
+  const [refundsQueue, setRefundsQueue] = useState<any[]>([]);
+  const [journals, setJournals] = useState<any[]>([]);
+  const [loadingFinance, setLoadingFinance] = useState(false);
+  const [payoutFilter, setPayoutFilter] = useState<string>("ALL");
+  // Payout disburse modal
+  const [disburseModalPayout, setDisburseModalPayout] = useState<any | null>(null);
+  const [disburseTransferRef, setDisburseTransferRef] = useState("");
+  const [disburseNotes, setDisburseNotes] = useState("");
+  const [isDisbursing, setIsDisbursing] = useState(false);
+  // Refund modal
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [refundBookingId, setRefundBookingId] = useState("");
+  const [refundReason, setRefundReason] = useState("");
+  const [refundNotes, setRefundNotes] = useState("");
+  const [isProcessingRefund, setIsProcessingRefund] = useState(false);
+  const [financeActionFeedback, setFinanceActionFeedback] = useState<string | null>(null);
 
   // Profile Dropdown & Modal States
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -190,20 +212,99 @@ export default function AdminPortalPage() {
     }
   }, []);
 
+  // ── Load Financial Center Data ──
+  const loadFinanceData = useCallback(async (isSilent = false) => {
+    if (!isSilent) setLoadingFinance(true);
+    try {
+      const [sumRes, tbRes, payRes, refRes, jrnRes] = await Promise.all([
+        api.getAdminFinancialSummary().catch(() => null),
+        api.getAdminTrialBalance().catch(() => null),
+        api.getAdminPayoutQueue().catch(() => ({ payouts: [] })),
+        api.getAdminRefundQueue().catch(() => ({ refunds: [] })),
+        api.getAdminJournals(50).catch(() => ({ journals: [] })),
+      ]);
+      if (sumRes) setFinancialSummary(sumRes);
+      if (tbRes?.trialBalance) setTrialBalance(tbRes.trialBalance);
+      if (payRes?.payouts) setPayoutsQueue(payRes.payouts);
+      if (refRes?.refunds) setRefundsQueue(refRes.refunds);
+      if (jrnRes?.journals) setJournals(jrnRes.journals);
+    } catch (err: any) {
+      console.warn("[Admin] Could not load finance data:", err);
+    } finally {
+      setLoadingFinance(false);
+    }
+  }, []);
+
+  const handleDisbursePayout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!disburseModalPayout) return;
+    setIsDisbursing(true);
+    setFinanceActionFeedback(null);
+    try {
+      await api.disburseAdminPayout(disburseModalPayout.id, {
+        transferRef: disburseTransferRef || undefined,
+        notes: disburseNotes || undefined,
+      });
+      setFinanceActionFeedback(`Payout of ${formatNaira(disburseModalPayout.amount)} successfully disbursed to ${disburseModalPayout.accountName || "Host"}!`);
+      setDisburseModalPayout(null);
+      setDisburseTransferRef("");
+      setDisburseNotes("");
+      loadFinanceData();
+    } catch (err: any) {
+      alert(err.message || "Failed to disburse payout");
+    } finally {
+      setIsDisbursing(false);
+    }
+  };
+
+  const handleProcessRefund = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!refundBookingId) return;
+    setIsProcessingRefund(true);
+    setFinanceActionFeedback(null);
+    try {
+      const res = await api.processAdminRefund({
+        bookingId: refundBookingId,
+        reason: refundReason || "Guest requested cancellation",
+        adminNotes: refundNotes || undefined,
+      });
+      setFinanceActionFeedback(`Refund processed successfully: ${formatNaira(res.refundableAmount)} returned to guest (domestic fee retained).`);
+      setShowRefundModal(false);
+      setRefundBookingId("");
+      setRefundReason("");
+      setRefundNotes("");
+      loadFinanceData();
+    } catch (err: any) {
+      alert(err.message || "Failed to process refund");
+    } finally {
+      setIsProcessingRefund(false);
+    }
+  };
+
   // Initial Load & Live Polling (every 14 seconds)
   useEffect(() => {
     if (!authLoading && isAuthenticated && user?.role === "admin") {
       loadAdminData();
+      loadFinanceData(true);
 
       const pollInterval = setInterval(() => {
         loadAdminData(true);
+        if (activeModule === "financials") {
+          loadFinanceData(true);
+        }
       }, 14000);
 
       return () => clearInterval(pollInterval);
     } else if (!authLoading) {
       setLoading(false);
     }
-  }, [authLoading, isAuthenticated, user, loadAdminData]);
+  }, [authLoading, isAuthenticated, user, loadAdminData, loadFinanceData, activeModule]);
+
+  useEffect(() => {
+    if (activeModule === "financials") {
+      loadFinanceData();
+    }
+  }, [activeModule, loadFinanceData]);
 
   // ── Open Split-View Workspace ──
   const openHostSplitView = async (host: any) => {
@@ -1415,84 +1516,747 @@ export default function AdminPortalPage() {
           )}
 
           {/* ─────────────────────────────────────────────────────────────
-              MODULE 4: FINANCIALS & BOOKINGS LEDGER
+              MODULE 4: FINANCIALS & INSTITUTIONAL DOUBLE-ENTRY LEDGER
           ────────────────────────────────────────────────────────────── */}
           {activeModule === "financials" && (
             <div className="space-y-6">
-              <div>
-                <h1 className="text-2xl font-bold text-primary tracking-tight">
-                  Financials &amp; Bookings Ledger
-                </h1>
-                <p className="text-xs text-primary-secondary mt-1">
-                  Full transactional audit of reservations, payment references, cleaning fee splits, and host settlement payouts.
-                </p>
+              {/* Module Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-accent">
+                      Institutional Finance Core
+                    </span>
+                    {trialBalance?.isBalanced && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
+                        <CheckCircle2 size={12} /> Balanced Ledger
+                      </span>
+                    )}
+                  </div>
+                  <h1 className="text-2xl font-bold text-primary tracking-tight mt-0.5">
+                    Financial Center &amp; Double-Entry Ledger
+                  </h1>
+                  <p className="text-xs text-primary-secondary mt-1">
+                    Continuous zero-sum reconciliation, host settlement authorization queue, non-refundable gateway fee audits, and chart of accounts.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => loadFinanceData()}
+                    disabled={loadingFinance}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer"
+                  >
+                    <RotateCw size={13} className={loadingFinance ? "animate-spin" : ""} />
+                    <span>Sync Ledger</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowRefundModal(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent text-white text-xs font-semibold hover:bg-accent-hover transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Receipt size={14} />
+                    <span>Issue Manual Refund</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Bookings Ledger Table */}
-              <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs divide-y divide-border">
-                  <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
-                    <tr>
-                      <th className="py-2.5 px-3">Order Ref</th>
-                      <th className="py-2.5 px-3">Guest</th>
-                      <th className="py-2.5 px-3">Stay Dates</th>
-                      <th className="py-2.5 px-3">Total Amount</th>
-                      <th className="py-2.5 px-3">Payment Method</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {bookings.map((b) => (
-                      <tr
-                        key={b.id}
-                        onClick={() => setSelectedBooking(b)}
-                        className="hover:bg-surface-muted/60 transition-colors cursor-pointer"
-                      >
-                        <td className="py-2 px-3 font-mono font-bold text-primary tabular-nums">
-                          {b.id?.slice(0, 8) || b.referenceCode || "BK-ORD"}
-                        </td>
-                        <td className="py-2 px-3">
-                          <div className="font-semibold text-primary">
-                            {b.guestName || "Guest User"}
-                          </div>
-                          <div className="text-[11px] text-primary-muted font-mono">{b.guestEmail}</div>
-                        </td>
-                        <td className="py-2 px-3 text-primary-secondary tabular-nums">
-                          {b.checkInDate || b.checkIn} → {b.checkOutDate || b.checkOut}
-                        </td>
-                        <td className="py-2 px-3 font-bold text-accent tabular-nums">
-                          {formatNaira(b.totalAmount || b.totalPrice || 0)}
-                        </td>
-                        <td className="py-2 px-3 text-primary-secondary font-medium">
-                          {b.payment?.paymentMethod || "Payment Gateway"}
-                        </td>
-                        <td className="py-2 px-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-status-success-bg text-status-success-text border border-status-success-border">
-                            {b.status || "CONFIRMED"}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-right" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedBooking(b)}
-                            className="px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted"
-                          >
-                            Details
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {bookings.length === 0 && (
-                      <tr>
-                        <td colSpan={7} className="p-10 text-center text-primary-muted">
-                          No transactions recorded in ledger.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+              {/* Action alert message */}
+              {financeActionFeedback && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900 text-xs flex items-center justify-between shadow-xs">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={16} className="text-emerald-700 shrink-0" />
+                    <span className="font-medium">{financeActionFeedback}</span>
+                  </div>
+                  <button
+                    onClick={() => setFinanceActionFeedback(null)}
+                    className="text-emerald-700 hover:text-emerald-950 font-bold ml-4"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              {/* Sub-tab Navigation */}
+              <div className="flex border-b border-border gap-6 sm:gap-8 overflow-x-auto">
+                {[
+                  { id: "overview", label: "Executive Overview", icon: LayoutDashboard },
+                  { id: "payouts", label: `Payout Queue (${payoutsQueue.filter((p) => p.status !== "PAID").length})`, icon: Landmark },
+                  { id: "refunds", label: `Refunds (${refundsQueue.length})`, icon: Receipt },
+                  { id: "trial_balance", label: "Trial Balance", icon: Activity },
+                  { id: "journals", label: "General Journals", icon: FileText },
+                  { id: "bookings", label: `Reservations (${bookings.length})`, icon: Calendar },
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = financeSubTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setFinanceSubTab(tab.id as any)}
+                      className={`pb-3 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                        isActive
+                          ? "border-accent text-accent"
+                          : "border-transparent text-primary-muted hover:text-primary"
+                      }`}
+                    >
+                      <Icon size={14} />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
               </div>
+
+              {/* ── Sub-Tab 1: Executive Overview ── */}
+              {financeSubTab === "overview" && (
+                <div className="space-y-6">
+                  {/* Zero-Sum Balance Sheet Status Banner */}
+                  <div
+                    className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs ${
+                      trialBalance?.isBalanced
+                        ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                        : "bg-amber-50/70 border-amber-200 text-amber-950"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                          trialBalance?.isBalanced
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        <ShieldCheck size={20} />
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm">
+                          {trialBalance?.isBalanced
+                            ? "Strict Mathematical Zero-Sum Ledger Verified"
+                            : "Ledger Reconciliation Discrepancy Detected"}
+                        </div>
+                        <p className="text-[11px] text-[#555] mt-0.5">
+                          {trialBalance?.isBalanced
+                            ? `All debits match credits exactly (Imbalance = ₦0.00). Total Inflow/Outflow: ${formatNaira(
+                                trialBalance?.totalDebits || 0
+                              )}.`
+                            : `Debit/Credit mismatch of ${formatNaira(
+                                trialBalance?.imbalance || 0
+                              )}. Administrative review recommended.`}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      <span className="font-mono text-[11px] px-2.5 py-1 rounded-lg bg-white border border-emerald-300 font-bold text-emerald-900">
+                        Δ Imbalance: {formatNaira(trialBalance?.imbalance || 0)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setFinanceSubTab("trial_balance")}
+                        className="px-3 py-1 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg font-semibold text-[11px] transition-colors"
+                      >
+                        Inspect Accounts →
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 4 Core Financial Metrics */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Paystack &amp; Bank Assets</span>
+                        <Landmark size={15} className="text-accent" />
+                      </div>
+                      <div className="text-2xl font-bold text-primary tabular-nums">
+                        {formatNaira(financialSummary?.metrics?.paystackClearing || 0)}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        In Clearing Account (1010)
+                      </p>
+                    </div>
+
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Advance Guest Escrow</span>
+                        <Lock size={15} className="text-blue-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-blue-900 tabular-nums">
+                        {formatNaira(financialSummary?.metrics?.advanceGuestDeposits || 0)}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        Escrow liability held until check-in (2010)
+                      </p>
+                    </div>
+
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Host Settlement Payable</span>
+                        <Clock size={15} className="text-amber-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-amber-900 tabular-nums">
+                        {formatNaira(financialSummary?.metrics?.hostSettlementPayable || 0)}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        Owed to hosts for checked-in stays (2020)
+                      </p>
+                    </div>
+
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Ilé Commission Revenue</span>
+                        <TrendingUp size={15} className="text-emerald-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-emerald-800 tabular-nums">
+                        {formatNaira(financialSummary?.metrics?.platformCommissionRevenue || 0)}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        Earned 10% platform commission (4010)
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Operational Action Queues Overview */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {/* Host Payouts Card */}
+                    <div className="p-6 bg-surface rounded-2xl border border-border shadow-xs space-y-4 flex flex-col justify-between">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
+                            <Landmark size={14} />
+                            <span>Host Payout Queue</span>
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                            {payoutsQueue.filter((p) => p.status !== "PAID").length} Pending
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-primary">
+                          Scheduled Host Settlements
+                        </h3>
+                        <p className="text-xs text-primary-secondary leading-relaxed">
+                          After guests check in and complete the 24-hour verification window, net payouts (90% of accommodation subtotal) become ready for manual authorization and Nigerian NUBAN transfer.
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-border flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] uppercase font-semibold text-primary-muted block">
+                            Pending Value
+                          </span>
+                          <span className="text-lg font-bold text-primary">
+                            {formatNaira(
+                              payoutsQueue
+                                .filter((p) => p.status !== "PAID")
+                                .reduce((acc, p) => acc + (p.amount || 0), 0)
+                            )}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFinanceSubTab("payouts")}
+                          className="px-4 py-2 bg-primary text-white text-xs font-semibold rounded-xl hover:bg-black transition-colors"
+                        >
+                          Review Payout Queue →
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Refunds Policy Card */}
+                    <div className="p-6 bg-surface rounded-2xl border border-border shadow-xs space-y-4 flex flex-col justify-between">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
+                            <Receipt size={14} />
+                            <span>Refunds &amp; Cancellations</span>
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                            {refundsQueue.length} Processed
+                          </span>
+                        </div>
+                        <h3 className="text-base font-bold text-primary">
+                          Non-Refundable Fee Protection
+                        </h3>
+                        <p className="text-xs text-primary-secondary leading-relaxed">
+                          Guests who cancel receive a refund for the accommodation price only. The Paystack domestic processing fee (1.5% + ₦100) is strictly non-refundable and kept by the processor.
+                        </p>
+                      </div>
+
+                      <div className="pt-3 border-t border-border flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] uppercase font-semibold text-primary-muted block">
+                            Total Refunded
+                          </span>
+                          <span className="text-lg font-bold text-primary">
+                            {formatNaira(
+                              refundsQueue.reduce((acc, r) => acc + (r.refundableAmount || 0), 0)
+                            )}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFinanceSubTab("refunds")}
+                          className="px-4 py-2 border border-border bg-surface hover:bg-surface-muted text-primary text-xs font-semibold rounded-xl transition-colors"
+                        >
+                          Manage Refunds →
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sub-Tab 2: Host Payout Queue ── */}
+              {financeSubTab === "payouts" && (
+                <div className="space-y-4">
+                  {/* Status Filters Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      {[
+                        { id: "ALL", label: "All Payouts", count: payoutsQueue.length },
+                        {
+                          id: "READY_FOR_PAYOUT",
+                          label: "Ready for Disbursement",
+                          count: payoutsQueue.filter((p) => p.status === "READY_FOR_PAYOUT").length,
+                        },
+                        {
+                          id: "HELD",
+                          label: "In 24h Escrow Hold",
+                          count: payoutsQueue.filter((p) => p.status === "HELD").length,
+                        },
+                        {
+                          id: "PAID",
+                          label: "Disbursed",
+                          count: payoutsQueue.filter((p) => p.status === "PAID").length,
+                        },
+                      ].map((filter) => (
+                        <button
+                          key={filter.id}
+                          type="button"
+                          onClick={() => setPayoutFilter(filter.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                            payoutFilter === filter.id
+                              ? "bg-accent text-white"
+                              : "bg-surface border border-border text-primary-muted hover:text-primary"
+                          }`}
+                        >
+                          <span>{filter.label}</span>
+                          <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/10">
+                            {filter.count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-xs text-primary-muted font-medium">
+                      Total Payout Value:{" "}
+                      <span className="font-bold text-primary">
+                        {formatNaira(
+                          payoutsQueue
+                            .filter((p) => (payoutFilter === "ALL" ? true : p.status === payoutFilter))
+                            .reduce((sum, p) => sum + (p.amount || 0), 0)
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Payout Queue Table */}
+                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                    <table className="w-full text-left text-xs divide-y divide-border">
+                      <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                        <tr>
+                          <th className="py-2.5 px-3">Ref / Host</th>
+                          <th className="py-2.5 px-3">Property &amp; Stay</th>
+                          <th className="py-2.5 px-3">Settlement Bank (NUBAN)</th>
+                          <th className="py-2.5 px-3">Net Amount</th>
+                          <th className="py-2.5 px-3">Scheduled For</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {payoutsQueue
+                          .filter((p) => (payoutFilter === "ALL" ? true : p.status === payoutFilter))
+                          .map((p) => (
+                            <tr key={p.id} className="hover:bg-surface-muted/60 transition-colors">
+                              <td className="py-3 px-3">
+                                <div className="font-bold text-primary font-mono">{p.bookingRef || p.bookingId?.slice(0, 8)}</div>
+                                <div className="font-semibold text-primary mt-0.5">{p.hostName || "Host"}</div>
+                                <div className="text-[11px] text-primary-muted font-mono">{p.hostEmail}</div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="font-medium text-primary line-clamp-1">{p.propertyName || "Stay"}</div>
+                                <div className="text-[11px] text-primary-secondary mt-0.5">
+                                  {p.checkInDate} → {p.checkOutDate}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="font-semibold text-primary">{p.bankName || "Bank"}</div>
+                                <div className="text-[11px] font-mono text-primary-secondary tracking-wider">
+                                  {p.accountNumber || "—"}
+                                </div>
+                                <div className="text-[10px] text-primary-muted">{p.accountName}</div>
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap font-bold text-emerald-800 text-sm tabular-nums">
+                                {formatNaira(p.amount || 0)}
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap text-primary-secondary">
+                                {p.scheduledFor ? new Date(p.scheduledFor).toLocaleDateString() : "Immediate"}
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+                                    p.status === "PAID"
+                                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                      : p.status === "READY_FOR_PAYOUT"
+                                      ? "bg-blue-50 text-blue-800 border-blue-200"
+                                      : "bg-amber-50 text-amber-800 border-amber-200"
+                                  }`}
+                                >
+                                  {p.status}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 text-right whitespace-nowrap">
+                                {p.status === "PAID" ? (
+                                  <div className="text-[11px] text-primary-muted">
+                                    <span className="font-mono">{p.paystackTransferRef || "Disbursed"}</span>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDisburseModalPayout(p);
+                                      setDisburseTransferRef(`TRF-${Date.now().toString(36).toUpperCase()}`);
+                                    }}
+                                    className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs"
+                                  >
+                                    Authorize &amp; Disburse
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        {payoutsQueue.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="p-10 text-center text-primary-muted">
+                              No payouts in queue.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sub-Tab 3: Refunds Management ── */}
+              {financeSubTab === "refunds" && (
+                <div className="space-y-4">
+                  {/* Notice Banner */}
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-xs text-amber-950 shadow-xs">
+                    <AlertTriangle size={18} className="text-amber-700 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold">Institutional Refund Rule: </span>
+                      <span>
+                        Processing fees (1.5% + ₦100, capped at ₦2,000) are non-refundable pass-through expenses forfeited by the guest.
+                        When an admin processes a refund, the double-entry engine debits Advance Guest Deposits Escrow (2010)
+                        and credits Paystack Clearing (1010), recognizing the retained gateway fee expense (5010).
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Refunds Table */}
+                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                    <div className="p-4 border-b border-border flex items-center justify-between">
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-primary">
+                        Executed Refunds Log ({refundsQueue.length})
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setShowRefundModal(true)}
+                        className="px-3 py-1.5 bg-accent text-white text-xs font-semibold rounded-xl hover:bg-accent-hover transition-colors cursor-pointer"
+                      >
+                        + Issue Refund
+                      </button>
+                    </div>
+
+                    <table className="w-full text-left text-xs divide-y divide-border">
+                      <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                        <tr>
+                          <th className="py-2.5 px-3">Booking Ref</th>
+                          <th className="py-2.5 px-3">Guest Contact</th>
+                          <th className="py-2.5 px-3">Gross Paid</th>
+                          <th className="py-2.5 px-3">Retained Fee (Forfeited)</th>
+                          <th className="py-2.5 px-3">Net Refunded</th>
+                          <th className="py-2.5 px-3">Reason / Notes</th>
+                          <th className="py-2.5 px-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {refundsQueue.map((r) => (
+                          <tr key={r.id} className="hover:bg-surface-muted/60 transition-colors">
+                            <td className="py-3 px-3">
+                              <span className="font-bold text-primary font-mono">{r.bookingRef || r.bookingId?.slice(0, 8)}</span>
+                              <div className="text-[11px] text-primary-muted">{r.propertyName}</div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="text-primary font-mono">{r.guestEmail}</div>
+                              <div className="text-[11px] text-primary-muted">{r.guestPhone}</div>
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap text-primary-secondary font-medium tabular-nums">
+                              {formatNaira(r.grossPaid || 0)}
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap text-rose-700 font-medium tabular-nums">
+                              -{formatNaira(r.nonRefundableProcessingFee || 0)}
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap font-bold text-blue-900 text-sm tabular-nums">
+                              {formatNaira(r.refundableAmount || 0)}
+                            </td>
+                            <td className="py-3 px-3 text-primary-secondary">
+                              <span className="font-medium text-primary block">{r.reason || "Cancellation"}</span>
+                              <span className="text-[10px] text-primary-muted">{r.adminNotes}</span>
+                            </td>
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 uppercase">
+                                {r.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {refundsQueue.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="p-10 text-center text-primary-muted">
+                              No refunds recorded.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sub-Tab 4: Double-Entry Trial Balance ── */}
+              {financeSubTab === "trial_balance" && (
+                <div className="space-y-4">
+                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                    <div className="p-4 border-b border-border flex items-center justify-between">
+                      <div>
+                        <h3 className="font-bold text-xs uppercase tracking-wider text-primary">
+                          Chart of Accounts &amp; Trial Balance
+                        </h3>
+                        <p className="text-[11px] text-primary-muted mt-0.5">
+                          Formal trial balance proving mathematical equilibrium ($\sum Debit = \sum Credit$).
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-primary">Balanced:</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                          {trialBalance?.isBalanced ? "✓ EQUAL" : "⚠ MISMATCH"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <table className="w-full text-left text-xs divide-y divide-border">
+                      <thead className="bg-surface text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                        <tr>
+                          <th className="py-2.5 px-4">Account Code</th>
+                          <th className="py-2.5 px-4">Account Name</th>
+                          <th className="py-2.5 px-4">Category</th>
+                          <th className="py-2.5 px-4">Normal Balance</th>
+                          <th className="py-2.5 px-4 text-right">Debit Balance</th>
+                          <th className="py-2.5 px-4 text-right">Credit Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {(trialBalance?.rows || []).map((row: any) => {
+                          const isDebit = row.normalBalance === "DEBIT";
+                          return (
+                            <tr key={row.code} className="hover:bg-surface-muted/60 transition-colors">
+                              <td className="py-3 px-4 font-mono font-bold text-primary">{row.code}</td>
+                              <td className="py-3 px-4 font-semibold text-primary">{row.name}</td>
+                              <td className="py-3 px-4">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-muted border border-border">
+                                  {row.category}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-primary-secondary font-mono text-[11px]">
+                                {row.normalBalance}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-semibold text-primary tabular-nums">
+                                {isDebit ? formatNaira(row.netBalance) : "—"}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-semibold text-primary tabular-nums">
+                                {!isDebit ? formatNaira(row.netBalance) : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-surface-muted/80 font-bold border-t-2 border-border text-xs">
+                        <tr>
+                          <td colSpan={4} className="py-3 px-4 uppercase tracking-wider text-primary">
+                            Trial Balance Totals (Reconciled)
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-emerald-800 text-sm tabular-nums">
+                            {formatNaira(trialBalance?.totalDebits || 0)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono text-emerald-800 text-sm tabular-nums">
+                            {formatNaira(trialBalance?.totalCredits || 0)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sub-Tab 5: General Ledger Journals Feed ── */}
+              {financeSubTab === "journals" && (
+                <div className="space-y-4">
+                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                    <div className="p-4 border-b border-border flex items-center justify-between">
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-primary">
+                        Balanced Journal Entries ({journals.length})
+                      </h3>
+                      <span className="text-[11px] text-primary-muted font-normal">
+                        Every entry satisfies $\sum Debit \equiv \sum Credit$
+                      </span>
+                    </div>
+
+                    <table className="w-full text-left text-xs divide-y divide-border">
+                      <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                        <tr>
+                          <th className="py-2.5 px-3">Date / ID</th>
+                          <th className="py-2.5 px-3">Type</th>
+                          <th className="py-2.5 px-3">Reference</th>
+                          <th className="py-2.5 px-3">Account Lines &amp; Splits</th>
+                          <th className="py-2.5 px-3 text-right">Debit / Credit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {journals.map((j: any) => (
+                          <tr key={j.id} className="hover:bg-surface-muted/60 transition-colors align-top">
+                            <td className="py-3 px-3 whitespace-nowrap">
+                              <div className="font-mono text-primary-secondary text-[11px]">
+                                {new Date(j.createdAt).toLocaleString("en-GB")}
+                              </div>
+                              <div className="font-mono text-[10px] text-primary-muted">{j.id?.slice(0, 12)}</div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-muted border border-border block w-fit">
+                                {j.transactionType}
+                              </span>
+                              <p className="text-[10px] text-primary-secondary mt-1">{j.description}</p>
+                            </td>
+                            <td className="py-3 px-3 font-mono text-primary font-semibold">
+                              {j.reference || "—"}
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="space-y-1">
+                                {(j.entries || []).map((e: any, idx: number) => (
+                                  <div key={idx} className="flex items-center justify-between gap-4 text-[11px]">
+                                    <span className="text-primary font-medium">
+                                      {e.accountCode} · {e.accountName}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="py-3 px-3 text-right whitespace-nowrap">
+                              <div className="space-y-1">
+                                {(j.entries || []).map((e: any, idx: number) => (
+                                  <div key={idx} className="font-mono font-semibold tabular-nums text-[11px]">
+                                    {e.entryType === "DEBIT" ? (
+                                      <span className="text-emerald-700">Dr {formatNaira(e.amount)}</span>
+                                    ) : (
+                                      <span className="text-blue-700">Cr {formatNaira(e.amount)}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {journals.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="p-10 text-center text-primary-muted">
+                              No journals recorded yet.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sub-Tab 6: Bookings Ledger ── */}
+              {financeSubTab === "bookings" && (
+                <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                  <table className="w-full text-left text-xs divide-y divide-border">
+                    <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                      <tr>
+                        <th className="py-2.5 px-3">Order Ref</th>
+                        <th className="py-2.5 px-3">Guest</th>
+                        <th className="py-2.5 px-3">Stay Dates</th>
+                        <th className="py-2.5 px-3">Total Amount</th>
+                        <th className="py-2.5 px-3">Payment Method</th>
+                        <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {bookings.map((b) => (
+                        <tr
+                          key={b.id}
+                          onClick={() => setSelectedBooking(b)}
+                          className="hover:bg-surface-muted/60 transition-colors cursor-pointer"
+                        >
+                          <td className="py-2 px-3 font-mono font-bold text-primary tabular-nums">
+                            {b.id?.slice(0, 8) || b.referenceCode || "BK-ORD"}
+                          </td>
+                          <td className="py-2 px-3">
+                            <div className="font-semibold text-primary">
+                              {b.guestName || "Guest User"}
+                            </div>
+                            <div className="text-[11px] text-primary-muted font-mono">{b.guestEmail}</div>
+                          </td>
+                          <td className="py-2 px-3 text-primary-secondary tabular-nums">
+                            {b.checkInDate || b.checkIn} → {b.checkOutDate || b.checkOut}
+                          </td>
+                          <td className="py-2 px-3 font-bold text-accent tabular-nums">
+                            {formatNaira(b.totalAmount || b.totalPrice || 0)}
+                          </td>
+                          <td className="py-2 px-3 text-primary-secondary font-medium">
+                            {b.payment?.paymentMethod || "Payment Gateway"}
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-status-success-bg text-status-success-text border border-status-success-border">
+                              {b.status || "CONFIRMED"}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedBooking(b)}
+                              className="px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted"
+                            >
+                              Details
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {bookings.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="p-10 text-center text-primary-muted">
+                            No transactions recorded in ledger.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 
@@ -1999,7 +2763,7 @@ export default function AdminPortalPage() {
                             : "text-[#6B6B67] hover:text-[#171717] bg-[#F5F4F0] hover:bg-[#EBEAE5]"
                         }`}
                       >
-                        Authority Deed
+                        Proof of Residence
                       </button>
                     )}
                   </div>
@@ -2052,7 +2816,7 @@ export default function AdminPortalPage() {
                                 ? "Back of ID"
                                 : activeDocTab === "selfie"
                                 ? "Biometric Selfie"
-                                : "Authority Deed"
+                                : "Proof of Residence"
                             )
                           }
                           disabled={!currentUrl}
@@ -2358,6 +3122,248 @@ export default function AdminPortalPage() {
             >
               Done
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Authorize & Disburse Host Payout ── */}
+      {disburseModalPayout && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-surface rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-5 text-primary shadow-2xl border border-border">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Landmark size={20} className="text-accent" />
+                <h3 className="font-bold text-base text-primary">Authorize Host Payout</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDisburseModalPayout(null)}
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 bg-surface-muted rounded-2xl border border-border space-y-2.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-primary-muted">Host Name:</span>
+                <span className="font-semibold text-primary">{disburseModalPayout.hostName || "Host"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-primary-muted">NUBAN Bank:</span>
+                <span className="font-semibold text-primary">{disburseModalPayout.bankName || "Bank"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-primary-muted">Account Number:</span>
+                <span className="font-mono font-bold text-primary tracking-wider">{disburseModalPayout.accountNumber || "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-primary-muted">Account Name:</span>
+                <span className="text-primary">{disburseModalPayout.accountName || "Host"}</span>
+              </div>
+              <div className="pt-2 border-t border-border flex justify-between items-center">
+                <span className="text-primary-muted font-bold uppercase tracking-wider text-[11px]">Net Disbursement:</span>
+                <span className="text-xl font-bold text-emerald-800 tabular-nums">
+                  {formatNaira(disburseModalPayout.amount || 0)}
+                </span>
+              </div>
+            </div>
+
+            <form onSubmit={handleDisbursePayout} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Paystack Transfer Reference / Bank Ref
+                </label>
+                <input
+                  type="text"
+                  value={disburseTransferRef}
+                  onChange={(e) => setDisburseTransferRef(e.target.value)}
+                  placeholder="e.g. TRF_20261022_9921"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary font-mono text-xs focus:outline-none focus:border-accent"
+                />
+                <span className="text-[10px] text-primary-muted mt-0.5 block">
+                  Reference recorded in ledger journal for reconciliation.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Administrative Notes (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={disburseNotes}
+                  onChange={(e) => setDisburseNotes(e.target.value)}
+                  placeholder="e.g. Manual bank wire verified via GTBank business portal"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDisburseModalPayout(null)}
+                  className="px-4 py-2 border border-border rounded-xl text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDisbursing}
+                  className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                >
+                  {isDisbursing ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Posting Ledger...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={14} />
+                      <span>Confirm &amp; Disburse Payout</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Issue Manual Refund ── */}
+      {showRefundModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-surface rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-5 text-primary shadow-2xl border border-border">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Receipt size={20} className="text-accent" />
+                <h3 className="font-bold text-base text-primary">Issue Guest Booking Refund</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRefundModal(false);
+                  setRefundBookingId("");
+                }}
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-950 flex items-start gap-2">
+              <AlertTriangle size={15} className="text-amber-700 shrink-0 mt-0.5" />
+              <span>
+                <strong>Fee Forfeiture Safeguard:</strong> The guest domestic processing fee (1.5% + ₦100, capped at ₦2,000) was consumed by Paystack and is forfeited. The refund strictly credits the guest with the accommodation subtotal.
+              </span>
+            </div>
+
+            <form onSubmit={handleProcessRefund} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Select Confirmed Booking
+                </label>
+                <select
+                  required
+                  value={refundBookingId}
+                  onChange={(e) => setRefundBookingId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
+                >
+                  <option value="">-- Choose a booking to refund --</option>
+                  {bookings.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.referenceCode || b.id.slice(0, 8)} — {b.guestName || b.guestEmail} ({formatNaira(b.totalAmount || b.totalPrice || 0)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Dynamic Calculation Preview */}
+              {(() => {
+                const targetBooking = bookings.find((b) => b.id === refundBookingId);
+                if (!targetBooking) return null;
+                const gross = targetBooking.totalAmount || targetBooking.totalPrice || 0;
+                const subtotal = targetBooking.accommodationSubtotal || Math.round(gross * 0.985 - 100);
+                const fee = targetBooking.paystackFeeAmount || calculatePaystackFee(subtotal);
+                const refundable = subtotal > 0 ? subtotal : Math.max(0, gross - fee);
+
+                return (
+                  <div className="p-4 bg-surface-muted rounded-2xl border border-border space-y-2 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-primary-muted">Gross Amount Paid:</span>
+                      <span className="font-semibold text-primary">{formatNaira(gross)}</span>
+                    </div>
+                    <div className="flex justify-between text-rose-700">
+                      <span>Gateway Fee (Non-Refundable):</span>
+                      <span className="font-semibold">-{formatNaira(fee)}</span>
+                    </div>
+                    <div className="pt-2 border-t border-border flex justify-between items-center">
+                      <span className="font-bold text-primary uppercase text-[11px]">Net Refund to Guest:</span>
+                      <span className="text-lg font-bold text-blue-900 tabular-nums">
+                        {formatNaira(refundable)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Refund Reason
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  placeholder="e.g. Guest emergency travel cancellation / mutual agreement"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Internal Administrative Notes
+                </label>
+                <textarea
+                  rows={2}
+                  value={refundNotes}
+                  onChange={(e) => setRefundNotes(e.target.value)}
+                  placeholder="e.g. Approved by Lead Auditor; processed via Paystack dashboard reversal"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent resize-none"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRefundModal(false);
+                    setRefundBookingId("");
+                  }}
+                  className="px-4 py-2 border border-border rounded-xl text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessingRefund || !refundBookingId}
+                  className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                >
+                  {isProcessingRefund ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Executing Ledger...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Receipt size={14} />
+                      <span>Confirm &amp; Process Refund</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

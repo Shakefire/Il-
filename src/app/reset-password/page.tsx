@@ -80,7 +80,7 @@ function ResetPasswordForm() {
         <div className="pt-2">
           <Link
             href="/forgot-password"
-            className="inline-flex items-center justify-center w-full h-[52px] bg-[#24483A] text-white rounded-[11px] font-medium text-[15px] hover:bg-[#1B372C] transition-colors"
+            className="inline-flex items-center justify-center w-full h-[52px] bg-[#065F46] text-white rounded-[11px] font-medium text-[15px] hover:bg-[#044E39] active:scale-[0.99] transition-all"
           >
             Request new reset link →
           </Link>
@@ -108,7 +108,7 @@ function ResetPasswordForm() {
           <div className="pt-2">
             <Link
               href="/login"
-              className="inline-flex items-center justify-center w-full h-[52px] bg-[#24483A] text-white rounded-[11px] font-medium text-[15px] hover:bg-[#1B372C] transition-colors"
+              className="inline-flex items-center justify-center w-full h-[52px] bg-[#065F46] text-white rounded-[11px] font-medium text-[15px] hover:bg-[#044E39] active:scale-[0.99] transition-all"
             >
               Continue to log in →
             </Link>

@@ -93,7 +93,7 @@ export default function DocumentPreviewModal({
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-[#E7E5E0] bg-white flex items-center justify-between text-xs text-[#6B6B67]">
-          <span>Document is securely stored and visible only to verification compliance officers.</span>
+          <span>Your document is securely stored and used only to verify your account.</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-lg border border-[#E7E5E0] text-[#171717] hover:bg-[#FAFAF8] font-medium transition-colors cursor-pointer"

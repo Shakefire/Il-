@@ -28,6 +28,9 @@ import {
   TrendingUp,
   Layers,
   RotateCcw,
+  Landmark,
+  Wallet,
+  ArrowUpRight,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
@@ -127,20 +130,52 @@ interface HostBooking {
   propertyId: string;
   propertyTitle: string;
   propertyCity: string;
-  propertyNeighborhood: string;
+  propertyNeighborhood?: string;
   guestFirstName: string;
   guestLastName: string;
   guestEmail: string;
   guestPhone: string;
-  guestCount: number;
-  startDate: string;
-  endDate: string;
-  totalNights: number;
-  totalPrice: number;
-  bookingStatus: string;
-  paymentStatus: string;
+  guestCount?: number;
+  totalGuests?: number;
+  startDate?: string;
+  checkInDate?: string;
+  endDate?: string;
+  checkOutDate?: string;
+  totalNights?: number;
+  numberOfNights?: number;
+  nightlyPrice?: number;
+  totalPrice?: number;
+  totalAmount?: number;
+  accommodationSubtotal?: number;
+  hostCommissionPct?: number;
+  hostCommissionAmount?: number;
+  paystackFeeAmount?: number;
+  hostNetAmount?: number;
+  bookingStatus?: string;
+  status?: string;
+  paymentStatus?: string;
   paymentReference?: string;
   createdAt: string;
+}
+
+interface HostPayout {
+  id: string;
+  bookingId: string;
+  amount: number;
+  currency: string;
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  status: "SCHEDULED" | "PROCESSING" | "DISBURSED" | "FAILED" | "CANCELLED";
+  scheduledFor: string;
+  disbursedAt?: string;
+  paystackTransferRef?: string;
+  notes?: string;
+  createdAt: string;
+  bookingRef: string;
+  propertyName: string;
+  checkInDate: string;
+  checkOutDate: string;
 }
 
 export default function HostDashboardPage() {
@@ -148,10 +183,19 @@ export default function HostDashboardPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const [properties, setProperties] = useState<HostProperty[]>([]);
   const [bookings, setBookings] = useState<HostBooking[]>([]);
-  const [activeTab, setActiveTab] = useState<"properties" | "bookings">("properties");
+  const [activeTab, setActiveTab] = useState<"properties" | "bookings" | "calendar" | "financials">("properties");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
   const [loadingBookings, setLoadingBookings] = useState(false);
+  const [payouts, setPayouts] = useState<HostPayout[]>([]);
+  const [loadingPayouts, setLoadingPayouts] = useState(false);
+  const [calendarSelectedPropId, setCalendarSelectedPropId] = useState<string>("");
+  const [calendarBlocks, setCalendarBlocks] = useState<any[]>([]);
+  const [loadingCalendar, setLoadingCalendar] = useState(false);
+  const [calBlockStart, setCalBlockStart] = useState("");
+  const [calBlockEnd, setCalBlockEnd] = useState("");
+  const [isCalBlocking, setIsCalBlocking] = useState(false);
+  const [calMessage, setCalMessage] = useState<string | null>(null);
   const [stats, setStats] = useState<{
     totalProperties: number;
     published: number;
@@ -329,12 +373,82 @@ export default function HostDashboardPage() {
     }
   };
 
+  const loadPayouts = async () => {
+    setLoadingPayouts(true);
+    try {
+      const res = await api.getHostPayouts();
+      if (res && res.payouts) {
+        setPayouts(res.payouts);
+      }
+    } catch (err: any) {
+      console.warn("Could not load host payouts:", err);
+    } finally {
+      setLoadingPayouts(false);
+    }
+  };
+
+  const loadCalendarForProperty = async (propId: string) => {
+    if (!propId) return;
+    setLoadingCalendar(true);
+    setCalMessage(null);
+    try {
+      const res = await api.getHostPropertyAvailability(propId);
+      if (res && res.blocks) {
+        setCalendarBlocks(res.blocks);
+      }
+    } catch (err: any) {
+      console.warn("Could not load calendar blocks:", err);
+    } finally {
+      setLoadingCalendar(false);
+    }
+  };
+
+  const handleCalendarBlockDates = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!calendarSelectedPropId || !calBlockStart || !calBlockEnd) return;
+    setIsCalBlocking(true);
+    setCalMessage(null);
+    try {
+      await api.blockHostPropertyDates(calendarSelectedPropId, {
+        startDate: calBlockStart,
+        endDate: calBlockEnd,
+      });
+      setCalMessage("Dates successfully blocked from public inventory.");
+      setCalBlockStart("");
+      setCalBlockEnd("");
+      loadCalendarForProperty(calendarSelectedPropId);
+    } catch (err: any) {
+      alert(err.message || "Failed to block dates.");
+    } finally {
+      setIsCalBlocking(false);
+    }
+  };
+
+  const handleCalendarUnblockDates = async (blockId: string) => {
+    if (!calendarSelectedPropId) return;
+    try {
+      await api.unblockHostPropertyDates(calendarSelectedPropId, blockId);
+      setCalMessage("Dates unblocked and returned to public inventory.");
+      loadCalendarForProperty(calendarSelectedPropId);
+    } catch (err: any) {
+      alert(err.message || "Failed to unblock dates.");
+    }
+  };
+
   useEffect(() => {
     loadProperties();
     loadBookings();
     loadStats();
     loadOnboardingStatus();
+    loadPayouts();
   }, []);
+
+  useEffect(() => {
+    if (properties.length > 0 && !calendarSelectedPropId) {
+      setCalendarSelectedPropId(properties[0].id);
+      loadCalendarForProperty(properties[0].id);
+    }
+  }, [properties, calendarSelectedPropId]);
 
   const handleCreateProperty = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -377,11 +491,11 @@ export default function HostDashboardPage() {
 
   const handleSubmitForReview = async (propId: string) => {
     try {
-      await api.submitPropertyForReview(propId);
-      setActionMessage("Property submitted for admin physical verification & review!");
+      const res = await api.submitPropertyForReview(propId);
+      setActionMessage(res?.message || "Property published successfully and is now live on Ilé!");
       loadProperties();
     } catch (err: any) {
-      alert(err.message || "Failed to submit property for review");
+      alert(err.message || "Failed to publish property");
     }
   };
 
@@ -488,6 +602,51 @@ export default function HostDashboardPage() {
         {status || "Pending"}
       </span>
     );
+  };
+
+  const getPayoutStatusBadge = (status: string) => {
+    switch (status) {
+      case "DISBURSED":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <CheckCircle2 size={13} />
+            Disbursed
+          </span>
+        );
+      case "SCHEDULED":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+            <Clock size={13} />
+            Scheduled (Hold)
+          </span>
+        );
+      case "PROCESSING":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+            <Loader2 size={13} className="animate-spin" />
+            Processing
+          </span>
+        );
+      case "FAILED":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+            <XCircle size={13} />
+            Failed
+          </span>
+        );
+      case "CANCELLED":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
+            Cancelled
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
+            {status}
+          </span>
+        );
+    }
   };
 
   return (
@@ -733,32 +892,56 @@ export default function HostDashboardPage() {
 
         {/* Navigation Tabs & Content (Cascaded with Framer Motion) */}
         <motion.div variants={itemVariants} className="space-y-6">
-          <div className="flex border-b border-[#E7E5E0] gap-8">
-          <button
-            type="button"
-            onClick={() => setActiveTab("properties")}
-            className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${
-              activeTab === "properties"
-                ? "border-[#0B5D45] text-[#0B5D45]"
-                : "border-transparent text-[#6B6B67] hover:text-[#171717]"
-            }`}
-          >
-            <Home size={16} />
-            <span>My Listings ({properties.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("bookings")}
-            className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${
-              activeTab === "bookings"
-                ? "border-[#0B5D45] text-[#0B5D45]"
-                : "border-transparent text-[#6B6B67] hover:text-[#171717]"
-            }`}
-          >
-            <Calendar size={16} />
-            <span>Reservations &amp; Bookings ({bookings.length})</span>
-          </button>
-        </div>
+          <div className="flex border-b border-[#E7E5E0] gap-6 sm:gap-8 overflow-x-auto">
+            <button
+              type="button"
+              onClick={() => setActiveTab("properties")}
+              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeTab === "properties"
+                  ? "border-[#0B5D45] text-[#0B5D45]"
+                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
+              }`}
+            >
+              <Home size={16} />
+              <span>My Listings ({properties.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("bookings")}
+              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeTab === "bookings"
+                  ? "border-[#0B5D45] text-[#0B5D45]"
+                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
+              }`}
+            >
+              <Calendar size={16} />
+              <span>Reservations ({bookings.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("calendar")}
+              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeTab === "calendar"
+                  ? "border-[#0B5D45] text-[#0B5D45]"
+                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
+              }`}
+            >
+              <CalendarCheck size={16} />
+              <span>Calendar &amp; Availability</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("financials")}
+              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
+                activeTab === "financials"
+                  ? "border-[#0B5D45] text-[#0B5D45]"
+                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
+              }`}
+            >
+              <Wallet size={16} />
+              <span>Settlements &amp; Financials</span>
+            </button>
+          </div>
 
         {/* Tab 1: Listings Overview */}
         {activeTab === "properties" && (
@@ -990,55 +1173,467 @@ export default function HostDashboardPage() {
                         <th className="py-3.5 px-4 font-semibold">Ref / Property</th>
                         <th className="py-3.5 px-4 font-semibold">Guest</th>
                         <th className="py-3.5 px-4 font-semibold">Dates &amp; Stay</th>
-                        <th className="py-3.5 px-4 font-semibold">Amount</th>
-                        <th className="py-3.5 px-4 font-semibold">Booking Status</th>
-                        <th className="py-3.5 px-4 font-semibold">Payment</th>
+                        <th className="py-3.5 px-4 font-semibold">Gross Subtotal</th>
+                        <th className="py-3.5 px-4 font-semibold">Ilé Fee (10%)</th>
+                        <th className="py-3.5 px-4 font-semibold">Net Host Payout</th>
+                        <th className="py-3.5 px-4 font-semibold">Status</th>
                         <th className="py-3.5 px-4 font-semibold">Booked On</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#E7E5E0]">
-                      {bookings.map((b) => (
-                        <tr key={b.id} className="hover:bg-stone-50/50 transition-colors">
-                          <td className="py-4 px-4">
-                            <div className="font-semibold text-[#171717]">{b.referenceCode}</div>
-                            <div className="text-xs text-[#6B6B67] line-clamp-1">{b.propertyTitle}</div>
-                            <div className="text-[11px] text-[#8B8B86]">{b.propertyNeighborhood}, {b.propertyCity}</div>
-                          </td>
-                          <td className="py-4 px-4">
-                            <div className="font-medium text-[#171717]">{b.guestFirstName} {b.guestLastName}</div>
-                            <div className="text-xs text-[#6B6B67]">{b.guestEmail}</div>
-                            <div className="text-[11px] text-[#8B8B86]">{b.guestPhone}</div>
-                          </td>
-                          <td className="py-4 px-4 whitespace-nowrap">
-                            <div className="text-xs font-medium text-[#171717]">
-                              {b.startDate} → {b.endDate}
-                            </div>
-                            <div className="text-xs text-[#6B6B67]">
-                              {b.totalNights} {b.totalNights === 1 ? "night" : "nights"} · {b.guestCount} {b.guestCount === 1 ? "guest" : "guests"}
-                            </div>
-                          </td>
-                          <td className="py-4 px-4 whitespace-nowrap">
-                            <div className="font-semibold text-[#171717]">
-                              {formatNaira(b.totalPrice)}
-                            </div>
-                          </td>
-                          <td className="py-4 px-4 whitespace-nowrap">
-                            {getBookingStatusBadge(b.bookingStatus)}
-                          </td>
-                          <td className="py-4 px-4 whitespace-nowrap">
-                            {getPaymentStatusBadge(b.paymentStatus)}
-                          </td>
-                          <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
-                            {new Date(b.createdAt).toLocaleDateString()}
-                          </td>
-                        </tr>
-                      ))}
+                      {bookings.map((b) => {
+                        const subtotal = b.accommodationSubtotal || (b.nightlyPrice ? b.nightlyPrice * (b.numberOfNights || b.totalNights || 1) : b.totalPrice || b.totalAmount || 0);
+                        const commission = b.hostCommissionAmount && b.hostCommissionAmount > 0 ? b.hostCommissionAmount : Math.round(subtotal * 0.1);
+                        const netPayout = b.hostNetAmount && b.hostNetAmount > 0 ? b.hostNetAmount : subtotal - commission;
+                        const startDate = b.startDate || b.checkInDate || "";
+                        const endDate = b.endDate || b.checkOutDate || "";
+                        const nights = b.totalNights || b.numberOfNights || 1;
+                        const guests = b.guestCount || b.totalGuests || 1;
+
+                        return (
+                          <tr key={b.id} className="hover:bg-stone-50/50 transition-colors">
+                            <td className="py-4 px-4">
+                              <div className="font-semibold text-[#171717]">{b.referenceCode}</div>
+                              <div className="text-xs text-[#6B6B67] line-clamp-1">{b.propertyTitle}</div>
+                              <div className="text-[11px] text-[#8B8B86]">{b.propertyNeighborhood ? `${b.propertyNeighborhood}, ` : ""}{b.propertyCity}</div>
+                            </td>
+                            <td className="py-4 px-4">
+                              <div className="font-medium text-[#171717]">{b.guestFirstName} {b.guestLastName}</div>
+                              <div className="text-xs text-[#6B6B67]">{b.guestEmail}</div>
+                              <div className="text-[11px] text-[#8B8B86]">{b.guestPhone}</div>
+                            </td>
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              <div className="text-xs font-medium text-[#171717]">
+                                {startDate} → {endDate}
+                              </div>
+                              <div className="text-xs text-[#6B6B67]">
+                                {nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}
+                              </div>
+                            </td>
+                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#171717]">
+                              {formatNaira(subtotal)}
+                            </td>
+                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#8B8B86]">
+                              -{formatNaira(commission)}
+                            </td>
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              <div className="font-bold text-emerald-800 text-sm">
+                                {formatNaira(netPayout)}
+                              </div>
+                            </td>
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              <div className="space-y-1">
+                                {getBookingStatusBadge(b.bookingStatus || b.status || "")}
+                                <div>{getPaymentStatusBadge(b.paymentStatus || "")}</div>
+                              </div>
+                            </td>
+                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
+                              {new Date(b.createdAt).toLocaleDateString()}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
             )}
           </>
+        )}
+
+        {/* Tab 3: Calendar & Availability */}
+        {activeTab === "calendar" && (
+          <div className="space-y-6">
+            {/* Property Selector Bar */}
+            <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-[#0B5D45]">
+                  Inventory Management
+                </span>
+                <h2 className="font-display text-xl text-[#171717] mt-0.5">
+                  Calendar &amp; Availability Controls
+                </h2>
+                <p className="text-xs text-[#6B6B67] mt-1">
+                  Select a property to view authoritative guest bookings or block dates for owner stays and renovations.
+                </p>
+              </div>
+
+              {properties.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <label htmlFor="calendar-property-select" className="text-xs font-semibold text-[#171717] uppercase tracking-wider whitespace-nowrap">
+                    Listing:
+                  </label>
+                  <select
+                    id="calendar-property-select"
+                    value={calendarSelectedPropId}
+                    onChange={(e) => {
+                      setCalendarSelectedPropId(e.target.value);
+                      loadCalendarForProperty(e.target.value);
+                    }}
+                    className="px-3.5 py-2 rounded-xl border border-[#E7E5E0] bg-white text-xs font-medium text-[#171717] focus:outline-none focus:border-[#0B5D45]"
+                  >
+                    {properties.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title} ({p.neighborhood}, {p.city})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {properties.length === 0 ? (
+              <div className="text-center py-16 px-4 bg-white rounded-2xl border border-[#E7E5E0] space-y-4 max-w-lg mx-auto">
+                <CalendarX size={40} className="mx-auto text-[#0B5D45]" />
+                <h3 className="font-display text-2xl text-[#171717]">No properties available</h3>
+                <p className="text-[15px] text-[#6B6B67]">
+                  Create your first listing to manage calendar dates and availability blocks.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Left col: Block new dates */}
+                <div className="p-6 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm space-y-4 h-fit">
+                  <div className="flex items-center gap-2">
+                    <CalendarX size={18} className="text-[#0B5D45]" />
+                    <h3 className="font-semibold text-sm text-[#171717]">Block Inventory Dates</h3>
+                  </div>
+                  <p className="text-xs text-[#6B6B67]">
+                    Temporarily hold dates off public search for maintenance, private use, or off-platform holds.
+                  </p>
+
+                  {calMessage && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
+                      <CheckCircle2 size={14} className="text-emerald-700 shrink-0" />
+                      <span>{calMessage}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleCalendarBlockDates} className="space-y-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#171717] uppercase mb-1">
+                        Start Date
+                      </label>
+                      <input
+                        required
+                        type="date"
+                        min={new Date().toISOString().split("T")[0]}
+                        value={calBlockStart}
+                        onChange={(e) => setCalBlockStart(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#E7E5E0] text-xs font-medium focus:outline-none focus:border-[#0B5D45]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-[#171717] uppercase mb-1">
+                        End Date
+                      </label>
+                      <input
+                        required
+                        type="date"
+                        min={calBlockStart || new Date().toISOString().split("T")[0]}
+                        value={calBlockEnd}
+                        onChange={(e) => setCalBlockEnd(e.target.value)}
+                        className="w-full px-3 py-2 rounded-xl border border-[#E7E5E0] text-xs font-medium focus:outline-none focus:border-[#0B5D45]"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isCalBlocking || !calBlockStart || !calBlockEnd}
+                      className="w-full py-2.5 px-4 bg-[#0B5D45] text-white text-xs font-semibold rounded-xl hover:bg-[#084936] disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                    >
+                      {isCalBlocking ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          <span>Blocking Dates...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CalendarX size={14} />
+                          <span>Block Selected Dates</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Right 2 cols: Active Calendar Restrictions & Bookings */}
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#E7E5E0] pb-3">
+                    <h3 className="font-semibold text-sm text-[#171717]">
+                      Calendar Restrictions &amp; Bookings ({calendarBlocks.length})
+                    </h3>
+                    <span className="text-xs text-[#8B8B86]">
+                      {properties.find((p) => p.id === calendarSelectedPropId)?.title || "Selected Stay"}
+                    </span>
+                  </div>
+
+                  {loadingCalendar ? (
+                    <div className="py-16 flex justify-center items-center text-xs text-[#6B6B67]">
+                      <Loader2 size={20} className="animate-spin mr-2 text-[#0B5D45]" />
+                      <span>Loading calendar records...</span>
+                    </div>
+                  ) : calendarBlocks.length === 0 ? (
+                    <div className="text-center py-14 p-4 rounded-xl border border-dashed border-[#E7E5E0] bg-[#FAFAF8]">
+                      <CheckCircle2 size={32} className="mx-auto text-[#0B5D45] mb-2" />
+                      <h4 className="font-semibold text-sm text-[#171717]">100% Calendar Availability</h4>
+                      <p className="text-xs text-[#6B6B67] mt-1 max-w-sm mx-auto">
+                        No dates are blocked or locked for this property. It is currently available for guest bookings.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+                      {calendarBlocks.map((b) => {
+                        const isBooking = b.type === "RESERVATION" || !!b.bookingId;
+                        return (
+                          <div
+                            key={b.id}
+                            className={`p-3.5 rounded-xl border flex items-center justify-between text-xs transition-colors ${
+                              isBooking
+                                ? "bg-amber-50/50 border-amber-200 text-amber-900"
+                                : "bg-stone-50/70 border-stone-200 text-stone-800"
+                            }`}
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                {isBooking ? (
+                                  <span className="inline-flex items-center gap-1 font-bold text-amber-800 text-[11px] px-2 py-0.5 rounded-md bg-amber-100">
+                                    <Lock size={10} />
+                                    <span>GUEST RESERVATION</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 font-bold text-stone-700 text-[11px] px-2 py-0.5 rounded-md bg-stone-200/80">
+                                    <CalendarX size={10} />
+                                    <span>MANUAL BLOCK</span>
+                                  </span>
+                                )}
+                                <span className="font-semibold text-xs text-[#171717]">
+                                  {b.startDate} → {b.endDate}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-[#6B6B67]">
+                                {isBooking
+                                  ? "Protected confirmed reservation. Dates locked against modifications."
+                                  : "Blocked by host. Stay dates are suppressed from public search results."}
+                              </p>
+                            </div>
+
+                            <div>
+                              {!isBooking ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCalendarUnblockDates(b.id)}
+                                  className="px-3 py-1.5 rounded-lg border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 text-[11px] font-semibold transition-colors cursor-pointer"
+                                >
+                                  Unblock
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-amber-800/80 font-semibold px-2 py-1 rounded bg-amber-100/60">
+                                  Authoritative
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 4: Settlements & Financials */}
+        {activeTab === "financials" && (
+          <div className="space-y-6">
+            {/* Top Cards: Bank info & Platform Policy */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Card 1: Verified Settlement Bank Account */}
+              <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B6B67]">
+                    Settlement Bank Account
+                  </span>
+                  <Landmark size={18} className="text-[#0B5D45]" />
+                </div>
+                {onboardingStatus?.profile?.bankAccountNumber ? (
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-base font-bold text-[#171717]">
+                        {onboardingStatus.profile.bankName}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        <CheckCircle2 size={11} /> Verified NUBAN
+                      </span>
+                    </div>
+                    <div className="text-sm font-mono text-[#6B6B67] tracking-wider mt-1">
+                      •••• •••• {onboardingStatus.profile.bankAccountNumber.slice(-4)}
+                    </div>
+                    <div className="text-xs text-[#8B8B86] mt-0.5">
+                      {onboardingStatus.profile.bankAccountName || "Registered Host Account"}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
+                      No NUBAN bank account connected. Required to receive booking settlements.
+                    </p>
+                    <Link
+                      href="/host/onboarding"
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5D45] hover:underline mt-2"
+                    >
+                      <span>Add Bank Account in Profile</span>
+                      <ArrowRight size={13} />
+                    </Link>
+                  </div>
+                )}
+                <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
+                  Direct NGN settlement via Paystack Transfer
+                </div>
+              </div>
+
+              {/* Card 2: Total Disbursed */}
+              <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B6B67]">
+                    Total Disbursed to Bank
+                  </span>
+                  <TrendingUp size={18} className="text-emerald-600" />
+                </div>
+                <div>
+                  <div className="text-3xl font-display font-medium text-emerald-800">
+                    <AnimatedCurrency
+                      value={payouts
+                        .filter((p) => p.status === "DISBURSED")
+                        .reduce((sum, p) => sum + p.amount, 0)}
+                    />
+                  </div>
+                  <div className="text-xs text-[#8B8B86] mt-1">
+                    {payouts.filter((p) => p.status === "DISBURSED").length} completed transfers
+                  </div>
+                </div>
+                <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
+                  Cleared to your Nigerian bank account
+                </div>
+              </div>
+
+              {/* Card 3: In Escrow / Pending Hold */}
+              <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm flex flex-col justify-between space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B6B67]">
+                    In Escrow &amp; Scheduled
+                  </span>
+                  <Clock size={18} className="text-blue-600" />
+                </div>
+                <div>
+                  <div className="text-3xl font-display font-medium text-blue-900">
+                    <AnimatedCurrency
+                      value={payouts
+                        .filter((p) => p.status === "SCHEDULED" || p.status === "PROCESSING")
+                        .reduce((sum, p) => sum + p.amount, 0)}
+                    />
+                  </div>
+                  <div className="text-xs text-[#8B8B86] mt-1">
+                    {payouts.filter((p) => p.status === "SCHEDULED" || p.status === "PROCESSING").length} upcoming payouts
+                  </div>
+                </div>
+                <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
+                  Cleared after 24h guest check-in hold
+                </div>
+              </div>
+            </div>
+
+            {/* Platform Settlement Terms Pill */}
+            <div className="p-4 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-emerald-950">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck size={18} className="text-[#0B5D45] shrink-0" />
+                <div>
+                  <span className="font-bold">Transparent Host Economics: </span>
+                  <span>Ilé charges a flat 10% platform commission on the nightly accommodation subtotal. Zero markup on utility fees.</span>
+                </div>
+              </div>
+              <span className="font-mono text-[11px] text-[#0B5D45] bg-white px-2.5 py-1 rounded-lg border border-emerald-300 font-semibold shrink-0">
+                Fee Rate: 10.0%
+              </span>
+            </div>
+
+            {/* Payout History & Schedule Table */}
+            <div className="bg-white rounded-2xl border border-[#E7E5E0] overflow-hidden shadow-sm">
+              <div className="p-4 sm:p-5 border-b border-[#E7E5E0] flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-base text-[#171717]">
+                    Payout Schedule &amp; Disbursements ({payouts.length})
+                  </h3>
+                  <p className="text-xs text-[#6B6B67] mt-0.5">
+                    Itemized settlements for each completed stay after 24-hour check-in verification.
+                  </p>
+                </div>
+              </div>
+
+              {loadingPayouts ? (
+                <div className="flex items-center justify-center py-20 text-[#6B6B67]">
+                  <Loader2 size={24} className="animate-spin mr-2 text-[#0B5D45]" />
+                  <span>Loading payout ledger...</span>
+                </div>
+              ) : payouts.length === 0 ? (
+                <div className="text-center py-16 px-4 space-y-3">
+                  <Wallet size={36} className="mx-auto text-[#0B5D45]" />
+                  <h4 className="font-display text-xl text-[#171717]">No payouts recorded yet</h4>
+                  <p className="text-xs text-[#6B6B67] max-w-sm mx-auto">
+                    When guests complete check-in on your published properties, your net earnings (90% of accommodation) are automatically scheduled and disbursed here.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-[#F8F7F4] border-b border-[#E7E5E0] text-xs uppercase tracking-wider text-[#6B6B67]">
+                      <tr>
+                        <th className="py-3.5 px-4 font-semibold">Ref / Property</th>
+                        <th className="py-3.5 px-4 font-semibold">Stay Dates</th>
+                        <th className="py-3.5 px-4 font-semibold">Net Payout</th>
+                        <th className="py-3.5 px-4 font-semibold">Scheduled Date</th>
+                        <th className="py-3.5 px-4 font-semibold">Payout Status</th>
+                        <th className="py-3.5 px-4 font-semibold">Disbursement Details</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#E7E5E0]">
+                      {payouts.map((p) => (
+                        <tr key={p.id} className="hover:bg-stone-50/50 transition-colors">
+                          <td className="py-4 px-4">
+                            <div className="font-semibold text-[#171717]">{p.bookingRef || p.bookingId.slice(0, 8)}</div>
+                            <div className="text-xs text-[#6B6B67]">{p.propertyName || "Stay"}</div>
+                          </td>
+                          <td className="py-4 px-4 whitespace-nowrap text-xs text-[#171717]">
+                            {p.checkInDate} → {p.checkOutDate}
+                          </td>
+                          <td className="py-4 px-4 whitespace-nowrap font-bold text-emerald-800">
+                            {formatNaira(p.amount)}
+                          </td>
+                          <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
+                            {p.scheduledFor ? new Date(p.scheduledFor).toLocaleDateString() : "Immediate"}
+                          </td>
+                          <td className="py-4 px-4 whitespace-nowrap">
+                            {getPayoutStatusBadge(p.status)}
+                          </td>
+                          <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
+                            {p.paystackTransferRef ? (
+                              <span className="font-mono text-[11px] text-[#171717]">{p.paystackTransferRef}</span>
+                            ) : p.disbursedAt ? (
+                              <span>Paid on {new Date(p.disbursedAt).toLocaleDateString()}</span>
+                            ) : (
+                              <span className="text-stone-400 italic">Held in Escrow</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
         )}
         </motion.div>
 
@@ -1153,6 +1748,9 @@ export default function HostDashboardPage() {
                       onChange={(e) => setPricePerNight(Number(e.target.value))}
                       className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
                     />
+                    <div className="text-[11px] text-[#0B5D45] font-semibold mt-1">
+                      You earn: {formatNaira(Math.round(pricePerNight * 0.9))} / night (90% payout)
+                    </div>
                   </div>
                 </div>
 

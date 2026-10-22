@@ -1,4 +1,4 @@
-import { eq, inArray, and, lte, gte, asc, lt, gt } from "drizzle-orm";
+import { eq, inArray, and, lte, gte, asc, lt, gt, sql } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { calculateDistanceKm, offsetCoordinates } from "../../lib/geocoding";
 import { locationsService, NormalizedLocation } from "../locations/locations.service";
@@ -90,7 +90,12 @@ export async function searchProperties(params: SearchParams) {
   const allPublished = await db
     .select()
     .from(schema.properties)
-    .where(eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED));
+    .where(
+      and(
+        eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
+        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+      )
+    );
 
   // 3. Check date availability
   let unavailableIds = new Set<string>();

@@ -11,6 +11,7 @@ export default function Footer() {
     [
       "/login",
       "/register",
+      "/signup",
       "/forgot-password",
       "/reset-password",
     ].includes(pathname) ||

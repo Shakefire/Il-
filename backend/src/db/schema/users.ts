@@ -12,6 +12,8 @@ export const users = pgTable("users", {
   emailVerified: boolean("email_verified").default(false).notNull(),
   emailVerificationCode: varchar("email_verification_code", { length: 10 }),
   emailVerificationExpiresAt: timestamp("email_verification_expires_at", { withTimezone: true }),
+  emailVerificationAttempts: integer("email_verification_attempts").default(0).notNull(),
+  emailVerificationSentAt: timestamp("email_verification_sent_at", { withTimezone: true }),
   phoneVerified: boolean("phone_verified").default(false).notNull(),
   phoneVerificationCode: varchar("phone_verification_code", { length: 10 }),
   phoneVerificationExpiresAt: timestamp("phone_verification_expires_at", { withTimezone: true }),

@@ -15,11 +15,11 @@ export const adminService = {
       .from(schema.profiles)
       .where(eq(schema.profiles.verificationStatus, "UNDER_REVIEW"));
 
-    // CRITICAL FIX: Query payments with status 'VERIFIED' (not 'SUCCESSFUL')
+    // Query payments with status 'SUCCESS' (matches payments.service.ts)
     const revenueResult = await db
       .select({ total: sql<number>`COALESCE(SUM(${schema.payments.amount}), 0)` })
       .from(schema.payments)
-      .where(eq(schema.payments.status, "VERIFIED"));
+      .where(eq(schema.payments.status, "SUCCESS"));
 
     const totalRevenue = Number(revenueResult[0]?.total) || 0;
 
@@ -97,9 +97,17 @@ export const adminService = {
       throw new Error("Property not found");
     }
 
-    const updateData: any = { status, updatedAt: new Date() };
-    if (reason && status === "REJECTED") {
-      updateData.rejectionReason = reason;
+    const updateData: any = { status, updatedAt: new Date(), moderatedAt: new Date(), moderatedBy: adminId };
+    if (status === "SUSPENDED") {
+      updateData.moderationStatus = "SUSPENDED";
+      updateData.moderationReason = reason || "Listing suspended by platform administrator.";
+    } else if (status === "REJECTED") {
+      updateData.moderationStatus = "REJECTED";
+      updateData.moderationReason = reason || "Listing rejected during moderation.";
+      if (reason) updateData.rejectionReason = reason;
+    } else if (status === "PUBLISHED") {
+      updateData.moderationStatus = "NONE";
+      updateData.moderationReason = null;
     }
 
     const [updated] = await db
@@ -120,7 +128,26 @@ export const adminService = {
     });
 
     // Notify host via Resend
-    if (status === "PUBLISHED" || status === "REJECTED") {
+    if (status === "SUSPENDED") {
+      import("../notifications/notifications.service").then(async ({ sendEmail, listingSuspendedEmail }) => {
+        const [host] = await db
+          .select({ email: schema.users.email, firstName: schema.users.firstName })
+          .from(schema.users)
+          .where(eq(schema.users.id, property.hostId))
+          .limit(1);
+
+        if (host) {
+          sendEmail(
+            listingSuspendedEmail({
+              hostName: host.firstName,
+              hostEmail: host.email,
+              propertyTitle: property.title,
+              reason: reason || undefined,
+            })
+          ).catch((e) => console.warn("[Admin] Failed to send listing suspension email:", e));
+        }
+      });
+    } else if (status === "PUBLISHED" || status === "REJECTED") {
       import("../notifications/notifications.service").then(async ({ sendEmail, propertyReviewStatusEmail }) => {
         const [host] = await db
           .select({ email: schema.users.email, firstName: schema.users.firstName })
@@ -707,11 +734,15 @@ export const adminService = {
       })
       .where(eq(schema.users.id, hostId));
 
-    // 3. Suspend all active/published properties for this host
+    // 3. Suspend all active/published properties for this host with moderation tracking
     await db
       .update(schema.properties)
       .set({
         status: "SUSPENDED",
+        moderationStatus: "SUSPENDED",
+        moderationReason: reason || "Host account suspended by administrator.",
+        moderatedAt: new Date(),
+        moderatedBy: adminId,
         updatedAt: new Date(),
       })
       .where(eq(schema.properties.hostId, hostId));
@@ -739,10 +770,107 @@ export const adminService = {
       ipAddress: ipAddress || null,
     });
 
+    // 6. Notify host of account suspension via Resend
+    import("../notifications/notifications.service").then(async ({ sendEmail, hostAccountSuspendedEmail }) => {
+      sendEmail(
+        hostAccountSuspendedEmail({
+          hostName: host.firstName,
+          hostEmail: host.email,
+          reason: reason || undefined,
+        })
+      ).catch((e) => console.warn("[Admin] Failed to send host account suspension email:", e));
+    });
+
     return {
       success: true,
       message: `Host account and all associated listings have been suspended.`,
       profile: updatedProfile,
     };
+  },
+
+  async getSettings() {
+    const db = getDb();
+    const [settings] = await db
+      .select()
+      .from(schema.platformSettings)
+      .where(eq(schema.platformSettings.id, "default"))
+      .limit(1);
+
+    if (!settings) {
+      return {
+        id: "default",
+        defaultHostCommissionPct: 10,
+        payoutHoldHours: 24,
+        updatedAt: new Date(),
+      };
+    }
+
+    return settings;
+  },
+
+  async updateSettings(
+    data: { defaultHostCommissionPct?: number; payoutHoldHours?: number },
+    adminId: string,
+    ipAddress?: string
+  ) {
+    const db = getDb();
+
+    if (data.defaultHostCommissionPct !== undefined) {
+      if (data.defaultHostCommissionPct < 0 || data.defaultHostCommissionPct > 50) {
+        throw new Error("Commission rate must be between 0% and 50%.");
+      }
+    }
+
+    if (data.payoutHoldHours !== undefined) {
+      if (data.payoutHoldHours < 0 || data.payoutHoldHours > 168) {
+        throw new Error("Payout hold period must be between 0 and 168 hours (7 days).");
+      }
+    }
+
+    const [existing] = await db
+      .select()
+      .from(schema.platformSettings)
+      .where(eq(schema.platformSettings.id, "default"))
+      .limit(1);
+
+    let updated: any;
+    if (!existing) {
+      const [inserted] = await db
+        .insert(schema.platformSettings)
+        .values({
+          id: "default",
+          defaultHostCommissionPct: data.defaultHostCommissionPct ?? 10,
+          payoutHoldHours: data.payoutHoldHours ?? 24,
+          updatedBy: adminId,
+          updatedAt: new Date(),
+        })
+        .returning();
+      updated = inserted;
+    } else {
+      const [up] = await db
+        .update(schema.platformSettings)
+        .set({
+          ...(data.defaultHostCommissionPct !== undefined ? { defaultHostCommissionPct: data.defaultHostCommissionPct } : {}),
+          ...(data.payoutHoldHours !== undefined ? { payoutHoldHours: data.payoutHoldHours } : {}),
+          updatedBy: adminId,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.platformSettings.id, "default"))
+        .returning();
+      updated = up;
+    }
+
+    // Audit log
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "SETTINGS_UPDATED",
+      entityType: "platform_settings",
+      entityId: "default",
+      details: `Updated platform settings: commission=${updated.defaultHostCommissionPct}%, payoutHold=${updated.payoutHoldHours}h`,
+      ipAddress: ipAddress || null,
+    });
+
+    return updated;
   },
 };

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "predev": "node -e \"const fs=require('fs');if(fs.existsSync('.next')){fs.rmSync('.next',{recursive:true,force:true});console.log('[predev] Cleared stale .next cache');}\"",
-    "dev": "next dev --turbo",
+    "dev": "next dev",
     "server": "tsx backend/src/server.ts",
     "seed": "tsx backend/src/db/seed.ts",
     "db:generate": "drizzle-kit generate",

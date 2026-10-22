@@ -46,10 +46,21 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // POST /api/bookings/reminders/process — Process upcoming arrival reminders
+  fastify.post("/reminders/process", async (request, reply) => {
+    try {
+      const { date } = (request.body || {}) as { date?: string };
+      const result = await bookingsService.processUpcomingArrivalReminders(date);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(500).send({ error: error.message });
+    }
+  });
+
   // POST /api/bookings/:id/cancel — Cancel booking & release date lock
   fastify.post("/:id/cancel", async (request, reply) => {
     const { id } = request.params as { id: string };
-    const { accessToken } = (request.body || {}) as { accessToken?: string };
+    const { accessToken, reason } = (request.body || {}) as { accessToken?: string; reason?: string };
     const headerToken = request.headers["x-access-token"] as string | undefined;
     const session = extractSession(request);
 
@@ -59,7 +70,7 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      const result = await bookingsService.cancelBooking(id, tokenOrUserId);
+      const result = await bookingsService.cancelBooking(id, tokenOrUserId, reason);
       return reply.send(result);
     } catch (error: any) {
       return reply.status(error.statusCode || 400).send({ error: error.message });

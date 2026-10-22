@@ -229,7 +229,7 @@ export async function hostsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // POST /api/host/properties/:id/submit — Submit for review
+  // POST /api/host/properties/:id/submit — Submit / publish listing
   fastify.post("/properties/:id/submit", async (request, reply) => {
     const session = await authenticateRequest(request, reply);
     if (!session) return;
@@ -237,6 +237,23 @@ export async function hostsRoutes(fastify: FastifyInstance) {
     const { id } = request.params as { id: string };
     try {
       const result = await hostsService.submitPropertyForReview(session.userId, id);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({
+        error: error.message,
+        missingFields: error.missingFields || [],
+      });
+    }
+  });
+
+  // POST /api/host/properties/:id/publish — Direct publication for verified hosts
+  fastify.post("/properties/:id/publish", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    try {
+      const result = await hostsService.publishProperty(session.userId, id);
       return reply.send(result);
     } catch (error: any) {
       return reply.status(error.statusCode || 400).send({
@@ -275,6 +292,15 @@ export async function hostsRoutes(fastify: FastifyInstance) {
     if (!session) return;
 
     const result = await hostsService.getHostBookings(session.userId);
+    return reply.send(result);
+  });
+
+  // GET /api/host/payouts — Host's payout queue and settlement ledger
+  fastify.get("/payouts", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const result = await hostsService.getHostPayouts(session.userId);
     return reply.send(result);
   });
 }

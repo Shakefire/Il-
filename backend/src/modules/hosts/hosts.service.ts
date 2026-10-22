@@ -35,6 +35,7 @@ export const HostPropertyDraftSchema = z.object({
   contactEmail: z.string().optional(),
   checkInInstructions: z.string().optional(),
   accessGateCode: z.string().optional(),
+  status: z.string().optional(),
 });
 
 export const UpdateHostPropertySchema = HostPropertyDraftSchema.partial();
@@ -48,9 +49,9 @@ export const hostsService = {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
     if (!user) throw new Error("User not found");
 
-    if (user.role !== "admin" && user.role !== "host") {
+    if (user.role !== "admin") {
       const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
-      const isApproved = profile && (profile.isVerified || profile.verificationStatus === "APPROVED");
+      const isApproved = profile && (profile.isVerified === true || profile.verificationStatus === "APPROVED");
       if (!isApproved) {
         const err: any = new Error("Only verified property partners can list properties. Please complete your host onboarding and await platform approval.");
         err.statusCode = 403;
@@ -147,9 +148,7 @@ export const hostsService = {
       throw new Error("Property not found or unauthorized");
     }
 
-    if (property.status === "SUSPENDED") {
-      throw new Error("Cannot update suspended property");
-    }
+    const isSuspended = property.moderationStatus === "SUSPENDED" || property.status === "SUSPENDED";
 
     const {
       exactAddress,
@@ -163,6 +162,17 @@ export const hostsService = {
       amenities,
       ...publicProps
     } = parsed;
+
+    if (isSuspended) {
+      if (data?.status === "PUBLISHED" || (publicProps as any).status === "PUBLISHED") {
+        const err: any = new Error("This property was suspended by platform administrators and cannot be republished directly. Please contact support.");
+        err.statusCode = 403;
+        throw err;
+      }
+      // Guarantee that administrative suspension remains intact even if host edits content
+      (publicProps as any).status = "SUSPENDED";
+      (publicProps as any).moderationStatus = "SUSPENDED";
+    }
 
     let updatedProperty = property;
 
@@ -245,16 +255,22 @@ export const hostsService = {
       .limit(1);
 
     if (!property) throw new Error("Property not found or unauthorized");
-    if (property.status === "PUBLISHED") throw new Error("This property is already published.");
-    if (property.status === "SUSPENDED") throw new Error("This property is suspended.");
+    if (property.status === "PUBLISHED" && property.moderationStatus !== "SUSPENDED") {
+      throw new Error("This property is already published.");
+    }
+    if (property.moderationStatus === "SUSPENDED" || property.status === "SUSPENDED") {
+      const err: any = new Error("This listing has been suspended by an administrator and cannot be published directly. Please contact support.");
+      err.statusCode = 403;
+      throw err;
+    }
 
-    // Enforce that host has approved verification
+    // Enforce that host has approved KYC verification
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
-    if (user?.role !== "admin" && user?.role !== "host") {
+    if (user?.role !== "admin") {
       const [profile] = await db.select().from(schema.profiles).where(eq(schema.profiles.userId, userId)).limit(1);
-      const isApproved = profile && (profile.isVerified || profile.verificationStatus === "APPROVED");
+      const isApproved = profile && (profile.isVerified === true || profile.verificationStatus === "APPROVED");
       if (!isApproved) {
-        const err: any = new Error("Your host verification must be approved before you can submit listings for review.");
+        const err: any = new Error("Your host verification must be approved before you can publish listings.");
         err.statusCode = 403;
         throw err;
       }
@@ -300,23 +316,25 @@ export const hostsService = {
     }
 
     if (missingFields.length > 0) {
-      const err: any = new Error("Please complete all required fields before submitting for review.");
+      const err: any = new Error("Please complete all required fields before publishing your listing.");
       err.missingFields = missingFields;
       err.statusCode = 400;
       throw err;
     }
 
+    // Direct publication for KYC-approved hosts
     const [updated] = await db
       .update(schema.properties)
       .set({
-        status: "PENDING_REVIEW",
+        status: "PUBLISHED",
+        moderationStatus: "NONE",
         updatedAt: new Date(),
       })
       .where(eq(schema.properties.id, propertyId))
       .returning();
 
-    // Trigger host submission receipt email via Resend
-    import("../notifications/notifications.service").then(async ({ sendEmail, hostPropertySubmittedEmail }) => {
+    // Trigger host publication confirmation email via Resend
+    import("../notifications/notifications.service").then(async ({ sendEmail, listingPublishedEmail }) => {
       const [host] = await db
         .select({ email: schema.users.email, firstName: schema.users.firstName })
         .from(schema.users)
@@ -324,21 +342,29 @@ export const hostsService = {
         .limit(1);
       if (host) {
         sendEmail(
-          hostPropertySubmittedEmail({
+          listingPublishedEmail({
             hostName: host.firstName,
             hostEmail: host.email,
             propertyTitle: updated.title,
             propertyId: updated.id,
+            nightlyPrice: updated.pricePerNight,
+            city: updated.city,
+            neighborhood: updated.neighborhood,
+            currency: updated.currency,
           })
-        ).catch((e) => console.warn("[Host] Failed to send submission email:", e));
+        ).catch((e) => console.warn("[Host] Failed to send publication email:", e));
       }
     });
 
     return {
       success: true,
-      message: "Property submitted for review. An administrator will review your listing shortly.",
+      message: "Property published successfully and is now live on Ilé!",
       property: updated,
     };
+  },
+
+  async publishProperty(userId: string, propertyId: string) {
+    return this.submitPropertyForReview(userId, propertyId);
   },
 
   async getHostProperties(userId: string) {
@@ -428,8 +454,16 @@ export const hostsService = {
       const paidBookings = bookings.filter((b) => b.status === "CONFIRMED" || b.status === "COMPLETED");
 
       for (const b of paidBookings) {
-        totalGross += b.totalAmount;
-        totalNet += b.totalAmount - b.serviceFee;
+        const subtotal = b.accommodationSubtotal || (b.nightlyPrice * b.numberOfNights) || (b.totalAmount - (b.serviceFee || 0));
+        const commission = b.hostCommissionAmount && b.hostCommissionAmount > 0
+          ? b.hostCommissionAmount
+          : Math.round(subtotal * ((b.hostCommissionPct || 10) / 100));
+        const net = b.hostNetAmount && b.hostNetAmount > 0
+          ? b.hostNetAmount
+          : subtotal - commission;
+
+        totalGross += subtotal;
+        totalNet += net;
       }
 
       recentBookings = bookings;
@@ -446,6 +480,7 @@ export const hostsService = {
       earnings: {
         totalGross,
         totalNet,
+        totalCommission: totalGross - totalNet,
       },
     };
   },
@@ -478,6 +513,12 @@ export const hostsService = {
         checkInDate: schema.bookings.checkInDate,
         checkOutDate: schema.bookings.checkOutDate,
         numberOfNights: schema.bookings.numberOfNights,
+        nightlyPrice: schema.bookings.nightlyPrice,
+        accommodationSubtotal: schema.bookings.accommodationSubtotal,
+        hostCommissionPct: schema.bookings.hostCommissionPct,
+        hostCommissionAmount: schema.bookings.hostCommissionAmount,
+        paystackFeeAmount: schema.bookings.paystackFeeAmount,
+        hostNetAmount: schema.bookings.hostNetAmount,
         totalAmount: schema.bookings.totalAmount,
         status: schema.bookings.status,
         createdAt: schema.bookings.createdAt,
@@ -488,14 +529,56 @@ export const hostsService = {
 
     const enriched = bookingsList.map((b) => {
       const prop = props.find((p) => p.id === b.propertyId);
+      const subtotal = b.accommodationSubtotal || (b.nightlyPrice * b.numberOfNights) || b.totalAmount;
+      const commission = b.hostCommissionAmount && b.hostCommissionAmount > 0
+        ? b.hostCommissionAmount
+        : Math.round(subtotal * ((b.hostCommissionPct || 10) / 100));
+      const net = b.hostNetAmount && b.hostNetAmount > 0
+        ? b.hostNetAmount
+        : subtotal - commission;
+
       return {
         ...b,
+        accommodationSubtotal: subtotal,
+        hostCommissionAmount: commission,
+        hostNetAmount: net,
         propertyTitle: prop?.title || "Property",
         propertyCity: prop?.city || "Nigeria",
       };
     });
 
     return { bookings: enriched };
+  },
+
+  async getHostPayouts(userId: string) {
+    const db = getDb();
+    const list = await db
+      .select({
+        id: schema.payouts.id,
+        bookingId: schema.payouts.bookingId,
+        amount: schema.payouts.amount,
+        currency: schema.payouts.currency,
+        bankName: schema.payouts.bankName,
+        accountNumber: schema.payouts.accountNumber,
+        accountName: schema.payouts.accountName,
+        status: schema.payouts.status,
+        scheduledFor: schema.payouts.scheduledFor,
+        disbursedAt: schema.payouts.disbursedAt,
+        paystackTransferRef: schema.payouts.paystackTransferRef,
+        notes: schema.payouts.notes,
+        createdAt: schema.payouts.createdAt,
+        bookingRef: schema.bookings.referenceCode,
+        propertyName: schema.properties.title,
+        checkInDate: schema.bookings.checkInDate,
+        checkOutDate: schema.bookings.checkOutDate,
+      })
+      .from(schema.payouts)
+      .innerJoin(schema.bookings, eq(schema.payouts.bookingId, schema.bookings.id))
+      .innerJoin(schema.properties, eq(schema.bookings.propertyId, schema.properties.id))
+      .where(eq(schema.payouts.hostId, userId))
+      .orderBy(desc(schema.payouts.createdAt));
+
+    return { payouts: list };
   },
 
   async getHostProfile(userId: string) {
@@ -629,7 +712,7 @@ export const hostsService = {
     if (!user.phone) missingRequirements.push("Provide your contact phone number");
     if (!profile.dateOfBirth || !profile.residentialAddress) missingRequirements.push("Complete personal and operational profile");
     if (!profile.idNumber || !profile.identityDocumentUrl || !profile.selfieUrl) missingRequirements.push("Upload Nigerian government ID & verified selfie");
-    if (!profile.authorityDocUrl) missingRequirements.push("Provide proof of property ownership or management mandate");
+    if (!profile.authorityDocUrl) missingRequirements.push("Provide proof of residence (utility bill, tenancy agreement, etc.)");
     if (!profile.bankAccountNumber || !profile.bankName) missingRequirements.push("Add Nigerian bank payout details");
 
     let progressPct = 15;
@@ -862,7 +945,7 @@ export const hostsService = {
       throw new Error("Please upload a verification selfie photo.");
     }
     if (!effectiveAuthorityDocUrl) {
-      throw new Error("Please provide proof of property ownership or management authority.");
+      throw new Error("Please provide proof of residence (utility bill, tenancy agreement, or estate clearance).");
     }
     if (!effectiveBankAccountNumber || !effectiveBankName) {
       throw new Error("Please provide your Nigerian bank account details for payout verification.");
@@ -1178,8 +1261,8 @@ export const hostsService = {
       throw err;
     }
 
-    if (property.status === "SUSPENDED") {
-      const err: any = new Error("This property was suspended by platform administrators and cannot be self-relisted.");
+    if (property.status === "SUSPENDED" || property.moderationStatus === "SUSPENDED") {
+      const err: any = new Error("This property was suspended by platform administrators and cannot be self-relisted. Please contact support.");
       err.statusCode = 403;
       throw err;
     }

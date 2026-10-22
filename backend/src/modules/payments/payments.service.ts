@@ -13,7 +13,11 @@ import {
   sendEmail,
   bookingConfirmationEmail,
   bookingAccessPassEmail,
+  hostBookingConfirmedEmail,
+  bookingPaymentFailedEmail,
+  bookingRefundEmail,
 } from "../notifications/notifications.service";
+import { LedgerService } from "../finance/ledger.service";
 
 export interface PaymentInitResult {
   success: boolean;
@@ -212,34 +216,7 @@ export async function processSuccessfulPayment(data: {
     );
   }
 
-  // 5. Update Payment Record
-  await db
-    .update(schema.payments)
-    .set({
-      status: "SUCCESS",
-      gatewayReference: data.gatewayReference || data.reference,
-      method: data.method || "CARD",
-      paidAt: new Date(),
-      rawPayload: data.rawPayload || null,
-    })
-    .where(eq(schema.payments.id, payment.id));
-
-  // 6. Confirm Booking
-  const [confirmedBooking] = await db
-    .update(schema.bookings)
-    .set({
-      status: "CONFIRMED",
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.bookings.id, booking.id))
-    .returning();
-
-  // 7. Calculate Host Earnings (Idempotent check)
-  const existingEarnings = await db
-    .select()
-    .from(schema.hostEarnings)
-    .where(eq(schema.hostEarnings.bookingId, booking.id))
-    .limit(1);
+  let confirmedBooking = booking;
 
   const [property] = await db
     .select()
@@ -247,23 +224,85 @@ export async function processSuccessfulPayment(data: {
     .where(eq(schema.properties.id, booking.propertyId))
     .limit(1);
 
-  if (existingEarnings.length === 0 && property) {
-    const grossAmount = booking.totalAmount;
-    const commissionRate = 0.1; // 10% platform fee
-    const commissionAmount = Math.round(grossAmount * commissionRate);
-    const netAmount = grossAmount - commissionAmount;
+  // 5-7. Transaction-safe Payment Confirmation & Host Earnings Snapshot
+  await db.transaction(async (tx) => {
+    // 5. Update Payment Record
+    await tx
+      .update(schema.payments)
+      .set({
+        status: "SUCCESS",
+        gatewayReference: data.gatewayReference || data.reference,
+        method: data.method || "CARD",
+        paidAt: new Date(),
+        rawPayload: data.rawPayload || null,
+      })
+      .where(eq(schema.payments.id, payment.id));
 
-    await db.insert(schema.hostEarnings).values({
-      id: `earn_${crypto.randomUUID()}`,
-      hostId: property.hostId,
-      bookingId: booking.id,
-      grossAmount,
-      commissionAmount,
-      netAmount,
-      status: "PENDING",
-      createdAt: new Date(),
-    });
-  }
+    // 6. Confirm Booking
+    const [confirmed] = await tx
+      .update(schema.bookings)
+      .set({
+        status: "CONFIRMED",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.bookings.id, booking.id))
+      .returning();
+    if (confirmed) confirmedBooking = confirmed;
+
+    // 7. Calculate Host Earnings (Idempotent check)
+    const existingEarnings = await tx
+      .select()
+      .from(schema.hostEarnings)
+      .where(eq(schema.hostEarnings.bookingId, booking.id))
+      .limit(1);
+
+    if (existingEarnings.length === 0 && property) {
+      // Authoritative Accommodation-only calculation (Phase 1)
+      const accommodationSubtotal =
+        booking.accommodationSubtotal ||
+        (booking.nightlyPrice * booking.numberOfNights) ||
+        (booking.totalAmount - (booking.serviceFee || 0));
+
+      const commissionRate = (booking.hostCommissionPct || 10) / 100;
+      const commissionAmount =
+        booking.hostCommissionAmount && booking.hostCommissionAmount > 0
+          ? booking.hostCommissionAmount
+          : Math.round(accommodationSubtotal * commissionRate);
+
+      const netAmount =
+        booking.hostNetAmount && booking.hostNetAmount > 0
+          ? booking.hostNetAmount
+          : accommodationSubtotal - commissionAmount;
+
+      await tx.insert(schema.hostEarnings).values({
+        id: `earn_${crypto.randomUUID()}`,
+        hostId: property.hostId,
+        bookingId: booking.id,
+        grossAmount: accommodationSubtotal, // Accommodation subtotal (clean fee excluded)
+        commissionAmount,
+        netAmount,
+        status: "PENDING",
+        createdAt: new Date(),
+      });
+
+      // 7b. Double-Entry Ledger Posting & Host Payout Queue (Phase 2)
+      const paystackFeeAmount =
+        booking.paystackFeeAmount ||
+        (booking.totalAmount - accommodationSubtotal > 0 ? booking.totalAmount - accommodationSubtotal : 0);
+
+      await LedgerService.recordBookingPayment(tx, {
+        bookingId: booking.id,
+        paymentRef: payment.reference,
+        totalAmount: booking.totalAmount,
+        accommodationSubtotal,
+        paystackFeeAmount,
+        hostNetAmount: netAmount,
+        hostId: property.hostId,
+        checkInDate: booking.checkInDate,
+        payoutHoldHours: 24,
+      });
+    }
+  });
 
   // 8. Fetch Quarantined Details & Send Emails via Resend
   try {
@@ -380,6 +419,42 @@ export async function processSuccessfulPayment(data: {
         accessToken: booking.accessToken,
       })
     );
+
+    // C. Send Host Booking Confirmed Notification with Guest & Payout Breakdown
+    if (host?.email) {
+      const gross =
+        booking.accommodationSubtotal ||
+        (booking.nightlyPrice * booking.numberOfNights) ||
+        (booking.totalAmount - (booking.serviceFee || 0));
+      const commission =
+        booking.hostCommissionAmount && booking.hostCommissionAmount > 0
+          ? booking.hostCommissionAmount
+          : Math.round(gross * 0.1);
+      const net =
+        booking.hostNetAmount && booking.hostNetAmount > 0
+          ? booking.hostNetAmount
+          : gross - commission;
+
+      await sendEmail(
+        hostBookingConfirmedEmail({
+          hostName: host.firstName || "Host",
+          hostEmail: host.email,
+          propertyTitle: propTitle,
+          referenceCode: booking.referenceCode,
+          guestName,
+          guestPhone: booking.guestPhone || undefined,
+          guestEmail: booking.guestEmail,
+          checkIn: booking.checkInDate,
+          checkOut: booking.checkOutDate,
+          numberOfNights: booking.numberOfNights,
+          guestCount: booking.guestCount || 1,
+          grossAmount: gross,
+          commissionAmount: commission,
+          netPayout: net,
+          currency: booking.currency || "NGN",
+        })
+      );
+    }
   } catch (emailErr) {
     console.warn("[Payments] Failed to dispatch booking confirmation emails:", emailErr);
   }
@@ -389,6 +464,55 @@ export async function processSuccessfulPayment(data: {
     message: "Payment verified and booking confirmed successfully.",
     booking: confirmedBooking,
   };
+}
+
+// ─── Process Failed Payment & Notify Guest ───
+
+export async function processFailedPayment(data: {
+  reference: string;
+  reason?: string;
+}): Promise<{ processed: boolean; message: string }> {
+  const db = getDb();
+  const [payment] = await db
+    .select()
+    .from(schema.payments)
+    .where(eq(schema.payments.reference, data.reference))
+    .limit(1);
+
+  if (!payment) return { processed: false, message: "Payment not found" };
+
+  await db
+    .update(schema.payments)
+    .set({ status: "FAILED" })
+    .where(eq(schema.payments.id, payment.id));
+
+  const [booking] = await db
+    .select()
+    .from(schema.bookings)
+    .where(eq(schema.bookings.id, payment.bookingId))
+    .limit(1);
+
+  if (booking) {
+    const [property] = await db
+      .select({ title: schema.properties.title })
+      .from(schema.properties)
+      .where(eq(schema.properties.id, booking.propertyId))
+      .limit(1);
+
+    sendEmail(
+      bookingPaymentFailedEmail({
+        guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+        guestEmail: booking.guestEmail,
+        propertyTitle: property?.title || "Ilé Property",
+        referenceCode: booking.referenceCode,
+        amount: payment.amount,
+        currency: payment.currency,
+        reason: data.reason || "Payment authorization was unsuccessful.",
+      })
+    ).catch((err) => console.warn("[Payments] Failed to send payment failed email:", err));
+  }
+
+  return { processed: true, message: "Payment marked failed and guest notified." };
 }
 
 // ─── Paystack Webhook Handler ───
@@ -437,6 +561,17 @@ export async function handlePaystackWebhook(
     });
 
     return { processed: true, message: "Webhook charge.success processed successfully." };
+  }
+
+  // 3. Handle 'charge.failed'
+  if (event.event === "charge.failed") {
+    const tx = event.data;
+    await processFailedPayment({
+      reference: tx.reference,
+      reason: tx.gateway_response || "Payment declined by financial institution.",
+    });
+
+    return { processed: true, message: "Webhook charge.failed processed." };
   }
 
   return { processed: false, message: `Ignored unhandled event: ${event.event}` };

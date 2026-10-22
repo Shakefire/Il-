@@ -5,3 +5,5 @@ export * from "./payments";
 export * from "./audit";
 export * from "./reviews";
 export * from "./locations";
+export * from "./settings";
+export * from "./finance";

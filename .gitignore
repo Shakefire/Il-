@@ -49,6 +49,7 @@ ehthumbs.db
 .turbo/
 scratch/
 artifacts/
+.agents/
 
 # Ilé — Embedded database & uploads
 .data/
