@@ -2320,6 +2320,57 @@ export function hostNewReviewEmail(data: {
   };
 }
 
+// ─── 25. Host Payout Disbursed ───
+
+export function hostPayoutDisbursedEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  amount: number;
+  bankName?: string;
+  accountNumberMasked?: string;
+  transferRef?: string;
+  currency?: string;
+}): EmailPayload {
+  const safeHost = escapeHtml(data.hostName);
+  const formattedAmount = formatCurrency(data.amount, data.currency || "NGN");
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #0B5D45;">Host Payout Disbursed</h2>
+    <p>Hello ${safeHost},</p>
+    <p>A payout of <strong>${formattedAmount}</strong> has been transferred to your Nigerian bank account.</p>
+    <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67;">Amount Disbursed:</td>
+          <td style="padding: 6px 0; text-align: right; font-weight: 700; color: #0B5D45;">${formattedAmount}</td>
+        </tr>
+        ${data.bankName ? `
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67;">Bank:</td>
+          <td style="padding: 6px 0; text-align: right; font-weight: 600;">${escapeHtml(data.bankName)}</td>
+        </tr>` : ""}
+        ${data.accountNumberMasked ? `
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67;">Account:</td>
+          <td style="padding: 6px 0; text-align: right; font-weight: 600;">${escapeHtml(data.accountNumberMasked)}</td>
+        </tr>` : ""}
+        ${data.transferRef ? `
+        <tr>
+          <td style="padding: 6px 0; color: #6B6B67;">NIP / Transfer Ref:</td>
+          <td style="padding: 6px 0; text-align: right; font-mono; font-size: 13px;">${escapeHtml(data.transferRef)}</td>
+        </tr>` : ""}
+      </table>
+    </div>
+    <p style="font-size: 13px; color: #6B6B67;">Funds typically reflect in your account within minutes via NIBSS Instant Payments (NIP).</p>
+  `;
+
+  return {
+    to: data.hostEmail,
+    subject: `💰 Payout Disbursed: ${formattedAmount}`,
+    html: emailShell("Payout Disbursed", "Host Earnings", content),
+    text: `Hello ${data.hostName}, a payout of ${formattedAmount} has been disbursed to your account. Transfer ref: ${data.transferRef || "Completed"}.`,
+  };
+}
+
 // ─── Dispatch Function ───
 
 export async function sendEmail(payload: EmailPayload): Promise<boolean> {

@@ -91,7 +91,8 @@ export default function AdminPortalPage() {
 
   // Property Actions
   const [selectedProperty, setSelectedProperty] = useState<any | null>(null);
-  const [propertySubTab, setPropertySubTab] = useState<"pending" | "all">("pending");
+  const [propertySubTab, setPropertySubTab] = useState<"all" | "published" | "pending" | "suspended" | "draft">("all");
+  const [propertySearchQuery, setPropertySearchQuery] = useState("");
 
   // Booking Modal
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
@@ -504,6 +505,101 @@ export default function AdminPortalPage() {
     }
   };
 
+  const handleRestoreProperty = async (id: string) => {
+    setActionLoading(id);
+    try {
+      const res = await api.restoreProperty(id);
+      setActionFeedback(res.message || "Property restored and published live to marketplace.");
+      setSelectedProperty(null);
+      await loadAdminData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to restore property");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleSuspendHost = async (hostId: string) => {
+    const reason = window.prompt("Enter account suspension reason for this host partner:");
+    if (!reason) return;
+    setActionLoading(hostId);
+    try {
+      const res = await api.suspendAdminHost(hostId, reason);
+      setActionFeedback(res.message || "Host account and associated listings suspended.");
+      if (selectedHost?.id === hostId) setSelectedHost(null);
+      await loadAdminData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to suspend host");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReinstateHost = async (hostId: string) => {
+    if (!window.confirm("Reinstate this host partner? This restores their account clearance and published listings.")) return;
+    setActionLoading(hostId);
+    try {
+      const res = await api.reinstateAdminHost(hostId, "Administrative clearance restored.");
+      setActionFeedback(res.message || "Host partner and associated listings reinstated successfully.");
+      if (selectedHost?.id === hostId) setSelectedHost(null);
+      await loadAdminData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to reinstate host");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const exportTransactionsToCSV = () => {
+    if (!bookings || bookings.length === 0) {
+      alert("No transactions available to export.");
+      return;
+    }
+
+    const headers = [
+      "Booking Reference",
+      "Guest Name",
+      "Guest Email",
+      "Property Title",
+      "Check-In",
+      "Check-Out",
+      "Nights",
+      "Accommodation Subtotal (NGN)",
+      "Paystack Fee (NGN)",
+      "Total Amount Paid (NGN)",
+      "Host Net Payout (NGN)",
+      "Platform Commission (NGN)",
+      "Status",
+      "Created At",
+    ];
+
+    const rows = bookings.map((b) => [
+      `"${b.referenceCode || ""}"`,
+      `"${b.guestFirstName || ""} ${b.guestLastName || ""}"`,
+      `"${b.guestEmail || ""}"`,
+      `"${(b.propertyTitle || "").replace(/"/g, '""')}"`,
+      b.checkInDate || "",
+      b.checkOutDate || "",
+      b.numberOfNights || 1,
+      b.accommodationSubtotal || (b.nightlyPrice * (b.numberOfNights || 1)),
+      b.paystackFeeAmount || b.serviceFee || 0,
+      b.totalAmount || 0,
+      b.hostNetAmount || 0,
+      b.hostCommissionAmount || 0,
+      b.status || "",
+      b.createdAt || "",
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `ile_transactions_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleDeleteProperty = async (id: string) => {
     if (!window.confirm("Are you sure you want to permanently delete this property listing? This action cannot be undone.")) {
       return;
@@ -660,7 +756,7 @@ export default function AdminPortalPage() {
             >
               <div className="flex items-center gap-3">
                 <ShieldCheck size={16} className={activeModule === "compliance" ? "text-[#0B5D45]" : ""} />
-                <span>Compliance &amp; KYC</span>
+                <span>Hosts &amp; KYC</span>
               </div>
               {underReviewCount > 0 && (
                 <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
@@ -823,7 +919,7 @@ export default function AdminPortalPage() {
             <span className="text-border">/</span>
             <span className="font-semibold text-primary capitalize">
               {activeModule === "compliance"
-                ? "Compliance & KYC"
+                ? "Host Partners & KYC"
                 : activeModule === "properties"
                 ? "Property Listings"
                 : activeModule === "financials"
@@ -1409,29 +1505,41 @@ export default function AdminPortalPage() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 bg-surface p-1 rounded-xl border border-border text-xs shadow-xs">
-                  <button
-                    type="button"
-                    onClick={() => setPropertySubTab("pending")}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
-                      propertySubTab === "pending"
-                        ? "bg-primary text-white shadow-xs"
-                        : "text-primary-secondary hover:text-primary"
-                    }`}
-                  >
-                    Pending Approvals ({pendingListingsCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPropertySubTab("all")}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition-all cursor-pointer ${
-                      propertySubTab === "all"
-                        ? "bg-primary text-white shadow-xs"
-                        : "text-primary-secondary hover:text-primary"
-                    }`}
-                  >
-                    All Properties ({properties.length})
-                  </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-primary-muted" size={13} />
+                    <input
+                      type="text"
+                      placeholder="Search listings..."
+                      value={propertySearchQuery}
+                      onChange={(e) => setPropertySearchQuery(e.target.value)}
+                      className="pl-8 pr-3 py-1.5 bg-surface border border-border rounded-xl text-xs text-primary placeholder:text-primary-muted focus:outline-none focus:border-accent w-48 sm:w-64"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 bg-surface p-1 rounded-xl border border-border text-xs shadow-xs">
+                    {(
+                      [
+                        { id: "all", label: "All", count: properties.length },
+                        { id: "published", label: "Published", count: properties.filter((p) => p.status === "PUBLISHED").length },
+                        { id: "pending", label: "Pending", count: pendingListingsCount },
+                        { id: "suspended", label: "Suspended", count: properties.filter((p) => p.status === "SUSPENDED").length },
+                        { id: "draft", label: "Draft", count: properties.filter((p) => p.status === "DRAFT").length },
+                      ] as const
+                    ).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setPropertySubTab(t.id)}
+                        className={`px-2.5 py-1 rounded-lg font-semibold transition-all cursor-pointer text-[11px] ${
+                          propertySubTab === t.id
+                            ? "bg-primary text-white shadow-xs"
+                            : "text-primary-secondary hover:text-primary"
+                        }`}
+                      >
+                        {t.label} ({t.count})
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -1449,7 +1557,23 @@ export default function AdminPortalPage() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {properties
-                      .filter((p) => (propertySubTab === "pending" ? p.status === "PENDING_REVIEW" : true))
+                      .filter((p) => {
+                        if (propertySubTab === "pending" && p.status !== "PENDING_REVIEW") return false;
+                        if (propertySubTab === "published" && p.status !== "PUBLISHED") return false;
+                        if (propertySubTab === "suspended" && p.status !== "SUSPENDED") return false;
+                        if (propertySubTab === "draft" && p.status !== "DRAFT") return false;
+                        if (propertySearchQuery.trim()) {
+                          const q = propertySearchQuery.toLowerCase();
+                          const title = (p.title || "").toLowerCase();
+                          const city = (p.city || "").toLowerCase();
+                          const neighborhood = (p.neighborhood || "").toLowerCase();
+                          const host = (p.host?.name || p.hostName || "").toLowerCase();
+                          if (!title.includes(q) && !city.includes(q) && !neighborhood.includes(q) && !host.includes(q)) {
+                            return false;
+                          }
+                        }
+                        return true;
+                      })
                       .map((prop) => (
                         <tr
                           key={prop.id}
@@ -1481,7 +1605,7 @@ export default function AdminPortalPage() {
                               {prop.status}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2 px-3 text-right space-x-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
                               onClick={() => setSelectedProperty(prop)}
@@ -1489,13 +1613,34 @@ export default function AdminPortalPage() {
                             >
                               Inspect
                             </button>
-                            {prop.status !== "PUBLISHED" && (
+                            {prop.status === "PENDING_REVIEW" && (
                               <button
                                 type="button"
                                 onClick={() => handleApproveProperty(prop.id)}
-                                className="px-2.5 py-1 bg-accent text-white font-semibold rounded-lg hover:bg-accent-hover"
+                                disabled={actionLoading === prop.id}
+                                className="px-2.5 py-1 bg-accent text-white font-semibold rounded-lg hover:bg-accent-hover transition-colors"
                               >
                                 Approve
+                              </button>
+                            )}
+                            {prop.status === "PUBLISHED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleSuspendProperty(prop.id)}
+                                disabled={actionLoading === prop.id}
+                                className="px-2.5 py-1 text-amber-800 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 font-semibold transition-colors"
+                              >
+                                Suspend
+                              </button>
+                            )}
+                            {prop.status === "SUSPENDED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleRestoreProperty(prop.id)}
+                                disabled={actionLoading === prop.id}
+                                className="px-2.5 py-1 text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 font-semibold transition-colors"
+                              >
+                                Restore
                               </button>
                             )}
                             <button
@@ -1734,7 +1879,7 @@ export default function AdminPortalPage() {
                           Scheduled Host Settlements
                         </h3>
                         <p className="text-xs text-primary-secondary leading-relaxed">
-                          After guests check in and complete the 24-hour verification window, net payouts (90% of accommodation subtotal) become ready for manual authorization and Nigerian NUBAN transfer.
+                          After guests check in and complete the 24-hour verification window, net host payouts become ready for manual authorization and Nigerian NUBAN transfer.
                         </p>
                       </div>
 
@@ -2192,7 +2337,22 @@ export default function AdminPortalPage() {
 
               {/* ── Sub-Tab 6: Bookings Ledger ── */}
               {financeSubTab === "bookings" && (
-                <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-primary">All Platform Reservations &amp; Transactions</h3>
+                      <p className="text-xs text-primary-muted">Audited transaction records, settlement status, and dispute/refund controls.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={exportTransactionsToCSV}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-surface text-primary text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer shadow-xs"
+                    >
+                      <Download size={13} />
+                      <span>Export CSV</span>
+                    </button>
+                  </div>
+                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
                   <table className="w-full text-left text-xs divide-y divide-border">
                     <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
                       <tr>
@@ -2235,7 +2395,7 @@ export default function AdminPortalPage() {
                               {b.status || "CONFIRMED"}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2 px-3 text-right space-x-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
                               onClick={() => setSelectedBooking(b)}
@@ -2243,6 +2403,18 @@ export default function AdminPortalPage() {
                             >
                               Details
                             </button>
+                            {b.status !== "CANCELLED" && b.status !== "REFUNDED" && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRefundBookingId(b.id);
+                                  setShowRefundModal(true);
+                                }}
+                                className="px-2.5 py-1 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 font-semibold transition-colors cursor-pointer"
+                              >
+                                Refund
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -2255,6 +2427,7 @@ export default function AdminPortalPage() {
                       )}
                     </tbody>
                   </table>
+                </div>
                 </div>
               )}
             </div>

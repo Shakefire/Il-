@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, desc, inArray, lt, gt } from "drizzle-orm";
+import { eq, and, desc, inArray, lt, gt, gte } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
 
@@ -14,6 +14,7 @@ export const HostPropertyDraftSchema = z.object({
   beds: z.number().int().min(1).optional().default(1),
   maxGuests: z.number().int().min(1).optional().default(2),
   pricePerNight: z.number().int().optional().default(15000),
+  hostBasePrice: z.number().int().optional(),
   city: z.string().optional().default("Abuja"),
   neighborhood: z.string().optional().default(""),
   state: z.string().optional().default("FCT"),
@@ -60,8 +61,13 @@ export const hostsService = {
     }
 
     const baseTitle = parsed.title || "Untitled Property";
-    const slug = `${baseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${crypto.randomBytes(4).toString("hex")}`;
+    const slug = `${baseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}-${crypto.randomBytes(4).toString("hex")}`;
     const propertyId = `prop_${crypto.randomUUID()}`;
+
+    const hostBasePrice = parsed.hostBasePrice || Math.round((parsed.pricePerNight || 15000) / 1.10);
+    const guestPricePerNight = parsed.hostBasePrice
+      ? Math.round(parsed.hostBasePrice * 1.10)
+      : (parsed.pricePerNight || 15000);
 
     const [property] = await db
       .insert(schema.properties)
@@ -78,7 +84,8 @@ export const hostsService = {
         bathrooms: parsed.bathrooms || 1,
         beds: parsed.beds || 1,
         maxGuests: parsed.maxGuests || 2,
-        pricePerNight: parsed.pricePerNight || 15000,
+        pricePerNight: guestPricePerNight,
+        hostBasePrice: hostBasePrice,
         city: parsed.city || "Abuja",
         neighborhood: parsed.neighborhood || "Central Area",
         state: parsed.state || "FCT",
@@ -172,6 +179,14 @@ export const hostsService = {
       // Guarantee that administrative suspension remains intact even if host edits content
       (publicProps as any).status = "SUSPENDED";
       (publicProps as any).moderationStatus = "SUSPENDED";
+    }
+
+    if (parsed.hostBasePrice !== undefined) {
+      (publicProps as any).hostBasePrice = parsed.hostBasePrice;
+      (publicProps as any).pricePerNight = Math.round(parsed.hostBasePrice * 1.10);
+    } else if (parsed.pricePerNight !== undefined) {
+      (publicProps as any).pricePerNight = parsed.pricePerNight;
+      (publicProps as any).hostBasePrice = Math.round(parsed.pricePerNight / 1.10);
     }
 
     let updatedProperty = property;
@@ -1177,6 +1192,42 @@ export const hostsService = {
     };
   },
 
+  async unpublishProperty(userId: string, propertyId: string) {
+    const db = getDb();
+    const [property] = await db
+      .select()
+      .from(schema.properties)
+      .where(and(eq(schema.properties.id, propertyId), eq(schema.properties.hostId, userId)))
+      .limit(1);
+
+    if (!property) {
+      const err: any = new Error("Property not found or unauthorized");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    if (property.moderationStatus === "SUSPENDED" || property.status === "SUSPENDED") {
+      const err: any = new Error("This property was suspended by platform administrators. Please contact support.");
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const [updated] = await db
+      .update(schema.properties)
+      .set({
+        status: "DRAFT",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.properties.id, propertyId))
+      .returning();
+
+    return {
+      success: true,
+      message: "Property listing unpublished and set to Draft. It is no longer visible on the marketplace.",
+      property: updated,
+    };
+  },
+
   async deleteProperty(userId: string, propertyId: string) {
     const db = getDb();
     const [property] = await db
@@ -1191,24 +1242,53 @@ export const hostsService = {
       throw err;
     }
 
-    // Guard against deleting property with active bookings
-    const activeBookings = await db
-      .select({ id: schema.bookings.id })
+    // 1. Guard against deleting property with upcoming or active reservations
+    const todayStr = new Date().toISOString().split("T")[0];
+    const upcomingBookings = await db
+      .select({ id: schema.bookings.id, referenceCode: schema.bookings.referenceCode, checkInDate: schema.bookings.checkInDate, checkOutDate: schema.bookings.checkOutDate })
       .from(schema.bookings)
       .where(
         and(
           eq(schema.bookings.propertyId, propertyId),
-          inArray(schema.bookings.status, ["CONFIRMED", "COMPLETED", "PAYMENT_PENDING"])
+          inArray(schema.bookings.status, ["CONFIRMED", "PENDING", "PAYMENT_PENDING"]),
+          gte(schema.bookings.checkOutDate, todayStr)
         )
-      )
-      .limit(1);
+      );
 
-    if (activeBookings.length > 0) {
-      const err: any = new Error("Cannot delete property with active or pending reservations.");
+    if (upcomingBookings.length > 0) {
+      const err: any = new Error(
+        `Cannot delete this listing because it has ${upcomingBookings.length} upcoming or active reservation(s). Existing guest bookings must be honoured or resolved before deleting.`
+      );
       err.statusCode = 400;
       throw err;
     }
 
+    // 2. Check if the property has historical bookings
+    const anyBookings = await db
+      .select({ id: schema.bookings.id })
+      .from(schema.bookings)
+      .where(eq(schema.bookings.propertyId, propertyId))
+      .limit(1);
+
+    if (anyBookings.length > 0) {
+      // Archive listing to preserve foreign key references and financial audit trail
+      await db
+        .update(schema.properties)
+        .set({
+          status: "ARCHIVED",
+          moderationStatus: "NONE",
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.properties.id, propertyId));
+
+      return {
+        success: true,
+        message: "Property listing archived successfully and removed from marketplace discovery while preserving historical booking records.",
+        archived: true,
+      };
+    }
+
+    // 3. Clean hard deletion if no bookings exist
     await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, propertyId));
     await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, propertyId));
     await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, propertyId));

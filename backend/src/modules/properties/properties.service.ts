@@ -1,4 +1,4 @@
-import { eq, inArray, count, and, asc, or, gte, lte, sql } from "drizzle-orm";
+import { eq, inArray, count, and, asc, desc, or, gte, lte, sql } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
 import { PROPERTY_STATUS } from "../../config/constants";
@@ -71,27 +71,36 @@ export async function getPublishedProperties(pagination: { limit: number; offset
   const [totalResult] = await db
     .select({ total: count(schema.properties.id) })
     .from(schema.properties)
+    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
-        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
+        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
       )
     );
 
   const total = Number(totalResult?.total) || 0;
 
   // Fetch page of properties (select ALL fields)
-  const properties = await db
-    .select()
+  const rows = await db
+    .select({
+      property: schema.properties,
+    })
     .from(schema.properties)
+    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
-        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
+        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
       )
     )
+    .orderBy(desc(schema.properties.createdAt))
     .limit(pagination.limit)
     .offset(pagination.offset);
+
+  const properties = rows.map((r: any) => r.property);
 
   if (properties.length === 0) return { properties: [], total };
 
@@ -185,21 +194,27 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
     eq(schema.properties.id, slugOrId)
   );
 
-  const [prop] = await db
-    .select()
+  const [row] = await db
+    .select({
+      property: schema.properties,
+      hostStatus: schema.users.status,
+    })
     .from(schema.properties)
+    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       allowUnpublished
         ? matchCondition
         : and(
             matchCondition,
             eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
-            sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+            sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
+            sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
           )
     )
     .limit(1);
 
-  if (!prop) return null;
+  if (!row || !row.property) return null;
+  const prop = row.property;
 
   const images = await db
     .select()

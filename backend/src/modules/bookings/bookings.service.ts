@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
 import { BOOKING_STATUS } from "../../config/constants";
 import { parsePagination, paginatedResponse } from "../../lib/pagination";
+import { calculateFromGuestPrice } from "../pricing/pricing.service";
 import {
   sendEmail,
   bookingConfirmationEmail,
@@ -182,20 +183,7 @@ export const bookingsService = {
         throw conflictErr;
       }
 
-      // E. Authoritative Server-side Price Calculation (Phase 1)
-      const pricePerNight = property.pricePerNight;
-      const accommodationSubtotal = nights * pricePerNight;
-
-      // Exact Paystack Pass-Through Processing Fee Formula (Local Nigeria)
-      let paystackFee = 0;
-      if (accommodationSubtotal < 2500) {
-        paystackFee = Math.ceil(accommodationSubtotal / 0.985) - accommodationSubtotal;
-      } else {
-        paystackFee = Math.ceil((accommodationSubtotal + 100) / 0.985) - accommodationSubtotal;
-        if (paystackFee > 2000) paystackFee = 2000; // Cap at ₦2,000 per Paystack fee rule
-      }
-
-      // Default platform commission rate (configurable via platform_settings)
+      // E. Authoritative Server-side Price Calculation (Phase 4 Centralized Pricing)
       let commissionPct = 10;
       try {
         const [settings] = await tx
@@ -208,9 +196,19 @@ export const bookingsService = {
         }
       } catch {}
 
-      const hostCommissionAmount = Math.round((accommodationSubtotal * commissionPct) / 100);
-      const hostNetAmount = accommodationSubtotal - hostCommissionAmount;
-      const totalAmount = accommodationSubtotal + paystackFee;
+      const pricing = calculateFromGuestPrice(
+        property.pricePerNight,
+        nights,
+        commissionPct / 100,
+        property.hostBasePrice || undefined
+      );
+
+      const pricePerNight = pricing.guestNightlyAccommodationPrice;
+      const accommodationSubtotal = pricing.accommodationSubtotal;
+      const paystackFee = pricing.paystackFee;
+      const hostCommissionAmount = pricing.platformCommission;
+      const hostNetAmount = pricing.hostEarnings;
+      const totalAmount = pricing.totalGuestPayment;
 
       const bookingId = `book_${crypto.randomUUID()}`;
       const referenceCode = `ILE-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
@@ -629,12 +627,25 @@ export const bookingsService = {
     return updatedBooking;
   },
 
-  async getBooking(bookingId: string) {
+  async getBooking(bookingIdOrRef: string) {
     const db = getDb();
-    const [booking] = await db.select().from(schema.bookings).where(eq(schema.bookings.id, bookingId));
+    const [booking] = await db
+      .select()
+      .from(schema.bookings)
+      .where(
+        or(
+          eq(schema.bookings.id, bookingIdOrRef),
+          eq(schema.bookings.referenceCode, bookingIdOrRef)
+        )
+      )
+      .limit(1);
     if (!booking) throw new Error("Booking not found");
 
-    const [property] = await db.select().from(schema.properties).where(eq(schema.properties.id, booking.propertyId));
+    const [property] = await db
+      .select()
+      .from(schema.properties)
+      .where(eq(schema.properties.id, booking.propertyId))
+      .limit(1);
 
     const enriched = {
       ...booking,
@@ -690,19 +701,46 @@ export const bookingsService = {
     return paginatedResponse(enriched, total, params);
   },
 
-  async getBookingContact(bookingId: string) {
+  async getBookingContact(bookingIdOrRef: string, authorizedUserIdOrToken?: string) {
     const db = getDb();
-    const [booking] = await db.select().from(schema.bookings).where(eq(schema.bookings.id, bookingId));
+    const [booking] = await db
+      .select()
+      .from(schema.bookings)
+      .where(
+        or(
+          eq(schema.bookings.id, bookingIdOrRef),
+          eq(schema.bookings.referenceCode, bookingIdOrRef)
+        )
+      )
+      .limit(1);
     if (!booking) throw new Error("Booking not found");
 
     if (booking.status !== BOOKING_STATUS.CONFIRMED) {
       throw new Error("Booking must be confirmed to view contact details");
     }
 
+    if (authorizedUserIdOrToken) {
+      const isTokenMatch = booking.accessToken && authorizedUserIdOrToken === booking.accessToken;
+      const isGuestMatch = booking.guestId && authorizedUserIdOrToken === booking.guestId;
+      if (!isTokenMatch && !isGuestMatch && authorizedUserIdOrToken !== "admin") {
+        const [prop] = await db
+          .select({ hostId: schema.properties.hostId })
+          .from(schema.properties)
+          .where(eq(schema.properties.id, booking.propertyId))
+          .limit(1);
+        if (!prop || prop.hostId !== authorizedUserIdOrToken) {
+          const err: any = new Error("Unauthorized to view property access details");
+          err.statusCode = 403;
+          throw err;
+        }
+      }
+    }
+
     const [privateDetails] = await db
       .select()
       .from(schema.propertyPrivateDetails)
-      .where(eq(schema.propertyPrivateDetails.propertyId, booking.propertyId));
+      .where(eq(schema.propertyPrivateDetails.propertyId, booking.propertyId))
+      .limit(1);
 
     if (!privateDetails) {
       throw new Error("Private contact details not found");

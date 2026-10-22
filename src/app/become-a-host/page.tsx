@@ -174,7 +174,8 @@ export default function BecomeAHostPage() {
       amenities: selectedAmenities,
       images,
       coverImage: images[0] || "/images/placeholder-property.jpg",
-      pricePerNight,
+      hostBasePrice: pricePerNight,
+      pricePerNight: Math.round(pricePerNight * 1.10),
       powerType,
       powerDescription,
     };
@@ -1005,7 +1006,7 @@ export default function BecomeAHostPage() {
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-[#6B6B67] mb-1.5">
-                    Price Per Night (₦ NGN) *
+                    Your Nightly Rate (What You Earn) *
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-3.5 text-base font-bold text-[#6B6B67]">
@@ -1022,13 +1023,19 @@ export default function BecomeAHostPage() {
                   </div>
                   <div className="mt-2 p-3 rounded-xl bg-[#EDF3F0] text-xs space-y-1">
                     <div className="flex justify-between font-medium text-[#171717]">
-                      <span>Your Estimated Net Payout:</span>
+                      <span>Your Net Payout:</span>
                       <span className="font-bold text-[#0B5D45] text-sm">
-                        {formatNaira(Math.round(pricePerNight * 0.9))} / night
+                        {formatNaira(pricePerNight)} / night (100%)
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-medium text-[#171717]">
+                      <span>Guest Listing Price:</span>
+                      <span className="font-semibold text-primary text-xs">
+                        {formatNaira(Math.round(pricePerNight * 1.10))} / night
                       </span>
                     </div>
                     <p className="text-[11px] text-[#6B6B67]">
-                      Ilé platform fee is a flat 10% on the nightly accommodation subtotal. You receive 90% net settlement directly to your Nigerian bank account.
+                      You receive 100% of your requested rate ({formatNaira(pricePerNight)}/night) for every booked night. Standard platform distribution is automatically added to determine the guest rate.
                     </p>
                   </div>
                 </div>
@@ -1106,10 +1113,10 @@ export default function BecomeAHostPage() {
                 <div className="pt-3 space-y-1">
                   <span className="text-xs uppercase font-semibold text-[#8B8B86]">Pricing &amp; Payout</span>
                   <p className="text-base font-bold text-[#065F46]">
-                    {formatNaira(pricePerNight)} / night
+                    {formatNaira(Math.round(pricePerNight * 1.10))} / night <span className="text-xs font-normal text-[#6B6B67]">(Guest Rate)</span>
                   </p>
                   <p className="text-xs text-[#6B6B67]">
-                    You receive: <strong className="text-[#0B5D45]">{formatNaira(Math.round(pricePerNight * 0.9))} / night</strong> net (90% payout)
+                    You receive: <strong className="text-[#0B5D45]">{formatNaira(pricePerNight)} / night</strong> (100% net payout)
                   </p>
                 </div>
 

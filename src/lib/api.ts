@@ -495,6 +495,17 @@ export const api = {
     return body;
   },
 
+  async restoreProperty(propertyId: string) {
+    const res = await fetch(`/api/admin/properties/${propertyId}/approve`, {
+      method: "POST",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to restore property");
+    return body;
+  },
+
   async deleteAdminProperty(propertyId: string) {
     const res = await fetch(`/api/admin/properties/${propertyId}`, {
       method: "DELETE",
@@ -597,6 +608,32 @@ export const api = {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "Failed to suspend host");
+    return body;
+  },
+
+  async reinstateAdminHost(id: string, reason?: string) {
+    const res = await fetch(`/api/admin/hosts/${id}/reinstate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify({ reason }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to reinstate host");
+    return body;
+  },
+
+  async unpublishProperty(id: string) {
+    const res = await fetch(`/api/host/properties/${id}/unpublish`, {
+      method: "POST",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to unpublish property");
     return body;
   },
 

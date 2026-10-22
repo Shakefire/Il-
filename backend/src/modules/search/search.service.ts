@@ -86,16 +86,22 @@ export async function searchProperties(params: SearchParams) {
     }
   }
 
-  // 2. Fetch all published properties
-  const allPublished = await db
-    .select()
+  // 2. Fetch all published properties from active hosts
+  const rows = await db
+    .select({
+      property: schema.properties,
+    })
     .from(schema.properties)
+    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
-        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
+        sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
+        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
       )
     );
+
+  const allPublished = rows.map((r: any) => r.property);
 
   // 3. Check date availability
   let unavailableIds = new Set<string>();

@@ -788,6 +788,98 @@ export const adminService = {
     };
   },
 
+  async reinstateHost(hostId: string, adminId: string, reason?: string, ipAddress?: string) {
+    const db = getDb();
+
+    const [host] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, hostId))
+      .limit(1);
+
+    if (!host) {
+      const err: any = new Error("Host user not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const [adminUser] = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.id, adminId))
+      .limit(1);
+
+    const validAdminId = adminUser ? adminUser.id : null;
+
+    // 1. Activate host user account
+    await db
+      .update(schema.users)
+      .set({
+        status: "ACTIVE",
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, hostId));
+
+    // 2. Restore host profile verification
+    const [updatedProfile] = await db
+      .update(schema.profiles)
+      .set({
+        verificationStatus: "APPROVED",
+        isVerified: true,
+        reviewFeedback: `Reinstated: ${reason || "Account clearance restored by platform administrator"}`,
+        reviewedBy: validAdminId,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, hostId))
+      .returning();
+
+    // 3. Clear suspension on host properties
+    await db
+      .update(schema.properties)
+      .set({
+        moderationStatus: "NONE",
+        moderationReason: null,
+        moderatedAt: new Date(),
+        moderatedBy: validAdminId,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(schema.properties.hostId, hostId),
+          eq(schema.properties.moderationStatus, "SUSPENDED")
+        )
+      );
+
+    // 4. Verification and Audit logs
+    await db.insert(schema.verificationLogs).values({
+      id: `vlog_${crypto.randomUUID()}`,
+      hostId,
+      adminId: validAdminId,
+      previousStatus: "SUSPENDED",
+      newStatus: "APPROVED",
+      action: "REINSTATE",
+      reason: reason || "Administrative reinstatement",
+      notes: `Reinstated by admin. Clearance restored.`,
+    });
+
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: validAdminId || adminId,
+      action: "HOST_REINSTATED",
+      entityType: "host",
+      entityId: hostId,
+      details: `Host ${host.firstName} ${host.lastName} (${host.email}) reinstated. Reason: ${reason || "Account restored."}`,
+      ipAddress: ipAddress || null,
+    });
+
+    return {
+      success: true,
+      message: `Host account and listings have been successfully reinstated.`,
+      profile: updatedProfile,
+    };
+  },
+
   async getSettings() {
     const db = getDb();
     const [settings] = await db

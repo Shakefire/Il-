@@ -20,6 +20,7 @@ export const properties = pgTable("properties", {
   maxGuests: integer("max_guests").notNull().default(2),
 
   pricePerNight: integer("price_per_night").notNull(),
+  hostBasePrice: integer("host_base_price"),
   cleaningFee: integer("cleaning_fee").notNull().default(0),
   serviceFeePct: integer("service_fee_pct").notNull().default(8),
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),

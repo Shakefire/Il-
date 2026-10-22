@@ -463,7 +463,8 @@ export default function HostDashboardPage() {
         city,
         neighborhood,
         state,
-        pricePerNight: Number(pricePerNight),
+        hostBasePrice: Number(pricePerNight),
+        pricePerNight: Math.round(Number(pricePerNight) * 1.10),
         bedrooms: Number(bedrooms),
         bathrooms: Number(bathrooms),
         beds: Number(beds),
@@ -508,6 +509,18 @@ export default function HostDashboardPage() {
       loadStats();
     } catch (err: any) {
       alert(err.message || "Failed to relist property.");
+    }
+  };
+
+  const handleUnpublishProperty = async (propId: string) => {
+    if (!confirm("Unpublish this listing? It will be set to Draft and hidden from public search, while any upcoming reservations remain fully honoured.")) return;
+    try {
+      await api.unpublishProperty(propId);
+      setActionMessage("Listing unpublished and moved to Draft.");
+      loadProperties();
+      loadStats();
+    } catch (err: any) {
+      alert(err.message || "Failed to unpublish property.");
     }
   };
 
@@ -1089,6 +1102,17 @@ export default function HostDashboardPage() {
                               </div>
                             )}
 
+                            {/* Published actions */}
+                            {prop.status === "PUBLISHED" && (
+                              <button
+                                type="button"
+                                onClick={() => handleUnpublishProperty(prop.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-100 text-[#171717] text-xs font-semibold hover:bg-stone-200 border border-[#E7E5E0] cursor-pointer"
+                              >
+                                <span>Unpublish</span>
+                              </button>
+                            )}
+
                             {/* Rejected actions */}
                             {prop.status === "REJECTED" && (
                               <div className="flex items-center gap-2">
@@ -1173,9 +1197,8 @@ export default function HostDashboardPage() {
                         <th className="py-3.5 px-4 font-semibold">Ref / Property</th>
                         <th className="py-3.5 px-4 font-semibold">Guest</th>
                         <th className="py-3.5 px-4 font-semibold">Dates &amp; Stay</th>
-                        <th className="py-3.5 px-4 font-semibold">Gross Subtotal</th>
-                        <th className="py-3.5 px-4 font-semibold">Ilé Fee (10%)</th>
-                        <th className="py-3.5 px-4 font-semibold">Net Host Payout</th>
+                        <th className="py-3.5 px-4 font-semibold">Accommodation Value</th>
+                        <th className="py-3.5 px-4 font-semibold">Your Net Payout</th>
                         <th className="py-3.5 px-4 font-semibold">Status</th>
                         <th className="py-3.5 px-4 font-semibold">Booked On</th>
                       </tr>
@@ -1210,11 +1233,8 @@ export default function HostDashboardPage() {
                                 {nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}
                               </div>
                             </td>
-                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#171717]">
+                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
                               {formatNaira(subtotal)}
-                            </td>
-                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#8B8B86]">
-                              -{formatNaira(commission)}
                             </td>
                             <td className="py-4 px-4 whitespace-nowrap">
                               <div className="font-bold text-emerald-800 text-sm">
@@ -1551,11 +1571,11 @@ export default function HostDashboardPage() {
                 <ShieldCheck size={18} className="text-[#0B5D45] shrink-0" />
                 <div>
                   <span className="font-bold">Transparent Host Economics: </span>
-                  <span>Ilé charges a flat 10% platform commission on the nightly accommodation subtotal. Zero markup on utility fees.</span>
+                  <span>Hosts receive 100% of their desired base nightly rate. Standard platform distribution is seamlessly integrated into guest pricing.</span>
                 </div>
               </div>
               <span className="font-mono text-[11px] text-[#0B5D45] bg-white px-2.5 py-1 rounded-lg border border-emerald-300 font-semibold shrink-0">
-                Fee Rate: 10.0%
+                Host Payout: 100% Net
               </span>
             </div>
 
@@ -1582,7 +1602,7 @@ export default function HostDashboardPage() {
                   <Wallet size={36} className="mx-auto text-[#0B5D45]" />
                   <h4 className="font-display text-xl text-[#171717]">No payouts recorded yet</h4>
                   <p className="text-xs text-[#6B6B67] max-w-sm mx-auto">
-                    When guests complete check-in on your published properties, your net earnings (90% of accommodation) are automatically scheduled and disbursed here.
+                    When guests complete check-in on your published properties, your net earnings (100% of your requested base rate) are automatically scheduled and disbursed here.
                   </p>
                 </div>
               ) : (
@@ -1749,7 +1769,7 @@ export default function HostDashboardPage() {
                       className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
                     />
                     <div className="text-[11px] text-[#0B5D45] font-semibold mt-1">
-                      You earn: {formatNaira(Math.round(pricePerNight * 0.9))} / night (90% payout)
+                      You receive: {formatNaira(pricePerNight)} / night (100% net payout) · Listed for guests at {formatNaira(Math.round(pricePerNight * 1.10))} / night
                     </div>
                   </div>
                 </div>

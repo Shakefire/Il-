@@ -1,6 +1,7 @@
 import { eq, desc, and, sql } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { LedgerService } from "./ledger.service";
+import { env } from "../../config/env";
 
 export class FinanceService {
   /**
@@ -156,6 +157,30 @@ export class FinanceService {
         notes,
       });
 
+      // Notify host of manual bank transfer payout via Resend
+      import("../notifications/notifications.service").then(async ({ sendEmail, hostPayoutDisbursedEmail }) => {
+        const [host] = await getDb()
+          .select({ email: schema.users.email, firstName: schema.users.firstName, lastName: schema.users.lastName })
+          .from(schema.users)
+          .where(eq(schema.users.id, payout.hostId))
+          .limit(1);
+
+        if (host) {
+          const masked = payout.accountNumber ? `******${payout.accountNumber.slice(-4)}` : undefined;
+          sendEmail(
+            hostPayoutDisbursedEmail({
+              hostName: `${host.firstName} ${host.lastName}`.trim(),
+              hostEmail: host.email,
+              amount: payout.amount,
+              bankName: payout.bankName || undefined,
+              accountNumberMasked: masked,
+              transferRef: transferRef || undefined,
+              currency: payout.currency || "NGN",
+            })
+          ).catch((e) => console.warn("[Finance] Failed to send host payout email:", e));
+        }
+      });
+
       return {
         success: true,
         payoutId: payout.id,
@@ -247,6 +272,46 @@ export class FinanceService {
       const accommodationSubtotal = booking.accommodationSubtotal || booking.nightlyPrice * booking.numberOfNights;
       const processingFee = booking.paystackFeeAmount || (booking.totalAmount - accommodationSubtotal);
 
+      // Real Paystack Refund Integration (Phase 6)
+      let resolvedPaystackRefundId = paystackRefundId || null;
+      const [payment] = await tx
+        .select()
+        .from(schema.payments)
+        .where(and(eq(schema.payments.bookingId, bookingId), eq(schema.payments.status, "SUCCESS")))
+        .limit(1);
+
+      if (env.PAYSTACK_SECRET_KEY && payment && (payment.gatewayReference || payment.reference)) {
+        try {
+          const paystackTx = payment.gatewayReference || payment.reference;
+          console.log(`[Finance] Executing real Paystack refund for tx: ${paystackTx}, amount: ₦${accommodationSubtotal}`);
+
+          const paystackRes = await fetch("https://api.paystack.co/refund", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              transaction: paystackTx,
+              amount: accommodationSubtotal * 100, // in kobo
+              currency: "NGN",
+              customer_note: reason || "Booking accommodation refund",
+              merchant_note: `Ilé booking #${booking.referenceCode} refund processed by admin: ${adminNotes || "N/A"}`,
+            }),
+          });
+
+          const pData = await paystackRes.json().catch(() => ({}));
+          console.log(`[Finance] Paystack refund response:`, pData);
+          if (pData?.data?.id) {
+            resolvedPaystackRefundId = String(pData.data.id);
+          } else if (pData?.message && !pData.status) {
+            console.warn(`[Finance] Paystack refund notice: ${pData.message}`);
+          }
+        } catch (paystackErr: any) {
+          console.error(`[Finance] Paystack refund API call error:`, paystackErr.message);
+        }
+      }
+
       const result = await LedgerService.recordBookingRefund(tx, {
         bookingId: booking.id,
         guestId: booking.guestId,
@@ -256,7 +321,39 @@ export class FinanceService {
         adminId,
         reason,
         adminNotes,
-        paystackRefundId,
+        paystackRefundId: resolvedPaystackRefundId,
+      });
+
+      // Release availability blocks so dates return to live calendar inventory
+      await tx
+        .delete(schema.availabilityBlocks)
+        .where(
+          and(
+            eq(schema.availabilityBlocks.propertyId, booking.propertyId),
+            eq(schema.availabilityBlocks.startDate, booking.checkInDate),
+            eq(schema.availabilityBlocks.endDate, booking.checkOutDate)
+          )
+        );
+
+      // Notify guest of confirmed refund via Resend
+      import("../notifications/notifications.service").then(async ({ sendEmail, bookingRefundEmail }) => {
+        const [property] = await getDb()
+          .select({ title: schema.properties.title })
+          .from(schema.properties)
+          .where(eq(schema.properties.id, booking.propertyId))
+          .limit(1);
+
+        sendEmail(
+          bookingRefundEmail({
+            guestName: `${booking.guestFirstName} ${booking.guestLastName}`.trim(),
+            guestEmail: booking.guestEmail,
+            propertyTitle: property?.title || "Property",
+            referenceCode: booking.referenceCode,
+            refundAmount: accommodationSubtotal,
+            currency: booking.currency || "NGN",
+            status: "PROCESSED",
+          })
+        ).catch((e) => console.warn("[Finance] Failed to send booking refund email:", e));
       });
 
       return {
@@ -264,6 +361,7 @@ export class FinanceService {
         bookingId: booking.id,
         refundedAmount: accommodationSubtotal,
         processingFeeRetained: processingFee,
+        paystackRefundId: resolvedPaystackRefundId,
         refundId: result.refundId,
         journalId: result.journal.id,
       };
