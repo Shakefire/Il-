@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyPayment } from "@/../backend/src/modules/payments/payments.service";
+import { verifyPayment, processFailedPayment } from "@/../backend/src/modules/payments/payments.service";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +15,15 @@ export async function GET(
   try {
     const result = await verifyPayment(reference);
     if (!result.verified) {
+      // Payment not successful on Paystack — cancel booking and release dates
+      try {
+        await processFailedPayment({
+          reference,
+          reason: result.error || "Payment was not completed on Paystack.",
+        });
+      } catch (cancelErr) {
+        console.warn("[API] Failed to cancel booking after unverified payment:", cancelErr);
+      }
       return NextResponse.json(
         { verified: false, error: result.error || "Payment could not be verified." },
         { status: 400 }

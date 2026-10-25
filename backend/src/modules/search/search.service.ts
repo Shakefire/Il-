@@ -1,4 +1,4 @@
-import { eq, inArray, and, lte, gte, asc, lt, gt, sql } from "drizzle-orm";
+import { eq, inArray, and, lte, gte, asc, lt, gt, sql, isNull, or } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { calculateDistanceKm, offsetCoordinates } from "../../lib/geocoding";
 import { locationsService, NormalizedLocation } from "../locations/locations.service";
@@ -11,13 +11,38 @@ import { enrichProperty } from "../properties/properties.service";
 export async function getUnavailablePropertyIds(checkIn: string, checkOut: string): Promise<Set<string>> {
   const db = getDb();
 
+  // Clean up stale PAYMENT_PENDING availability blocks older than 30 minutes
+  const thirtyMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const staleBlocks = await db
+    .select({ id: schema.availabilityBlocks.id, bookingId: schema.availabilityBlocks.bookingId })
+    .from(schema.availabilityBlocks)
+    .innerJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
+    .where(
+      and(
+        eq(schema.bookings.status, "PAYMENT_PENDING"),
+        lt(schema.bookings.createdAt, thirtyMinAgo)
+      )
+    );
+  for (const stale of staleBlocks) {
+    await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, stale.id));
+    if (stale.bookingId) {
+      await db.update(schema.bookings).set({ status: "CANCELLED" }).where(eq(schema.bookings.id, stale.bookingId));
+    }
+  }
+
+  // Only count blocks where booking is CONFIRMED or block is a manual host block (no bookingId)
   const conflicting = await db
     .select({ propertyId: schema.availabilityBlocks.propertyId })
     .from(schema.availabilityBlocks)
+    .leftJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
     .where(
       and(
         lt(schema.availabilityBlocks.startDate, checkOut),
-        gt(schema.availabilityBlocks.endDate, checkIn)
+        gt(schema.availabilityBlocks.endDate, checkIn),
+        or(
+          isNull(schema.availabilityBlocks.bookingId),
+          eq(schema.bookings.status, "CONFIRMED")
+        )
       )
     );
 

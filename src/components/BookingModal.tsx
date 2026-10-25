@@ -87,6 +87,26 @@ export default function BookingModal({
     }
   }, [user, isOpen]);
 
+  // Cancel pending booking on page unload (refresh, back button, tab close)
+  useEffect(() => {
+    if (!serverBooking?.id || !serverBooking?.accessToken || step !== 3) return;
+
+    const cancelPending = () => {
+      const url = `/api/bookings/${serverBooking.id}/cancel?token=${serverBooking.accessToken}`;
+      const body = JSON.stringify({ reason: "Guest left page before completing payment." });
+      // Use sendBeacon for reliability during page unload
+      if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: "application/json" });
+        navigator.sendBeacon(url, blob);
+      } else {
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "x-access-token": serverBooking.accessToken }, body, keepalive: true }).catch(() => {});
+      }
+    };
+
+    window.addEventListener("beforeunload", cancelPending);
+    return () => window.removeEventListener("beforeunload", cancelPending);
+  }, [serverBooking, step]);
+
   if (!isOpen) return null;
 
   const nights = calculateNights(checkIn, checkOut);
@@ -445,7 +465,20 @@ export default function BookingModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setStep(2)}
+                  onClick={async () => {
+                    // Cancel the pending booking before going back
+                    if (serverBooking?.id && serverBooking?.accessToken) {
+                      try {
+                        await fetch(`/api/bookings/${serverBooking.id}/cancel?token=${serverBooking.accessToken}`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", "x-access-token": serverBooking.accessToken },
+                          body: JSON.stringify({ reason: "Guest went back to edit details." }),
+                        });
+                      } catch {}
+                    }
+                    setServerBooking(null);
+                    setStep(2);
+                  }}
                   className="w-full py-2.5 text-[14px] font-medium text-[#6B6B67] hover:text-[#171717] transition-colors cursor-pointer"
                 >
                   ← Back to guest details

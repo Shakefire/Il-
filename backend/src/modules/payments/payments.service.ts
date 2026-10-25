@@ -573,7 +573,7 @@ export async function processFailedPayment(data: {
 
 // ─── Expire Stale Pending Bookings ───
 
-export async function expireStalePendingBookings(maxAgeMinutes = 30): Promise<{
+export async function expireStalePendingBookings(maxAgeMinutes = 10): Promise<{
   expired: number;
   bookingIds: string[];
 }> {

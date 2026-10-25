@@ -1,4 +1,4 @@
-import { eq, inArray, count, and, asc, desc, or, gte, lte, sql } from "drizzle-orm";
+import { eq, inArray, count, and, asc, desc, or, gte, lte, lt, gt, sql, isNull } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
 import { PROPERTY_STATUS } from "../../config/constants";
@@ -134,30 +134,43 @@ export async function getPublishedProperties(pagination: { limit: number; offset
   const reservedIds = new Set<string>();
 
   try {
+    // Clean up stale PAYMENT_PENDING availability blocks older than 30 minutes
+    const thirtyMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const staleBlocks = await db
+      .select({ id: schema.availabilityBlocks.id, bookingId: schema.availabilityBlocks.bookingId })
+      .from(schema.availabilityBlocks)
+      .innerJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
+      .where(
+        and(
+          inArray(schema.availabilityBlocks.propertyId, propertyIds),
+          eq(schema.bookings.status, "PAYMENT_PENDING"),
+          lt(schema.bookings.createdAt, thirtyMinAgo)
+        )
+      );
+    for (const stale of staleBlocks) {
+      await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, stale.id));
+      if (stale.bookingId) {
+        await db.update(schema.bookings).set({ status: "CANCELLED" }).where(eq(schema.bookings.id, stale.bookingId));
+      }
+    }
+
+    // Only count blocks where booking is CONFIRMED or block is a manual host block (no bookingId)
     const activeBlocks = await db
       .select({ propertyId: schema.availabilityBlocks.propertyId })
       .from(schema.availabilityBlocks)
+      .leftJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
       .where(
         and(
           inArray(schema.availabilityBlocks.propertyId, propertyIds),
           lte(schema.availabilityBlocks.startDate, today),
-          gte(schema.availabilityBlocks.endDate, today)
+          gte(schema.availabilityBlocks.endDate, today),
+          or(
+            isNull(schema.availabilityBlocks.bookingId),
+            eq(schema.bookings.status, "CONFIRMED")
+          )
         )
       );
     activeBlocks.forEach((b: any) => reservedIds.add(b.propertyId));
-
-    const activeBookings = await db
-      .select({ propertyId: schema.bookings.propertyId })
-      .from(schema.bookings)
-      .where(
-        and(
-          inArray(schema.bookings.propertyId, propertyIds),
-          eq(schema.bookings.status, "CONFIRMED"),
-          lte(schema.bookings.checkInDate, today),
-          gte(schema.bookings.checkOutDate, today)
-        )
-      );
-    activeBookings.forEach((b: any) => reservedIds.add(b.propertyId));
   } catch {}
 
   // Map enriched properties with isReserved flag
@@ -248,35 +261,45 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
   let isReserved = false;
   try {
     const today = new Date().toISOString().split("T")[0];
-    const [activeBooking] = await db
-      .select()
-      .from(schema.bookings)
+
+    // Clean up stale PAYMENT_PENDING availability blocks older than 30 minutes
+    const thirtyMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const staleBlocks = await db
+      .select({ id: schema.availabilityBlocks.id, bookingId: schema.availabilityBlocks.bookingId })
+      .from(schema.availabilityBlocks)
+      .innerJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
       .where(
         and(
-          eq(schema.bookings.propertyId, prop.id),
-          eq(schema.bookings.status, "CONFIRMED"),
-          lte(schema.bookings.checkInDate, today),
-          gte(schema.bookings.checkOutDate, today)
+          eq(schema.availabilityBlocks.propertyId, prop.id),
+          eq(schema.bookings.status, "PAYMENT_PENDING"),
+          lt(schema.bookings.createdAt, thirtyMinAgo)
+        )
+      );
+    for (const stale of staleBlocks) {
+      await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, stale.id));
+      if (stale.bookingId) {
+        await db.update(schema.bookings).set({ status: "CANCELLED" }).where(eq(schema.bookings.id, stale.bookingId));
+      }
+    }
+
+    // Only count blocks where booking is CONFIRMED or block is a manual host block (no bookingId)
+    const [activeBlock] = await db
+      .select({ id: schema.availabilityBlocks.id })
+      .from(schema.availabilityBlocks)
+      .leftJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
+      .where(
+        and(
+          eq(schema.availabilityBlocks.propertyId, prop.id),
+          lte(schema.availabilityBlocks.startDate, today),
+          gte(schema.availabilityBlocks.endDate, today),
+          or(
+            isNull(schema.availabilityBlocks.bookingId),
+            eq(schema.bookings.status, "CONFIRMED")
+          )
         )
       )
       .limit(1);
-
-    if (activeBooking) {
-      isReserved = true;
-    } else {
-      const [activeBlock] = await db
-        .select()
-        .from(schema.availabilityBlocks)
-        .where(
-          and(
-            eq(schema.availabilityBlocks.propertyId, prop.id),
-            lte(schema.availabilityBlocks.startDate, today),
-            gte(schema.availabilityBlocks.endDate, today)
-          )
-        )
-        .limit(1);
-      if (activeBlock) isReserved = true;
-    }
+    if (activeBlock) isReserved = true;
   } catch {}
 
   const enriched = enrichProperty(prop, images, amenities, hostUser);

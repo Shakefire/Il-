@@ -132,7 +132,7 @@ export const bookingsService = {
           )
         );
 
-      // Filter out stale blocks from abandoned PAYMENT_PENDING bookings older than 30 mins
+      // Filter out stale blocks from abandoned PAYMENT_PENDING bookings older than 10 mins
       const now = Date.now();
       const activeConflicts: typeof potentialConflicts = [];
 
@@ -161,9 +161,9 @@ export const bookingsService = {
           continue;
         }
 
-        // Unpaid bookings older than 30 minutes expire
+        // Unpaid bookings older than 10 minutes expire
         const ageMs = now - new Date(linkedBooking.createdAt).getTime();
-        if (linkedBooking.status === "PAYMENT_PENDING" && ageMs > 30 * 60 * 1000) {
+        if (linkedBooking.status === "PAYMENT_PENDING" && ageMs > 10 * 60 * 1000) {
           await tx
             .update(schema.bookings)
             .set({ status: "CANCELLED", updatedAt: new Date() })
