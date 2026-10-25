@@ -305,12 +305,14 @@ export async function processSuccessfulPayment(data: {
   });
 
   // 8. Fetch Quarantined Details & Send Emails via Resend
+  let privateDetails: any = null;
   try {
-    const [privateDetails] = await db
+    const [fetchedPrivateDetails] = await db
       .select()
       .from(schema.propertyPrivateDetails)
       .where(eq(schema.propertyPrivateDetails.propertyId, booking.propertyId))
       .limit(1);
+    privateDetails = fetchedPrivateDetails;
 
     const [host] = await db
       .select({
@@ -462,7 +464,31 @@ export async function processSuccessfulPayment(data: {
   return {
     success: true,
     message: "Payment verified and booking confirmed successfully.",
-    booking: confirmedBooking,
+    booking: {
+      ...confirmedBooking,
+      property: property
+        ? {
+            id: property.id,
+            title: property.title,
+            city: property.city,
+            neighborhood: property.neighborhood,
+            coverImage: property.coverImage,
+            slug: property.slug,
+          }
+        : undefined,
+      privateDetails: privateDetails
+        ? {
+            bookingReference: confirmedBooking.referenceCode,
+            exactAddress: privateDetails.exactAddress,
+            unitNumber: privateDetails.unitNumber || undefined,
+            contactName: privateDetails.contactName,
+            contactPhone: privateDetails.contactPhone,
+            contactEmail: privateDetails.contactEmail,
+            checkInInstructions: privateDetails.checkInInstructions || undefined,
+            accessGateCode: privateDetails.accessGateCode || undefined,
+          }
+        : undefined,
+    },
   };
 }
 

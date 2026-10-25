@@ -117,6 +117,56 @@ export class FinanceService {
   }
 
   /**
+   * Admin Updates Payout Bank Details for a Host Payout
+   */
+  static async updatePayoutBankAccount(
+    adminId: string,
+    params: {
+      payoutId: string;
+      bankName: string;
+      bankCode?: string;
+      accountNumber: string;
+      accountName: string;
+      updateHostDefaultProfile?: boolean;
+    }
+  ) {
+    const db = getDb();
+    const { payoutId, bankName, bankCode, accountNumber, accountName, updateHostDefaultProfile = true } = params;
+
+    const [payout] = await db.select().from(schema.payouts).where(eq(schema.payouts.id, payoutId)).limit(1);
+    if (!payout) {
+      throw new Error(`Payout ${payoutId} not found`);
+    }
+
+    const [updated] = await db
+      .update(schema.payouts)
+      .set({
+        bankName,
+        bankCode: bankCode || payout.bankCode,
+        accountNumber,
+        accountName,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.payouts.id, payoutId))
+      .returning();
+
+    if (updateHostDefaultProfile && payout.hostId) {
+      await db
+        .update(schema.profiles)
+        .set({
+          bankName,
+          bankCode: bankCode || undefined,
+          bankAccountNumber: accountNumber,
+          bankAccountName: accountName,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.profiles.userId, payout.hostId));
+    }
+
+    return updated;
+  }
+
+  /**
    * Admin Authorizes and Disburses a Host Payout
    */
   static async disbursePayout(

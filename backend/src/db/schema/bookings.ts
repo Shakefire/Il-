@@ -7,7 +7,7 @@ export const bookings = pgTable("bookings", {
   referenceCode: varchar("reference_code", { length: 30 }).notNull().unique(),
   propertyId: varchar("property_id", { length: 100 })
     .notNull()
-    .references(() => properties.id),
+    .references(() => properties.id, { onDelete: "cascade" }),
 
   guestId: varchar("guest_id", { length: 100 }).references(() => users.id, { onDelete: "set null" }),
   guestFirstName: varchar("guest_first_name", { length: 100 }).notNull(),

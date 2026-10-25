@@ -92,7 +92,7 @@ export async function searchProperties(params: SearchParams) {
       property: schema.properties,
     })
     .from(schema.properties)
-    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
+    .leftJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),

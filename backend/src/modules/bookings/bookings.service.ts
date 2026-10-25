@@ -12,6 +12,7 @@ import {
   bookingInitiatedEmail,
   bookingCancelledEmail,
   hostUpcomingArrivalEmail,
+  hostBookingConfirmedEmail,
 } from "../notifications/notifications.service";
 
 const CreateBookingSchema = z.object({
@@ -620,6 +621,42 @@ export const bookingsService = {
           accessToken: booking.accessToken,
         })
       );
+
+      // C. Send Host Booking Confirmed Notification with Guest & Payout Breakdown
+      if (host?.email) {
+        const gross =
+          booking.accommodationSubtotal ||
+          (booking.nightlyPrice * booking.numberOfNights) ||
+          booking.totalAmount;
+        const commission =
+          booking.hostCommissionAmount && booking.hostCommissionAmount > 0
+            ? booking.hostCommissionAmount
+            : Math.round(gross * 0.1);
+        const net =
+          booking.hostNetAmount && booking.hostNetAmount > 0
+            ? booking.hostNetAmount
+            : gross - commission;
+
+        await sendEmail(
+          hostBookingConfirmedEmail({
+            hostName: host.firstName || "Host",
+            hostEmail: host.email,
+            propertyTitle: propTitle,
+            referenceCode: booking.referenceCode,
+            guestName,
+            guestPhone: booking.guestPhone || undefined,
+            guestEmail: booking.guestEmail,
+            checkIn: booking.checkInDate,
+            checkOut: booking.checkOutDate,
+            numberOfNights: booking.numberOfNights,
+            guestCount: booking.guestCount || 1,
+            grossAmount: gross,
+            commissionAmount: commission,
+            netPayout: net,
+            currency: booking.currency || "NGN",
+          })
+        );
+      }
     } catch (emailErr) {
       console.warn("[Bookings] Failed to dispatch booking confirmation emails:", emailErr);
     }
@@ -722,7 +759,8 @@ export const bookingsService = {
     if (authorizedUserIdOrToken) {
       const isTokenMatch = booking.accessToken && authorizedUserIdOrToken === booking.accessToken;
       const isGuestMatch = booking.guestId && authorizedUserIdOrToken === booking.guestId;
-      if (!isTokenMatch && !isGuestMatch && authorizedUserIdOrToken !== "admin") {
+      const isEmailMatch = booking.guestEmail && authorizedUserIdOrToken.toLowerCase().trim() === booking.guestEmail.toLowerCase().trim();
+      if (!isTokenMatch && !isGuestMatch && !isEmailMatch && authorizedUserIdOrToken !== "admin") {
         const [prop] = await db
           .select({ hostId: schema.properties.hostId })
           .from(schema.properties)

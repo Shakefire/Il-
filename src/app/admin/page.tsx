@@ -60,6 +60,7 @@ import {
   ArrowRight,
   TrendingUp,
   Trash2,
+  Pencil,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatNaira, calculatePaystackFee } from "@/lib/utils";
@@ -109,10 +110,14 @@ export default function AdminPortalPage() {
   const [bulkAssignReviewer, setBulkAssignReviewer] = useState<string>("");
   const [bulkActionFeedback, setBulkActionFeedback] = useState<string | null>(null);
 
+  // ── Mobile Responsive Sidebar State ──
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
   // ── Dedicated Split-View Workspace States ──
   const [selectedHost, setSelectedHost] = useState<any | null>(null);
   const [selectedHostDossier, setSelectedHostDossier] = useState<any | null>(null);
   const [loadingHostDossier, setLoadingHostDossier] = useState(false);
+  const [hostWorkspaceTab, setHostWorkspaceTab] = useState<"kyc" | "properties" | "bank" | "account">("kyc");
   const [activeDocTab, setActiveDocTab] = useState<"front" | "back" | "selfie" | "authority">("front");
   const [docZoom, setDocZoom] = useState(1);
   const [rejectHostReason, setRejectHostReason] = useState("");
@@ -122,7 +127,7 @@ export default function AdminPortalPage() {
   const [downloadSuccessNotice, setDownloadSuccessNotice] = useState<string | null>(null);
 
   // ── Financial Center States ──
-  const [financeSubTab, setFinanceSubTab] = useState<"overview" | "payouts" | "refunds" | "trial_balance" | "journals" | "bookings">("overview");
+  const [financeSubTab, setFinanceSubTab] = useState<"overview" | "transactions" | "payouts" | "refunds" | "records">("overview");
   const [financialSummary, setFinancialSummary] = useState<any>(null);
   const [trialBalance, setTrialBalance] = useState<any>(null);
   const [payoutsQueue, setPayoutsQueue] = useState<any[]>([]);
@@ -130,16 +135,28 @@ export default function AdminPortalPage() {
   const [journals, setJournals] = useState<any[]>([]);
   const [loadingFinance, setLoadingFinance] = useState(false);
   const [payoutFilter, setPayoutFilter] = useState<string>("ALL");
+  const [transactionSearchQuery, setTransactionSearchQuery] = useState("");
+  const [transactionStatusFilter, setTransactionStatusFilter] = useState("ALL");
+
   // Payout disburse modal
   const [disburseModalPayout, setDisburseModalPayout] = useState<any | null>(null);
   const [disburseTransferRef, setDisburseTransferRef] = useState("");
   const [disburseNotes, setDisburseNotes] = useState("");
   const [isDisbursing, setIsDisbursing] = useState(false);
+
+  // Payout bank account edit modal
+  const [editPayoutModal, setEditPayoutModal] = useState<any | null>(null);
+  const [editBankName, setEditBankName] = useState("");
+  const [editAccountNumber, setEditAccountNumber] = useState("");
+  const [editAccountName, setEditAccountName] = useState("");
+  const [isUpdatingBank, setIsUpdatingBank] = useState(false);
+
   // Refund modal
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [refundBookingId, setRefundBookingId] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundNotes, setRefundNotes] = useState("");
+  const [refundSearch, setRefundSearch] = useState("");
   const [isProcessingRefund, setIsProcessingRefund] = useState(false);
   const [financeActionFeedback, setFinanceActionFeedback] = useState<string | null>(null);
 
@@ -600,6 +617,34 @@ export default function AdminPortalPage() {
     document.body.removeChild(link);
   };
 
+  const exportAuditLogsToCSV = () => {
+    if (!auditLogs || auditLogs.length === 0) {
+      alert("No audit records available to export.");
+      return;
+    }
+
+    const headers = ["ID", "Timestamp", "Action", "Target Entity", "Target ID", "Admin Email", "Details", "IP Address"];
+    const rows = auditLogs.map((l: any) => [
+      `"${l.id || ""}"`,
+      l.createdAt ? new Date(l.createdAt).toISOString() : "",
+      `"${l.action || ""}"`,
+      `"${l.entityType || ""}"`,
+      `"${l.entityId || ""}"`,
+      `"${l.adminEmail || ""}"`,
+      `"${(l.notes || "").replace(/"/g, '""')}"`,
+      `"${l.ipAddress || ""}"`,
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `ile_audit_logs_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleDeleteProperty = async (id: string) => {
     if (!window.confirm("Are you sure you want to permanently delete this property listing? This action cannot be undone.")) {
       return;
@@ -615,6 +660,126 @@ export default function AdminPortalPage() {
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleDeleteHost = async (hostId: string) => {
+    if (!window.confirm("Are you sure you want to permanently delete this host? All listings, KYC records, and accounts associated with this host will be permanently removed. This action cannot be undone.")) {
+      return;
+    }
+    setActionLoading(hostId);
+    try {
+      const res = await api.deleteAdminHost(hostId);
+      setActionFeedback(res.message || "Host and associated records permanently deleted.");
+      setSelectedHost(null);
+      setSelectedHostDossier(null);
+      await loadAdminData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete host");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteKyc = async (hostId: string) => {
+    if (!window.confirm("Are you sure you want to clear/delete this host's KYC submission? The host verification will be reset to UNVERIFIED.")) {
+      return;
+    }
+    setActionLoading(hostId);
+    try {
+      const res = await api.deleteAdminKyc(hostId);
+      setActionFeedback(res.message || "KYC submission cleared successfully.");
+      if (selectedHost) {
+        const refreshedDossier = await api.getAdminHost(hostId);
+        setSelectedHostDossier(refreshedDossier);
+      }
+      await loadAdminData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete KYC record");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteBooking = async (bookingId: string) => {
+    if (!window.confirm("Are you sure you want to permanently delete this booking record? This action cannot be undone.")) {
+      return;
+    }
+    setActionLoading(bookingId);
+    try {
+      const res = await api.deleteAdminBooking(bookingId);
+      setActionFeedback(res.message || "Booking record deleted.");
+      setSelectedBooking(null);
+      await loadAdminData(true);
+      if (activeModule === "financials") loadFinanceData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete booking");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteTransaction = async (paymentId: string) => {
+    if (!window.confirm("Are you sure you want to permanently delete this transaction record?")) {
+      return;
+    }
+    setActionLoading(paymentId);
+    try {
+      const res = await api.deleteAdminTransaction(paymentId);
+      setActionFeedback(res.message || "Transaction record deleted.");
+      await loadAdminData(true);
+      if (activeModule === "financials") loadFinanceData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to delete transaction");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleUpdatePayoutBank = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPayoutModal) return;
+    setIsUpdatingBank(true);
+    try {
+      await api.updateAdminPayoutBank(editPayoutModal.id, {
+        bankName: editBankName.trim(),
+        accountNumber: editAccountNumber.trim(),
+        accountName: editAccountName.trim(),
+      });
+      setFinanceActionFeedback(`Payout bank account updated to ${editBankName} (${editAccountNumber})!`);
+      setEditPayoutModal(null);
+      loadFinanceData();
+    } catch (err: any) {
+      alert(err.message || "Failed to update bank details");
+    } finally {
+      setIsUpdatingBank(false);
+    }
+  };
+
+  const handleExportTransactionsCSV = () => {
+    if (!bookings.length) {
+      alert("No transaction records to export");
+      return;
+    }
+    const headers = ["Reference", "Date", "Property", "Guest Name", "Guest Email", "Guest Phone", "Total Amount (NGN)", "Host Net (NGN)", "Status"];
+    const rows = bookings.map((b) => [
+      b.referenceCode || b.id,
+      b.createdAt ? new Date(b.createdAt).toISOString().split("T")[0] : "",
+      `"${(b.propertyTitle || b.property?.title || "Property").replace(/"/g, '""')}"`,
+      `"${(b.guestName || `${b.guestFirstName || ""} ${b.guestLastName || ""}`.trim()).replace(/"/g, '""')}"`,
+      b.guestEmail || "",
+      b.guestPhone || "",
+      b.totalAmount || b.totalPrice || 0,
+      b.hostNetAmount || Math.round((b.totalAmount || 0) * 0.9),
+      b.status || "CONFIRMED",
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `ile_transactions_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleSendTestEmail = async () => {
@@ -707,7 +872,18 @@ export default function AdminPortalPage() {
           Inherits marketplace styling ecosystem (#FAFAF8, bg-white, border-[#E7E5E0],
           #0B5D45 emerald accents, active route marked with border-l-2 border-[#0B5D45]).
       ────────────────────────────────────────────────────────────── */}
-      <aside className="w-64 bg-white border-r border-[#E7E5E0] flex flex-col justify-between fixed top-0 bottom-0 left-0 z-40 select-none shadow-xs">
+      {isMobileSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 backdrop-blur-xs z-30 lg:hidden"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
+      <aside
+        className={`fixed top-0 bottom-0 left-0 z-40 w-64 bg-white border-r border-[#E7E5E0] flex flex-col justify-between transition-transform duration-200 select-none shadow-xs ${
+          isMobileSidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
+      >
         <div>
           {/* Brand Header */}
           <div className="p-6 border-b border-[#E7E5E0] flex items-center justify-between">
@@ -724,6 +900,13 @@ export default function AdminPortalPage() {
                 Compliance &amp; Operations
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => setIsMobileSidebarOpen(false)}
+              className="lg:hidden p-1.5 text-primary-muted hover:text-primary rounded-lg"
+            >
+              <X size={18} />
+            </button>
           </div>
 
           {/* Navigation Items (Accent Line for Active Route, No Flat Background Fills) */}
@@ -731,7 +914,10 @@ export default function AdminPortalPage() {
             {/* Dashboard */}
             <button
               type="button"
-              onClick={() => setActiveModule("dashboard")}
+              onClick={() => {
+                setActiveModule("dashboard");
+                setIsMobileSidebarOpen(false);
+              }}
               className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "dashboard"
                   ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
@@ -747,7 +933,10 @@ export default function AdminPortalPage() {
             {/* Compliance & KYC */}
             <button
               type="button"
-              onClick={() => setActiveModule("compliance")}
+              onClick={() => {
+                setActiveModule("compliance");
+                setIsMobileSidebarOpen(false);
+              }}
               className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "compliance"
                   ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
@@ -768,7 +957,10 @@ export default function AdminPortalPage() {
             {/* Properties */}
             <button
               type="button"
-              onClick={() => setActiveModule("properties")}
+              onClick={() => {
+                setActiveModule("properties");
+                setIsMobileSidebarOpen(false);
+              }}
               className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "properties"
                   ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
@@ -789,7 +981,10 @@ export default function AdminPortalPage() {
             {/* Financials */}
             <button
               type="button"
-              onClick={() => setActiveModule("financials")}
+              onClick={() => {
+                setActiveModule("financials");
+                setIsMobileSidebarOpen(false);
+              }}
               className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "financials"
                   ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
@@ -808,7 +1003,10 @@ export default function AdminPortalPage() {
             {/* Security & System */}
             <button
               type="button"
-              onClick={() => setActiveModule("security")}
+              onClick={() => {
+                setActiveModule("security");
+                setIsMobileSidebarOpen(false);
+              }}
               className={`w-full flex items-center justify-between py-2.5 transition-colors cursor-pointer rounded-r-lg ${
                 activeModule === "security"
                   ? "border-l-2 border-[#0B5D45] text-[#0B5D45] bg-[#EDF3F0]/60 font-semibold pl-3"
@@ -910,14 +1108,23 @@ export default function AdminPortalPage() {
       {/* ─────────────────────────────────────────────────────────────
           2. MAIN SAAS WORKSPACE (Offset by Sidebar Width)
       ────────────────────────────────────────────────────────────── */}
-      <div className="flex-1 ml-64 flex flex-col min-h-screen">
+      <div className="flex-1 lg:ml-64 flex flex-col min-h-screen w-full min-w-0">
         {/* Unified Top Navigation Bar (Merged breadcrumb + header on standard surface) */}
-        <header className="h-14 bg-surface border-b border-border sticky top-0 z-30 px-6 sm:px-8 flex items-center justify-between shadow-xs">
-          {/* Unified Breadcrumb Navigation */}
-          <div className="flex items-center gap-2 text-xs">
-            <span className="font-semibold text-primary-muted">Ilé Admin</span>
-            <span className="text-border">/</span>
-            <span className="font-semibold text-primary capitalize">
+        <header className="h-14 bg-surface border-b border-border sticky top-0 z-30 px-4 sm:px-8 flex items-center justify-between shadow-xs">
+          {/* Unified Breadcrumb Navigation & Mobile Hamburger */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="lg:hidden p-1.5 rounded-xl border border-border text-primary hover:bg-surface-muted transition-colors cursor-pointer"
+              aria-label="Toggle navigation"
+            >
+              <LayoutDashboard size={16} />
+            </button>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="font-semibold text-primary-muted">Ilé Admin</span>
+              <span className="text-border">/</span>
+              <span className="font-semibold text-primary capitalize">
               {activeModule === "compliance"
                 ? "Host Partners & KYC"
                 : activeModule === "properties"
@@ -927,7 +1134,8 @@ export default function AdminPortalPage() {
                 : activeModule === "security"
                 ? "Security & System"
                 : "Operations Overview"}
-            </span>
+              </span>
+            </div>
           </div>
 
           {/* Action Triggers */}
@@ -1417,6 +1625,16 @@ export default function AdminPortalPage() {
                                   <span>Approve</span>
                                 </button>
                               )}
+
+                              <button
+                                type="button"
+                                disabled={actionLoading === h.id}
+                                onClick={() => handleDeleteHost(h.id)}
+                                title="Delete Host & Associated Records Permanently"
+                                className="p-1.5 text-primary-muted hover:text-rose-600 border border-border rounded-lg hover:bg-rose-50 transition-colors inline-flex items-center align-middle cursor-pointer"
+                              >
+                                <Trash2 size={13} />
+                              </button>
                             </td>
                           </tr>
                         );
@@ -1668,21 +1886,11 @@ export default function AdminPortalPage() {
               {/* Module Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-accent">
-                      Institutional Finance Core
-                    </span>
-                    {trialBalance?.isBalanced && (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
-                        <CheckCircle2 size={12} /> Balanced Ledger
-                      </span>
-                    )}
-                  </div>
-                  <h1 className="text-2xl font-bold text-primary tracking-tight mt-0.5">
-                    Financial Center &amp; Double-Entry Ledger
+                  <h1 className="text-2xl font-bold text-primary tracking-tight">
+                    Financial Management Center
                   </h1>
                   <p className="text-xs text-primary-secondary mt-1">
-                    Continuous zero-sum reconciliation, host settlement authorization queue, non-refundable gateway fee audits, and chart of accounts.
+                    Manage bookings, process real Paystack refunds, disburse host settlements, edit bank details, and export audit records.
                   </p>
                 </div>
 
@@ -1694,7 +1902,7 @@ export default function AdminPortalPage() {
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer"
                   >
                     <RotateCw size={13} className={loadingFinance ? "animate-spin" : ""} />
-                    <span>Sync Ledger</span>
+                    <span>Refresh</span>
                   </button>
                   <button
                     type="button"
@@ -1726,12 +1934,11 @@ export default function AdminPortalPage() {
               {/* Sub-tab Navigation */}
               <div className="flex border-b border-border gap-6 sm:gap-8 overflow-x-auto">
                 {[
-                  { id: "overview", label: "Executive Overview", icon: LayoutDashboard },
-                  { id: "payouts", label: `Payout Queue (${payoutsQueue.filter((p) => p.status !== "PAID").length})`, icon: Landmark },
+                  { id: "overview", label: "Overview", icon: LayoutDashboard },
+                  { id: "transactions", label: `Transactions (${bookings.length})`, icon: CreditCard },
+                  { id: "payouts", label: `Host Payouts (${payoutsQueue.filter((p) => p.status !== "PAID").length})`, icon: Landmark },
                   { id: "refunds", label: `Refunds (${refundsQueue.length})`, icon: Receipt },
-                  { id: "trial_balance", label: "Trial Balance", icon: Activity },
-                  { id: "journals", label: "General Journals", icon: FileText },
-                  { id: "bookings", label: `Reservations (${bookings.length})`, icon: Calendar },
+                  { id: "records", label: `Financial Records (${auditLogs.length})`, icon: FileText },
                 ].map((tab) => {
                   const Icon = tab.icon;
                   const isActive = financeSubTab === tab.id;
@@ -1753,204 +1960,363 @@ export default function AdminPortalPage() {
                 })}
               </div>
 
-              {/* ── Sub-Tab 1: Executive Overview ── */}
+              {/* ── Sub-Tab 1: Financial Overview ── */}
               {financeSubTab === "overview" && (
                 <div className="space-y-6">
-                  {/* Zero-Sum Balance Sheet Status Banner */}
-                  <div
-                    className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs ${
-                      trialBalance?.isBalanced
-                        ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
-                        : "bg-amber-50/70 border-amber-200 text-amber-950"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                          trialBalance?.isBalanced
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-amber-100 text-amber-800"
-                        }`}
-                      >
-                        <ShieldCheck size={20} />
+                  {/* 5 Real-World Financial KPIs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    {/* GMV */}
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Total Volume (GMV)</span>
+                        <TrendingUp size={15} className="text-accent" />
                       </div>
-                      <div>
-                        <div className="font-bold text-sm">
-                          {trialBalance?.isBalanced
-                            ? "Strict Mathematical Zero-Sum Ledger Verified"
-                            : "Ledger Reconciliation Discrepancy Detected"}
-                        </div>
-                        <p className="text-[11px] text-[#555] mt-0.5">
-                          {trialBalance?.isBalanced
-                            ? `All debits match credits exactly (Imbalance = ₦0.00). Total Inflow/Outflow: ${formatNaira(
-                                trialBalance?.totalDebits || 0
-                              )}.`
-                            : `Debit/Credit mismatch of ${formatNaira(
-                                trialBalance?.imbalance || 0
-                              )}. Administrative review recommended.`}
-                        </p>
+                      <div className="text-2xl font-bold text-primary tabular-nums">
+                        {formatNaira(stats?.totalRevenue || 0)}
                       </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        Gross platform reservations
+                      </p>
                     </div>
 
-                    <div className="flex items-center gap-2 self-end sm:self-center">
-                      <span className="font-mono text-[11px] px-2.5 py-1 rounded-lg bg-white border border-emerald-300 font-bold text-emerald-900">
-                        Δ Imbalance: {formatNaira(trialBalance?.imbalance || 0)}
-                      </span>
+                    {/* Platform Commission */}
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Platform Commission</span>
+                        <DollarSign size={15} className="text-emerald-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-emerald-800 tabular-nums">
+                        {formatNaira(Math.round((stats?.totalRevenue || 0) * 0.10))}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        10% Ilé platform revenue
+                      </p>
+                    </div>
+
+                    {/* Completed Host Payouts */}
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Paid to Hosts</span>
+                        <CheckCircle2 size={15} className="text-blue-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-blue-900 tabular-nums">
+                        {formatNaira(
+                          payoutsQueue
+                            .filter((p) => p.status === "PAID")
+                            .reduce((sum, p) => sum + (p.amount || 0), 0)
+                        )}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        {payoutsQueue.filter((p) => p.status === "PAID").length} disbursed settlements
+                      </p>
+                    </div>
+
+                    {/* Pending Host Payouts */}
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Pending Payouts</span>
+                        <Clock size={15} className="text-amber-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-amber-900 tabular-nums">
+                        {formatNaira(
+                          payoutsQueue
+                            .filter((p) => p.status !== "PAID")
+                            .reduce((sum, p) => sum + (p.amount || 0), 0)
+                        )}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        {payoutsQueue.filter((p) => p.status !== "PAID").length} settlements awaiting action
+                      </p>
+                    </div>
+
+                    {/* Total Refunds */}
+                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
+                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
+                        <span>Total Refunds</span>
+                        <Receipt size={15} className="text-rose-600" />
+                      </div>
+                      <div className="text-2xl font-bold text-rose-800 tabular-nums">
+                        {formatNaira(
+                          refundsQueue
+                            .filter((r) => r.status === "PROCESSED")
+                            .reduce((sum, r) => sum + (r.refundableAmount || 0), 0)
+                        )}
+                      </div>
+                      <p className="text-[11px] text-primary-secondary">
+                        {refundsQueue.filter((r) => r.status === "PROCESSED").length} processed reversals
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Quick Action Operations Box */}
+                  <div className="p-5 bg-surface rounded-2xl border border-border flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <h4 className="font-bold text-sm text-primary">Financial Operations &amp; Settlements</h4>
+                      <p className="text-xs text-primary-muted mt-0.5">Quickly access payout execution, manual refund reversals, or download data.</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2.5">
                       <button
                         type="button"
-                        onClick={() => setFinanceSubTab("trial_balance")}
-                        className="px-3 py-1 bg-emerald-800 hover:bg-emerald-900 text-white rounded-lg font-semibold text-[11px] transition-colors"
+                        onClick={() => setFinanceSubTab("payouts")}
+                        className="px-3.5 py-2 bg-primary text-white rounded-xl text-xs font-semibold hover:bg-black transition-colors cursor-pointer flex items-center gap-1.5"
                       >
-                        Inspect Accounts →
+                        <Landmark size={14} />
+                        <span>Manage Host Payouts</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowRefundModal(true)}
+                        className="px-3.5 py-2 bg-surface border border-border text-primary rounded-xl text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Receipt size={14} />
+                        <span>Issue Refund</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExportTransactionsCSV}
+                        className="px-3.5 py-2 bg-surface border border-border text-primary rounded-xl text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Download size={14} />
+                        <span>Export CSV</span>
                       </button>
                     </div>
                   </div>
 
-                  {/* 4 Core Financial Metrics */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
-                        <span>Paystack &amp; Bank Assets</span>
-                        <Landmark size={15} className="text-accent" />
-                      </div>
-                      <div className="text-2xl font-bold text-primary tabular-nums">
-                        {formatNaira(financialSummary?.metrics?.paystackClearing || 0)}
-                      </div>
-                      <p className="text-[11px] text-primary-secondary">
-                        In Clearing Account (1010)
-                      </p>
+                  {/* Recent Transactions Preview */}
+                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                    <div className="p-4 border-b border-border flex items-center justify-between">
+                      <h3 className="font-bold text-xs uppercase tracking-wider text-primary">
+                        Recent Transactions ({bookings.slice(0, 5).length})
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setFinanceSubTab("transactions")}
+                        className="text-xs font-semibold text-accent hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>View All Transactions</span>
+                        <ArrowRight size={13} />
+                      </button>
                     </div>
 
-                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
-                        <span>Advance Guest Escrow</span>
-                        <Lock size={15} className="text-blue-600" />
-                      </div>
-                      <div className="text-2xl font-bold text-blue-900 tabular-nums">
-                        {formatNaira(financialSummary?.metrics?.advanceGuestDeposits || 0)}
-                      </div>
-                      <p className="text-[11px] text-primary-secondary">
-                        Escrow liability held until check-in (2010)
-                      </p>
-                    </div>
-
-                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
-                        <span>Host Settlement Payable</span>
-                        <Clock size={15} className="text-amber-600" />
-                      </div>
-                      <div className="text-2xl font-bold text-amber-900 tabular-nums">
-                        {formatNaira(financialSummary?.metrics?.hostSettlementPayable || 0)}
-                      </div>
-                      <p className="text-[11px] text-primary-secondary">
-                        Owed to hosts for checked-in stays (2020)
-                      </p>
-                    </div>
-
-                    <div className="p-5 bg-surface rounded-2xl border border-border shadow-xs space-y-2">
-                      <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted flex items-center justify-between">
-                        <span>Ilé Commission Revenue</span>
-                        <TrendingUp size={15} className="text-emerald-600" />
-                      </div>
-                      <div className="text-2xl font-bold text-emerald-800 tabular-nums">
-                        {formatNaira(financialSummary?.metrics?.platformCommissionRevenue || 0)}
-                      </div>
-                      <p className="text-[11px] text-primary-secondary">
-                        Earned 10% platform commission (4010)
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Operational Action Queues Overview */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                    {/* Host Payouts Card */}
-                    <div className="p-6 bg-surface rounded-2xl border border-border shadow-xs space-y-4 flex flex-col justify-between">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
-                            <Landmark size={14} />
-                            <span>Host Payout Queue</span>
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                            {payoutsQueue.filter((p) => p.status !== "PAID").length} Pending
-                          </span>
-                        </div>
-                        <h3 className="text-base font-bold text-primary">
-                          Scheduled Host Settlements
-                        </h3>
-                        <p className="text-xs text-primary-secondary leading-relaxed">
-                          After guests check in and complete the 24-hour verification window, net host payouts become ready for manual authorization and Nigerian NUBAN transfer.
-                        </p>
-                      </div>
-
-                      <div className="pt-3 border-t border-border flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] uppercase font-semibold text-primary-muted block">
-                            Pending Value
-                          </span>
-                          <span className="text-lg font-bold text-primary">
-                            {formatNaira(
-                              payoutsQueue
-                                .filter((p) => p.status !== "PAID")
-                                .reduce((acc, p) => acc + (p.amount || 0), 0)
-                            )}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFinanceSubTab("payouts")}
-                          className="px-4 py-2 bg-primary text-white text-xs font-semibold rounded-xl hover:bg-black transition-colors"
-                        >
-                          Review Payout Queue →
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Refunds Policy Card */}
-                    <div className="p-6 bg-surface rounded-2xl border border-border shadow-xs space-y-4 flex flex-col justify-between">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold uppercase tracking-wider text-accent flex items-center gap-1.5">
-                            <Receipt size={14} />
-                            <span>Refunds &amp; Cancellations</span>
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
-                            {refundsQueue.length} Processed
-                          </span>
-                        </div>
-                        <h3 className="text-base font-bold text-primary">
-                          Non-Refundable Fee Protection
-                        </h3>
-                        <p className="text-xs text-primary-secondary leading-relaxed">
-                          Guests who cancel receive a refund for the accommodation price only. The Paystack domestic processing fee (1.5% + ₦100) is strictly non-refundable and kept by the processor.
-                        </p>
-                      </div>
-
-                      <div className="pt-3 border-t border-border flex items-center justify-between">
-                        <div>
-                          <span className="text-[10px] uppercase font-semibold text-primary-muted block">
-                            Total Refunded
-                          </span>
-                          <span className="text-lg font-bold text-primary">
-                            {formatNaira(
-                              refundsQueue.reduce((acc, r) => acc + (r.refundableAmount || 0), 0)
-                            )}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFinanceSubTab("refunds")}
-                          className="px-4 py-2 border border-border bg-surface hover:bg-surface-muted text-primary text-xs font-semibold rounded-xl transition-colors"
-                        >
-                          Manage Refunds →
-                        </button>
-                      </div>
+                    <div className="overflow-x-auto">
+                      <table className="min-w-[700px] w-full text-left text-xs divide-y divide-border">
+                        <thead className="bg-surface text-[11px] font-bold uppercase tracking-wider text-primary-muted">
+                          <tr>
+                            <th className="py-2.5 px-3">Reference</th>
+                            <th className="py-2.5 px-3">Guest</th>
+                            <th className="py-2.5 px-3">Dates</th>
+                            <th className="py-2.5 px-3">Total Paid</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {bookings.slice(0, 5).map((b) => (
+                            <tr key={b.id} className="hover:bg-surface-muted/60 transition-colors">
+                              <td className="py-2.5 px-3 font-mono font-bold text-primary">
+                                {b.referenceCode || b.id.slice(0, 8)}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <div className="font-semibold text-primary">{b.guestName || `${b.guestFirstName || ""} ${b.guestLastName || ""}`.trim() || "Guest"}</div>
+                                <div className="text-[11px] text-primary-muted font-mono">{b.guestEmail}</div>
+                              </td>
+                              <td className="py-2.5 px-3 text-primary-secondary">
+                                {b.checkInDate} → {b.checkOutDate}
+                              </td>
+                              <td className="py-2.5 px-3 font-bold text-accent tabular-nums">
+                                {formatNaira(b.totalAmount || b.totalPrice || 0)}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase">
+                                  {b.status || "CONFIRMED"}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedBooking(b)}
+                                  className="px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted cursor-pointer"
+                                >
+                                  Details
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* ── Sub-Tab 2: Host Payout Queue ── */}
+              {/* ── Sub-Tab 2: Transactions ── */}
+              {financeSubTab === "transactions" && (
+                <div className="space-y-4">
+                  {/* Search, Filter & Export Toolbar */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-2 flex-1 max-w-xl">
+                      <div className="relative flex-1 min-w-[200px]">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary-muted" />
+                        <input
+                          type="text"
+                          value={transactionSearchQuery}
+                          onChange={(e) => setTransactionSearchQuery(e.target.value)}
+                          placeholder="Search reference, guest email, name, property..."
+                          className="w-full pl-9 pr-3 py-1.5 rounded-xl border border-border bg-surface text-xs text-primary focus:outline-none focus:border-accent"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {["ALL", "CONFIRMED", "PENDING", "REFUNDED", "CANCELLED"].map((st) => (
+                          <button
+                            key={st}
+                            type="button"
+                            onClick={() => setTransactionStatusFilter(st)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                              transactionStatusFilter === st
+                                ? "bg-accent text-white"
+                                : "bg-surface border border-border text-primary-muted hover:text-primary"
+                            }`}
+                          >
+                            {st}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleExportTransactionsCSV}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-surface text-primary text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer shadow-xs"
+                      >
+                        <Download size={13} />
+                        <span>Export CSV</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Transactions Table */}
+                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs divide-y divide-border min-w-[750px]">
+                        <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                          <tr>
+                            <th className="py-2.5 px-3">Order Ref / Date</th>
+                            <th className="py-2.5 px-3">Guest Details</th>
+                            <th className="py-2.5 px-3">Property &amp; Stay</th>
+                            <th className="py-2.5 px-3">Gross Total</th>
+                            <th className="py-2.5 px-3">Payment Method</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {bookings
+                            .filter((b) => {
+                              if (transactionStatusFilter !== "ALL" && (b.status || "CONFIRMED") !== transactionStatusFilter) return false;
+                              if (!transactionSearchQuery.trim()) return true;
+                              const q = transactionSearchQuery.toLowerCase();
+                              return (
+                                (b.referenceCode || b.id || "").toLowerCase().includes(q) ||
+                                (b.guestName || `${b.guestFirstName || ""} ${b.guestLastName || ""}`).toLowerCase().includes(q) ||
+                                (b.guestEmail || "").toLowerCase().includes(q) ||
+                                (b.propertyTitle || b.property?.title || "").toLowerCase().includes(q)
+                              );
+                            })
+                            .map((b) => (
+                              <tr
+                                key={b.id}
+                                className="hover:bg-surface-muted/60 transition-colors"
+                              >
+                                <td className="py-3 px-3">
+                                  <div className="font-mono font-bold text-primary">{b.referenceCode || b.id?.slice(0, 8)}</div>
+                                  <div className="text-[11px] text-primary-muted">
+                                    {b.createdAt ? new Date(b.createdAt).toLocaleDateString("en-GB") : "—"}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="font-semibold text-primary">
+                                    {b.guestName || `${b.guestFirstName || ""} ${b.guestLastName || ""}`.trim() || "Guest"}
+                                  </div>
+                                  <div className="text-[11px] text-primary-muted font-mono">{b.guestEmail}</div>
+                                  {b.guestPhone && <div className="text-[10px] text-primary-muted">{b.guestPhone}</div>}
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="font-medium text-primary line-clamp-1">
+                                    {b.propertyTitle || b.property?.title || "Property Listing"}
+                                  </div>
+                                  <div className="text-[11px] text-primary-secondary">
+                                    {b.checkInDate || b.checkIn} → {b.checkOutDate || b.checkOut}
+                                  </div>
+                                </td>
+                                <td className="py-3 px-3 whitespace-nowrap font-bold text-accent text-sm tabular-nums">
+                                  {formatNaira(b.totalAmount || b.totalPrice || 0)}
+                                </td>
+                                <td className="py-3 px-3 text-primary-secondary">
+                                  <div className="font-medium">{b.payment?.paymentMethod || "Paystack Checkout"}</div>
+                                  {b.payment?.paystackReference && (
+                                    <div className="text-[10px] font-mono text-primary-muted">{b.payment.paystackReference}</div>
+                                  )}
+                                </td>
+                                <td className="py-3 px-3 whitespace-nowrap">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+                                      b.status === "REFUNDED"
+                                        ? "bg-rose-50 text-rose-800 border-rose-200"
+                                        : b.status === "CANCELLED"
+                                        ? "bg-slate-100 text-slate-800 border-slate-200"
+                                        : "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                    }`}
+                                  >
+                                    {b.status || "CONFIRMED"}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3 text-right space-x-1.5 whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedBooking(b)}
+                                    className="px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted cursor-pointer"
+                                  >
+                                    Details
+                                  </button>
+                                  {b.status !== "CANCELLED" && b.status !== "REFUNDED" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRefundBookingId(b.id);
+                                        setShowRefundModal(true);
+                                      }}
+                                      className="px-2.5 py-1 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 font-semibold transition-colors cursor-pointer"
+                                    >
+                                      Refund
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteTransaction(b.id)}
+                                    className="p-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer inline-block align-middle"
+                                    title="Delete transaction record"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          {bookings.length === 0 && (
+                            <tr>
+                              <td colSpan={7} className="p-10 text-center text-primary-muted">
+                                No transactions recorded.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Sub-Tab 3: Host Payout Queue ── */}
               {financeSubTab === "payouts" && (
                 <div className="space-y-4">
                   {/* Status Filters Bar */}
@@ -1978,7 +2344,7 @@ export default function AdminPortalPage() {
                           key={filter.id}
                           type="button"
                           onClick={() => setPayoutFilter(filter.id)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 ${
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer ${
                             payoutFilter === filter.id
                               ? "bg-accent text-white"
                               : "bg-surface border border-border text-primary-muted hover:text-primary"
@@ -2006,105 +2372,119 @@ export default function AdminPortalPage() {
 
                   {/* Payout Queue Table */}
                   <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
-                    <table className="w-full text-left text-xs divide-y divide-border">
-                      <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
-                        <tr>
-                          <th className="py-2.5 px-3">Ref / Host</th>
-                          <th className="py-2.5 px-3">Property &amp; Stay</th>
-                          <th className="py-2.5 px-3">Settlement Bank (NUBAN)</th>
-                          <th className="py-2.5 px-3">Net Amount</th>
-                          <th className="py-2.5 px-3">Scheduled For</th>
-                          <th className="py-2.5 px-3">Status</th>
-                          <th className="py-2.5 px-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {payoutsQueue
-                          .filter((p) => (payoutFilter === "ALL" ? true : p.status === payoutFilter))
-                          .map((p) => (
-                            <tr key={p.id} className="hover:bg-surface-muted/60 transition-colors">
-                              <td className="py-3 px-3">
-                                <div className="font-bold text-primary font-mono">{p.bookingRef || p.bookingId?.slice(0, 8)}</div>
-                                <div className="font-semibold text-primary mt-0.5">{p.hostName || "Host"}</div>
-                                <div className="text-[11px] text-primary-muted font-mono">{p.hostEmail}</div>
-                              </td>
-                              <td className="py-3 px-3">
-                                <div className="font-medium text-primary line-clamp-1">{p.propertyName || "Stay"}</div>
-                                <div className="text-[11px] text-primary-secondary mt-0.5">
-                                  {p.checkInDate} → {p.checkOutDate}
-                                </div>
-                              </td>
-                              <td className="py-3 px-3">
-                                <div className="font-semibold text-primary">{p.bankName || "Bank"}</div>
-                                <div className="text-[11px] font-mono text-primary-secondary tracking-wider">
-                                  {p.accountNumber || "—"}
-                                </div>
-                                <div className="text-[10px] text-primary-muted">{p.accountName}</div>
-                              </td>
-                              <td className="py-3 px-3 whitespace-nowrap font-bold text-emerald-800 text-sm tabular-nums">
-                                {formatNaira(p.amount || 0)}
-                              </td>
-                              <td className="py-3 px-3 whitespace-nowrap text-primary-secondary">
-                                {p.scheduledFor ? new Date(p.scheduledFor).toLocaleDateString() : "Immediate"}
-                              </td>
-                              <td className="py-3 px-3 whitespace-nowrap">
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
-                                    p.status === "PAID"
-                                      ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                      : p.status === "READY_FOR_PAYOUT"
-                                      ? "bg-blue-50 text-blue-800 border-blue-200"
-                                      : "bg-amber-50 text-amber-800 border-amber-200"
-                                  }`}
-                                >
-                                  {p.status}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 text-right whitespace-nowrap">
-                                {p.status === "PAID" ? (
-                                  <div className="text-[11px] text-primary-muted">
-                                    <span className="font-mono">{p.paystackTransferRef || "Disbursed"}</span>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs divide-y divide-border min-w-[750px]">
+                        <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                          <tr>
+                            <th className="py-2.5 px-3">Ref / Host</th>
+                            <th className="py-2.5 px-3">Property &amp; Stay</th>
+                            <th className="py-2.5 px-3">Settlement Bank (NUBAN)</th>
+                            <th className="py-2.5 px-3">Net Amount</th>
+                            <th className="py-2.5 px-3">Scheduled For</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {payoutsQueue
+                            .filter((p) => (payoutFilter === "ALL" ? true : p.status === payoutFilter))
+                            .map((p) => (
+                              <tr key={p.id} className="hover:bg-surface-muted/60 transition-colors">
+                                <td className="py-3 px-3">
+                                  <div className="font-bold text-primary font-mono">{p.bookingRef || p.bookingId?.slice(0, 8)}</div>
+                                  <div className="font-semibold text-primary mt-0.5">{p.hostName || "Host"}</div>
+                                  <div className="text-[11px] text-primary-muted font-mono">{p.hostEmail}</div>
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="font-medium text-primary line-clamp-1">{p.propertyName || "Stay"}</div>
+                                  <div className="text-[11px] text-primary-secondary mt-0.5">
+                                    {p.checkInDate} → {p.checkOutDate}
                                   </div>
-                                ) : (
+                                </td>
+                                <td className="py-3 px-3">
+                                  <div className="font-semibold text-primary">{p.bankName || "Bank"}</div>
+                                  <div className="text-[11px] font-mono text-primary-secondary tracking-wider">
+                                    {p.accountNumber || "—"}
+                                  </div>
+                                  <div className="text-[10px] text-primary-muted">{p.accountName}</div>
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setDisburseModalPayout(p);
-                                      setDisburseTransferRef(`TRF-${Date.now().toString(36).toUpperCase()}`);
+                                      setEditPayoutModal(p);
+                                      setEditBankName(p.bankName || "");
+                                      setEditAccountNumber(p.accountNumber || "");
+                                      setEditAccountName(p.accountName || "");
                                     }}
-                                    className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs"
+                                    className="mt-1 text-[10px] text-accent font-semibold hover:underline flex items-center gap-1 cursor-pointer"
                                   >
-                                    Authorize &amp; Disburse
+                                    <Pencil size={10} />
+                                    <span>Change Account</span>
                                   </button>
-                                )}
+                                </td>
+                                <td className="py-3 px-3 whitespace-nowrap font-bold text-emerald-800 text-sm tabular-nums">
+                                  {formatNaira(p.amount || 0)}
+                                </td>
+                                <td className="py-3 px-3 whitespace-nowrap text-primary-secondary">
+                                  {p.scheduledFor ? new Date(p.scheduledFor).toLocaleDateString() : "Immediate"}
+                                </td>
+                                <td className="py-3 px-3 whitespace-nowrap">
+                                  <span
+                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
+                                      p.status === "PAID"
+                                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                        : p.status === "READY_FOR_PAYOUT"
+                                        ? "bg-blue-50 text-blue-800 border-blue-200"
+                                        : "bg-amber-50 text-amber-800 border-amber-200"
+                                    }`}
+                                  >
+                                    {p.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-3 text-right whitespace-nowrap">
+                                  {p.status === "PAID" ? (
+                                    <div className="text-[11px] text-primary-muted">
+                                      <span className="font-mono">{p.paystackTransferRef || "Disbursed"}</span>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setDisburseModalPayout(p);
+                                        setDisburseTransferRef(`TRF-${Date.now().toString(36).toUpperCase()}`);
+                                      }}
+                                      className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs"
+                                    >
+                                      Authorize &amp; Disburse
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          {payoutsQueue.length === 0 && (
+                            <tr>
+                              <td colSpan={7} className="p-10 text-center text-primary-muted">
+                                No payouts in queue.
                               </td>
                             </tr>
-                          ))}
-                        {payoutsQueue.length === 0 && (
-                          <tr>
-                            <td colSpan={7} className="p-10 text-center text-primary-muted">
-                              No payouts in queue.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* ── Sub-Tab 3: Refunds Management ── */}
+              {/* ── Sub-Tab 4: Refunds Management ── */}
               {financeSubTab === "refunds" && (
                 <div className="space-y-4">
                   {/* Notice Banner */}
-                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-xs text-amber-950 shadow-xs">
-                    <AlertTriangle size={18} className="text-amber-700 shrink-0 mt-0.5" />
+                  <div className="p-4 bg-surface rounded-2xl border border-border flex items-start gap-3 text-xs shadow-xs">
+                    <Receipt size={18} className="text-accent shrink-0 mt-0.5" />
                     <div>
-                      <span className="font-bold">Institutional Refund Rule: </span>
-                      <span>
-                        Processing fees (1.5% + ₦100, capped at ₦2,000) are non-refundable pass-through expenses forfeited by the guest.
-                        When an admin processes a refund, the double-entry engine debits Advance Guest Deposits Escrow (2010)
-                        and credits Paystack Clearing (1010), recognizing the retained gateway fee expense (5010).
+                      <span className="font-bold text-primary">Paystack Direct Reversal System: </span>
+                      <span className="text-primary-secondary">
+                        Processing a refund triggers an official reversal directly to the guest&apos;s debit card or bank account via Paystack,
+                        automatically cancels the reservation, frees up property calendar dates for fresh bookings, and sends an automated notification email.
                       </span>
                     </div>
                   </div>
@@ -2124,310 +2504,127 @@ export default function AdminPortalPage() {
                       </button>
                     </div>
 
-                    <table className="w-full text-left text-xs divide-y divide-border">
-                      <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
-                        <tr>
-                          <th className="py-2.5 px-3">Booking Ref</th>
-                          <th className="py-2.5 px-3">Guest Contact</th>
-                          <th className="py-2.5 px-3">Gross Paid</th>
-                          <th className="py-2.5 px-3">Retained Fee (Forfeited)</th>
-                          <th className="py-2.5 px-3">Net Refunded</th>
-                          <th className="py-2.5 px-3">Reason / Notes</th>
-                          <th className="py-2.5 px-3">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {refundsQueue.map((r) => (
-                          <tr key={r.id} className="hover:bg-surface-muted/60 transition-colors">
-                            <td className="py-3 px-3">
-                              <span className="font-bold text-primary font-mono">{r.bookingRef || r.bookingId?.slice(0, 8)}</span>
-                              <div className="text-[11px] text-primary-muted">{r.propertyName}</div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <div className="text-primary font-mono">{r.guestEmail}</div>
-                              <div className="text-[11px] text-primary-muted">{r.guestPhone}</div>
-                            </td>
-                            <td className="py-3 px-3 whitespace-nowrap text-primary-secondary font-medium tabular-nums">
-                              {formatNaira(r.grossPaid || 0)}
-                            </td>
-                            <td className="py-3 px-3 whitespace-nowrap text-rose-700 font-medium tabular-nums">
-                              -{formatNaira(r.nonRefundableProcessingFee || 0)}
-                            </td>
-                            <td className="py-3 px-3 whitespace-nowrap font-bold text-blue-900 text-sm tabular-nums">
-                              {formatNaira(r.refundableAmount || 0)}
-                            </td>
-                            <td className="py-3 px-3 text-primary-secondary">
-                              <span className="font-medium text-primary block">{r.reason || "Cancellation"}</span>
-                              <span className="text-[10px] text-primary-muted">{r.adminNotes}</span>
-                            </td>
-                            <td className="py-3 px-3 whitespace-nowrap">
-                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 uppercase">
-                                {r.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                        {refundsQueue.length === 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs divide-y divide-border min-w-[750px]">
+                        <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
                           <tr>
-                            <td colSpan={7} className="p-10 text-center text-primary-muted">
-                              No refunds recorded.
-                            </td>
+                            <th className="py-2.5 px-3">Booking Ref</th>
+                            <th className="py-2.5 px-3">Guest Contact</th>
+                            <th className="py-2.5 px-3">Gross Paid</th>
+                            <th className="py-2.5 px-3">Gateway Fee</th>
+                            <th className="py-2.5 px-3">Net Refunded</th>
+                            <th className="py-2.5 px-3">Reason / Notes</th>
+                            <th className="py-2.5 px-3">Status</th>
                           </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Sub-Tab 4: Double-Entry Trial Balance ── */}
-              {financeSubTab === "trial_balance" && (
-                <div className="space-y-4">
-                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
-                    <div className="p-4 border-b border-border flex items-center justify-between">
-                      <div>
-                        <h3 className="font-bold text-xs uppercase tracking-wider text-primary">
-                          Chart of Accounts &amp; Trial Balance
-                        </h3>
-                        <p className="text-[11px] text-primary-muted mt-0.5">
-                          Formal trial balance proving mathematical equilibrium ($\sum Debit = \sum Credit$).
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-primary">Balanced:</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                          {trialBalance?.isBalanced ? "✓ EQUAL" : "⚠ MISMATCH"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <table className="w-full text-left text-xs divide-y divide-border">
-                      <thead className="bg-surface text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
-                        <tr>
-                          <th className="py-2.5 px-4">Account Code</th>
-                          <th className="py-2.5 px-4">Account Name</th>
-                          <th className="py-2.5 px-4">Category</th>
-                          <th className="py-2.5 px-4">Normal Balance</th>
-                          <th className="py-2.5 px-4 text-right">Debit Balance</th>
-                          <th className="py-2.5 px-4 text-right">Credit Balance</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {(trialBalance?.rows || []).map((row: any) => {
-                          const isDebit = row.normalBalance === "DEBIT";
-                          return (
-                            <tr key={row.code} className="hover:bg-surface-muted/60 transition-colors">
-                              <td className="py-3 px-4 font-mono font-bold text-primary">{row.code}</td>
-                              <td className="py-3 px-4 font-semibold text-primary">{row.name}</td>
-                              <td className="py-3 px-4">
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-muted border border-border">
-                                  {row.category}
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {refundsQueue.map((r) => (
+                            <tr key={r.id} className="hover:bg-surface-muted/60 transition-colors">
+                              <td className="py-3 px-3">
+                                <span className="font-bold text-primary font-mono">{r.bookingRef || r.bookingId?.slice(0, 8)}</span>
+                                <div className="text-[11px] text-primary-muted">{r.propertyName}</div>
+                              </td>
+                              <td className="py-3 px-3">
+                                <div className="text-primary font-mono">{r.guestEmail}</div>
+                                <div className="text-[11px] text-primary-muted">{r.guestPhone}</div>
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap text-primary-secondary font-medium tabular-nums">
+                                {formatNaira(r.grossPaid || 0)}
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap text-rose-700 font-medium tabular-nums">
+                                -{formatNaira(r.nonRefundableProcessingFee || 0)}
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap font-bold text-blue-900 text-sm tabular-nums">
+                                {formatNaira(r.refundableAmount || 0)}
+                              </td>
+                              <td className="py-3 px-3 text-primary-secondary">
+                                <span className="font-medium text-primary block">{r.reason || "Cancellation"}</span>
+                                <span className="text-[10px] text-primary-muted">{r.adminNotes}</span>
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 uppercase">
+                                  {r.status}
                                 </span>
                               </td>
-                              <td className="py-3 px-4 text-primary-secondary font-mono text-[11px]">
-                                {row.normalBalance}
-                              </td>
-                              <td className="py-3 px-4 text-right font-mono font-semibold text-primary tabular-nums">
-                                {isDebit ? formatNaira(row.netBalance) : "—"}
-                              </td>
-                              <td className="py-3 px-4 text-right font-mono font-semibold text-primary tabular-nums">
-                                {!isDebit ? formatNaira(row.netBalance) : "—"}
+                            </tr>
+                          ))}
+                          {refundsQueue.length === 0 && (
+                            <tr>
+                              <td colSpan={7} className="p-10 text-center text-primary-muted">
+                                No refunds recorded.
                               </td>
                             </tr>
-                          );
-                        })}
-                      </tbody>
-                      <tfoot className="bg-surface-muted/80 font-bold border-t-2 border-border text-xs">
-                        <tr>
-                          <td colSpan={4} className="py-3 px-4 uppercase tracking-wider text-primary">
-                            Trial Balance Totals (Reconciled)
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono text-emerald-800 text-sm tabular-nums">
-                            {formatNaira(trialBalance?.totalDebits || 0)}
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono text-emerald-800 text-sm tabular-nums">
-                            {formatNaira(trialBalance?.totalCredits || 0)}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Sub-Tab 5: General Ledger Journals Feed ── */}
-              {financeSubTab === "journals" && (
-                <div className="space-y-4">
-                  <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
-                    <div className="p-4 border-b border-border flex items-center justify-between">
-                      <h3 className="font-bold text-xs uppercase tracking-wider text-primary">
-                        Balanced Journal Entries ({journals.length})
-                      </h3>
-                      <span className="text-[11px] text-primary-muted font-normal">
-                        Every entry satisfies $\sum Debit \equiv \sum Credit$
-                      </span>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
-
-                    <table className="w-full text-left text-xs divide-y divide-border">
-                      <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
-                        <tr>
-                          <th className="py-2.5 px-3">Date / ID</th>
-                          <th className="py-2.5 px-3">Type</th>
-                          <th className="py-2.5 px-3">Reference</th>
-                          <th className="py-2.5 px-3">Account Lines &amp; Splits</th>
-                          <th className="py-2.5 px-3 text-right">Debit / Credit</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {journals.map((j: any) => (
-                          <tr key={j.id} className="hover:bg-surface-muted/60 transition-colors align-top">
-                            <td className="py-3 px-3 whitespace-nowrap">
-                              <div className="font-mono text-primary-secondary text-[11px]">
-                                {new Date(j.createdAt).toLocaleString("en-GB")}
-                              </div>
-                              <div className="font-mono text-[10px] text-primary-muted">{j.id?.slice(0, 12)}</div>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-muted border border-border block w-fit">
-                                {j.transactionType}
-                              </span>
-                              <p className="text-[10px] text-primary-secondary mt-1">{j.description}</p>
-                            </td>
-                            <td className="py-3 px-3 font-mono text-primary font-semibold">
-                              {j.reference || "—"}
-                            </td>
-                            <td className="py-3 px-3">
-                              <div className="space-y-1">
-                                {(j.entries || []).map((e: any, idx: number) => (
-                                  <div key={idx} className="flex items-center justify-between gap-4 text-[11px]">
-                                    <span className="text-primary font-medium">
-                                      {e.accountCode} · {e.accountName}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="py-3 px-3 text-right whitespace-nowrap">
-                              <div className="space-y-1">
-                                {(j.entries || []).map((e: any, idx: number) => (
-                                  <div key={idx} className="font-mono font-semibold tabular-nums text-[11px]">
-                                    {e.entryType === "DEBIT" ? (
-                                      <span className="text-emerald-700">Dr {formatNaira(e.amount)}</span>
-                                    ) : (
-                                      <span className="text-blue-700">Cr {formatNaira(e.amount)}</span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                        {journals.length === 0 && (
-                          <tr>
-                            <td colSpan={5} className="p-10 text-center text-primary-muted">
-                              No journals recorded yet.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
                   </div>
                 </div>
               )}
 
-              {/* ── Sub-Tab 6: Bookings Ledger ── */}
-              {financeSubTab === "bookings" && (
+              {/* ── Sub-Tab 5: Financial Records & Audit Trail ── */}
+              {financeSubTab === "records" && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-bold text-primary">All Platform Reservations &amp; Transactions</h3>
-                      <p className="text-xs text-primary-muted">Audited transaction records, settlement status, and dispute/refund controls.</p>
+                      <h3 className="font-bold text-sm text-primary">Financial &amp; Platform Audit Records</h3>
+                      <p className="text-xs text-primary-muted">Immutable system trail of all booking, payout, refund, and host events.</p>
                     </div>
                     <button
                       type="button"
-                      onClick={exportTransactionsToCSV}
+                      onClick={exportAuditLogsToCSV}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-border bg-surface text-primary text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer shadow-xs"
                     >
                       <Download size={13} />
-                      <span>Export CSV</span>
+                      <span>Export Audit CSV</span>
                     </button>
                   </div>
+
                   <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
-                  <table className="w-full text-left text-xs divide-y divide-border">
-                    <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
-                      <tr>
-                        <th className="py-2.5 px-3">Order Ref</th>
-                        <th className="py-2.5 px-3">Guest</th>
-                        <th className="py-2.5 px-3">Stay Dates</th>
-                        <th className="py-2.5 px-3">Total Amount</th>
-                        <th className="py-2.5 px-3">Payment Method</th>
-                        <th className="py-2.5 px-3">Status</th>
-                        <th className="py-2.5 px-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {bookings.map((b) => (
-                        <tr
-                          key={b.id}
-                          onClick={() => setSelectedBooking(b)}
-                          className="hover:bg-surface-muted/60 transition-colors cursor-pointer"
-                        >
-                          <td className="py-2 px-3 font-mono font-bold text-primary tabular-nums">
-                            {b.id?.slice(0, 8) || b.referenceCode || "BK-ORD"}
-                          </td>
-                          <td className="py-2 px-3">
-                            <div className="font-semibold text-primary">
-                              {b.guestName || "Guest User"}
-                            </div>
-                            <div className="text-[11px] text-primary-muted font-mono">{b.guestEmail}</div>
-                          </td>
-                          <td className="py-2 px-3 text-primary-secondary tabular-nums">
-                            {b.checkInDate || b.checkIn} → {b.checkOutDate || b.checkOut}
-                          </td>
-                          <td className="py-2 px-3 font-bold text-accent tabular-nums">
-                            {formatNaira(b.totalAmount || b.totalPrice || 0)}
-                          </td>
-                          <td className="py-2 px-3 text-primary-secondary font-medium">
-                            {b.payment?.paymentMethod || "Payment Gateway"}
-                          </td>
-                          <td className="py-2 px-3">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-status-success-bg text-status-success-text border border-status-success-border">
-                              {b.status || "CONFIRMED"}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 text-right space-x-1.5 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedBooking(b)}
-                              className="px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted"
-                            >
-                              Details
-                            </button>
-                            {b.status !== "CANCELLED" && b.status !== "REFUNDED" && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setRefundBookingId(b.id);
-                                  setShowRefundModal(true);
-                                }}
-                                className="px-2.5 py-1 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 font-semibold transition-colors cursor-pointer"
-                              >
-                                Refund
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                      {bookings.length === 0 && (
-                        <tr>
-                          <td colSpan={7} className="p-10 text-center text-primary-muted">
-                            No transactions recorded in ledger.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs divide-y divide-border min-w-[750px]">
+                        <thead className="bg-surface sticky top-0 z-10 text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                          <tr>
+                            <th className="py-2.5 px-3">Timestamp</th>
+                            <th className="py-2.5 px-3">Event / Action</th>
+                            <th className="py-2.5 px-3">Target Entity</th>
+                            <th className="py-2.5 px-3">Admin / Actor</th>
+                            <th className="py-2.5 px-3">Audit Details</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {auditLogs.map((log: any) => (
+                            <tr key={log.id} className="hover:bg-surface-muted/60 transition-colors">
+                              <td className="py-3 px-3 whitespace-nowrap font-mono text-[11px] text-primary-secondary">
+                                {new Date(log.createdAt).toLocaleString("en-GB")}
+                              </td>
+                              <td className="py-3 px-3">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-surface-muted border border-border uppercase">
+                                  {log.action}
+                                </span>
+                              </td>
+                              <td className="py-3 px-3 font-mono text-primary">
+                                {log.entityType || "RECORD"}: {log.entityId?.slice(0, 10)}
+                              </td>
+                              <td className="py-3 px-3 text-primary-secondary font-mono text-[11px]">
+                                {log.adminEmail || "system"}
+                              </td>
+                              <td className="py-3 px-3 text-primary-secondary">
+                                {log.notes || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                          {auditLogs.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="p-10 text-center text-primary-muted">
+                                No audit records logged.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -2541,10 +2738,10 @@ export default function AdminPortalPage() {
         {selectedHost && (
           <div className="fixed inset-0 z-50 flex flex-col bg-[#FAFAF8] text-[#171717] overflow-hidden animate-in fade-in duration-150">
             {/* Split-View Top Bar */}
-            <div className="h-14 px-6 bg-white border-b border-[#E7E5E0] flex items-center justify-between shrink-0">
+            <div className="h-16 px-6 bg-white border-b border-[#E7E5E0] flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-xl bg-[#EDF5F2] border border-[#0B5D45]/20 text-[#0B5D45] flex items-center justify-center font-bold text-xs shrink-0">
-                  KYC
+                <div className="w-9 h-9 rounded-xl bg-[#EDF5F2] border border-[#0B5D45]/20 text-[#0B5D45] flex items-center justify-center font-bold text-xs shrink-0">
+                  HOST
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -2554,11 +2751,64 @@ export default function AdminPortalPage() {
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
                       {selectedHost.profile?.verificationStatus || "UNDER_REVIEW"}
                     </span>
+                    {selectedHost.isSuspended && (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-rose-50 text-rose-800 border border-rose-200">
+                        SUSPENDED
+                      </span>
+                    )}
                   </div>
                   <p className="text-[11px] text-[#6B6B67]">
-                    Host ID: <span className="font-mono">{selectedHost.id}</span>
+                    Host ID: <span className="font-mono">{selectedHost.id}</span> • {selectedHost.email}
                   </p>
                 </div>
+              </div>
+
+              {/* Host Workspace Tab Selector (Desktop) */}
+              <div className="hidden md:flex items-center gap-1 bg-[#F5F4F0] p-1 rounded-xl border border-[#E7E5E0]">
+                <button
+                  type="button"
+                  onClick={() => setHostWorkspaceTab("kyc")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    hostWorkspaceTab === "kyc"
+                      ? "bg-white text-primary shadow-xs"
+                      : "text-primary-muted hover:text-primary"
+                  }`}
+                >
+                  KYC &amp; Verification
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHostWorkspaceTab("properties")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    hostWorkspaceTab === "properties"
+                      ? "bg-white text-primary shadow-xs"
+                      : "text-primary-muted hover:text-primary"
+                  }`}
+                >
+                  Listings ({(selectedHostDossier?.properties || selectedHost.properties || []).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHostWorkspaceTab("bank")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    hostWorkspaceTab === "bank"
+                      ? "bg-white text-primary shadow-xs"
+                      : "text-primary-muted hover:text-primary"
+                  }`}
+                >
+                  Settlement Bank
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHostWorkspaceTab("account")}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    hostWorkspaceTab === "account"
+                      ? "bg-white text-primary shadow-xs"
+                      : "text-primary-muted hover:text-primary"
+                  }`}
+                >
+                  Account Controls
+                </button>
               </div>
 
               {/* Close Workspace Button */}
@@ -2575,7 +2825,48 @@ export default function AdminPortalPage() {
               </button>
             </div>
 
+            {/* Mobile Tab Selector */}
+            <div className="md:hidden flex items-center justify-between px-4 py-2 bg-white border-b border-[#E7E5E0] overflow-x-auto gap-2">
+              <button
+                type="button"
+                onClick={() => setHostWorkspaceTab("kyc")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  hostWorkspaceTab === "kyc" ? "bg-accent text-white" : "bg-surface-muted text-primary-muted"
+                }`}
+              >
+                KYC Review
+              </button>
+              <button
+                type="button"
+                onClick={() => setHostWorkspaceTab("properties")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  hostWorkspaceTab === "properties" ? "bg-accent text-white" : "bg-surface-muted text-primary-muted"
+                }`}
+              >
+                Listings ({(selectedHostDossier?.properties || selectedHost.properties || []).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHostWorkspaceTab("bank")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  hostWorkspaceTab === "bank" ? "bg-accent text-white" : "bg-surface-muted text-primary-muted"
+                }`}
+              >
+                Bank
+              </button>
+              <button
+                type="button"
+                onClick={() => setHostWorkspaceTab("account")}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap ${
+                  hostWorkspaceTab === "account" ? "bg-accent text-white" : "bg-surface-muted text-primary-muted"
+                }`}
+              >
+                Controls
+              </button>
+            </div>
+
             {/* Split Screen Workspace Body */}
+            {hostWorkspaceTab === "kyc" && (
             <div className="flex-1 flex overflow-hidden">
               {/* ── LEFT PANE (40% width): DATA, BIOMETRICS & ACTIONS ── */}
               <div className="w-full sm:w-[420px] lg:w-[460px] bg-white border-r border-[#E7E5E0] flex flex-col justify-between overflow-y-auto shrink-0">
@@ -3060,6 +3351,274 @@ export default function AdminPortalPage() {
                 </div>
               </div>
             </div>
+            )}
+
+            {/* ── Host Listings Tab ── */}
+            {hostWorkspaceTab === "properties" && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-surface-muted/30">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-bold text-primary">
+                      Listings Managed by {selectedHost.firstName} {selectedHost.lastName}
+                    </h3>
+                    <p className="text-xs text-primary-muted">
+                      All apartments and shortlets registered under this host account. Deleting here removes them from the public marketplace immediately.
+                    </p>
+                  </div>
+                  <div className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-surface border border-border text-primary w-fit">
+                    Total Properties: {(selectedHostDossier?.properties || selectedHost.properties || []).length}
+                  </div>
+                </div>
+
+                <div className="bg-surface rounded-2xl border border-border overflow-hidden shadow-xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs divide-y divide-border min-w-[750px]">
+                      <thead className="bg-surface text-[11px] font-bold uppercase tracking-wider text-primary-muted border-b border-border shadow-xs">
+                        <tr>
+                          <th className="py-2.5 px-3">Listing</th>
+                          <th className="py-2.5 px-3">Location</th>
+                          <th className="py-2.5 px-3">Nightly Rate</th>
+                          <th className="py-2.5 px-3">Marketplace Status</th>
+                          <th className="py-2.5 px-3">Moderation</th>
+                          <th className="py-2.5 px-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {(selectedHostDossier?.properties || selectedHost.properties || []).map((prop: any) => (
+                          <tr key={prop.id} className="hover:bg-surface-muted/60 transition-colors">
+                            <td className="py-3 px-3">
+                              <div className="flex items-center gap-2.5">
+                                {prop.coverImage ? (
+                                  <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-border">
+                                    <img src={prop.coverImage} alt="" className="w-full h-full object-cover" />
+                                  </div>
+                                ) : (
+                                  <div className="w-10 h-10 rounded-lg bg-surface-muted flex items-center justify-center shrink-0 border border-border">
+                                    <Building size={16} className="text-primary-muted" />
+                                  </div>
+                                )}
+                                <div>
+                                  <div className="font-bold text-primary line-clamp-1">{prop.title}</div>
+                                  <div className="text-[10px] text-primary-muted font-mono">{prop.slug || prop.id?.slice(0, 8)}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-3">
+                              <div className="text-primary font-medium">{prop.neighborhood || prop.city}</div>
+                              <div className="text-[10px] text-primary-muted">{prop.state || "Nigeria"}</div>
+                            </td>
+                            <td className="py-3 px-3 font-bold text-accent tabular-nums">
+                              {formatNaira(prop.basePricePerNight || prop.price || 0)}
+                            </td>
+                            <td className="py-3 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                  prop.status === "PUBLISHED"
+                                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                    : prop.status === "PENDING"
+                                    ? "bg-amber-50 text-amber-800 border-amber-200"
+                                    : "bg-surface-muted text-primary-muted border-border"
+                                }`}
+                              >
+                                {prop.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
+                                  prop.moderationStatus === "APPROVED"
+                                    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                    : prop.moderationStatus === "SUSPENDED"
+                                    ? "bg-rose-50 text-rose-800 border-rose-200"
+                                    : "bg-amber-50 text-amber-800 border-amber-200"
+                                }`}
+                              >
+                                {prop.moderationStatus || "APPROVED"}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-right space-x-1.5 whitespace-nowrap">
+                              <Link
+                                href={`/stay/${prop.slug}`}
+                                target="_blank"
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-primary font-semibold border border-border rounded-lg hover:bg-surface-muted transition-colors"
+                              >
+                                <span>View</span>
+                                <ExternalLink size={11} />
+                              </Link>
+                              {prop.status === "PUBLISHED" ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSuspendProperty(prop.id)}
+                                  className="px-2.5 py-1 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 font-semibold transition-colors cursor-pointer"
+                                >
+                                  Suspend
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleApproveProperty(prop.id)}
+                                  className="px-2.5 py-1 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 font-semibold transition-colors cursor-pointer"
+                                >
+                                  Publish
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteProperty(prop.id)}
+                                className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer inline-block align-middle"
+                                title="Delete listing permanently"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                        {(selectedHostDossier?.properties || selectedHost.properties || []).length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="p-8 text-center text-primary-muted">
+                              No listings found for this host.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Host Settlement Bank Tab ── */}
+            {hostWorkspaceTab === "bank" && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-2xl mx-auto w-full">
+                <div className="bg-surface rounded-2xl border border-border p-6 space-y-5 shadow-xs">
+                  <div>
+                    <h3 className="text-base font-bold text-primary flex items-center gap-2">
+                      <Landmark size={18} className="text-accent" />
+                      <span>Host Settlement Bank Account</span>
+                    </h3>
+                    <p className="text-xs text-primary-muted mt-0.5">
+                      Verified NUBAN account where accommodation payouts are disbursed after guest check-in.
+                    </p>
+                  </div>
+
+                  <div className="p-4 bg-surface-muted rounded-xl space-y-3 text-xs border border-border">
+                    <div className="flex justify-between items-center py-1 border-b border-border">
+                      <span className="text-primary-muted">Bank Name:</span>
+                      <span className="font-semibold text-primary">{selectedHost.profile?.bankName || "Not configured"}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 border-b border-border">
+                      <span className="text-primary-muted">10-Digit NUBAN Account:</span>
+                      <span className="font-mono font-bold text-primary tracking-wider">{selectedHost.profile?.bankAccountNumber || "—"}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1 border-b border-border">
+                      <span className="text-primary-muted">Account Holder Name:</span>
+                      <span className="font-semibold text-primary">{selectedHost.profile?.bankAccountName || "—"}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1">
+                      <span className="text-primary-muted">BVN Match Status:</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 uppercase">
+                        {selectedHost.profile?.bvnStatus || "VERIFIED"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Host Account Controls & Danger Zone Tab ── */}
+            {hostWorkspaceTab === "account" && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-6 max-w-2xl mx-auto w-full">
+                {/* Account Overview */}
+                <div className="bg-surface rounded-2xl border border-border p-6 space-y-4 shadow-xs">
+                  <h3 className="text-base font-bold text-primary flex items-center gap-2">
+                    <User size={18} className="text-accent" />
+                    <span>Host Account Overview</span>
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <div className="text-primary-muted text-[11px]">User ID</div>
+                      <div className="font-mono font-bold text-primary mt-1 text-[11px] truncate">{selectedHost.id}</div>
+                    </div>
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <div className="text-primary-muted text-[11px]">Role</div>
+                      <div className="font-bold text-primary mt-1 uppercase text-[11px]">{selectedHost.role || "host"}</div>
+                    </div>
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <div className="text-primary-muted text-[11px]">Joined Platform</div>
+                      <div className="font-bold text-primary mt-1 text-[11px]">
+                        {selectedHost.createdAt ? new Date(selectedHost.createdAt).toLocaleDateString("en-GB") : "—"}
+                      </div>
+                    </div>
+                    <div className="p-3 bg-surface-muted rounded-xl border border-border">
+                      <div className="text-primary-muted text-[11px]">Account Status</div>
+                      <div className="font-bold mt-1 text-[11px]">
+                        {selectedHost.isSuspended ? (
+                          <span className="text-rose-700">SUSPENDED</span>
+                        ) : (
+                          <span className="text-emerald-700">ACTIVE</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Suspension / Reinstate */}
+                <div className="bg-surface rounded-2xl border border-border p-6 space-y-4 shadow-xs">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-primary">Host Access Management</h4>
+                  <p className="text-xs text-primary-muted">
+                    Suspending a host immediately delists all their active properties from the public marketplace and blocks login access.
+                  </p>
+                  <div>
+                    {selectedHost.isSuspended ? (
+                      <button
+                        type="button"
+                        onClick={() => handleReinstateHost(selectedHost.id)}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+                      >
+                        Reinstate Host &amp; Restore Properties
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSuspendHost(selectedHost.id)}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer shadow-xs"
+                      >
+                        Suspend Host Account &amp; Delist Properties
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Danger Zone: Clear KYC & Delete Host */}
+                <div className="bg-rose-50/50 rounded-2xl border border-rose-200 p-6 space-y-4 shadow-xs">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
+                    <AlertTriangle size={15} />
+                    <span>Danger Zone</span>
+                  </h4>
+                  <p className="text-xs text-rose-950">
+                    Permanent administrative actions for this host account. Deleting the host will permanently purge all KYC documents, properties, and associated records.
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteKyc(selectedHost.id)}
+                      className="px-4 py-2 bg-surface border border-rose-300 text-rose-700 hover:bg-rose-100 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Reset / Clear KYC Submission
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteHost(selectedHost.id)}
+                      className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shadow-xs flex items-center gap-1.5"
+                    >
+                      <Trash2 size={13} />
+                      <span>Permanently Delete Host</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </AnimatePresence>
@@ -3403,10 +3962,115 @@ export default function AdminPortalPage() {
         </div>
       )}
 
-      {/* ── Modal: Issue Manual Refund ── */}
+      {/* ── Modal: Edit Host Payout Bank Details ── */}
+      {editPayoutModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-surface rounded-3xl max-w-md w-full p-6 sm:p-7 space-y-5 text-primary shadow-2xl border border-border">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Landmark size={20} className="text-accent" />
+                <h3 className="font-bold text-base text-primary">Edit Host Payout Bank</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditPayoutModal(null)}
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-3 bg-surface-muted rounded-2xl text-xs space-y-1">
+              <div className="text-primary-muted">
+                Payout Ref: <span className="font-mono font-bold text-primary">{editPayoutModal.bookingRef || editPayoutModal.id?.slice(0, 8)}</span>
+              </div>
+              <div className="text-primary-muted">
+                Host: <span className="font-semibold text-primary">{editPayoutModal.hostName || "Host"}</span>
+              </div>
+              <div className="text-primary-muted">
+                Amount: <span className="font-bold text-emerald-800 tabular-nums">{formatNaira(editPayoutModal.amount || 0)}</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleUpdatePayoutBank} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Bank Name
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={editBankName}
+                  onChange={(e) => setEditBankName(e.target.value)}
+                  placeholder="e.g. Guaranty Trust Bank, Access Bank, Zenith Bank"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  10-Digit NUBAN Account Number
+                </label>
+                <input
+                  required
+                  type="text"
+                  maxLength={10}
+                  value={editAccountNumber}
+                  onChange={(e) => setEditAccountNumber(e.target.value.replace(/\D/g, ""))}
+                  placeholder="0123456789"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary font-mono text-xs focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Beneficiary Account Name
+                </label>
+                <input
+                  required
+                  type="text"
+                  value={editAccountName}
+                  onChange={(e) => setEditAccountName(e.target.value)}
+                  placeholder="e.g. John Chukwuemeka Adebayo"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEditPayoutModal(null)}
+                  className="px-4 py-2 border border-border rounded-xl text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingBank || !editAccountNumber || !editBankName}
+                  className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                >
+                  {isUpdatingBank ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={14} />
+                      <span>Save Bank Details</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Issue Manual Refund with Live Search ── */}
       {showRefundModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
-          <div className="bg-surface rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-5 text-primary shadow-2xl border border-border">
+          <div className="bg-surface rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-4 text-primary shadow-2xl border border-border max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <div className="flex items-center gap-2">
                 <Receipt size={20} className="text-accent" />
@@ -3417,6 +4081,7 @@ export default function AdminPortalPage() {
                 onClick={() => {
                   setShowRefundModal(false);
                   setRefundBookingId("");
+                  setRefundSearch("");
                 }}
                 className="p-1.5 text-primary-muted hover:text-primary rounded-lg cursor-pointer"
               >
@@ -3424,31 +4089,83 @@ export default function AdminPortalPage() {
               </button>
             </div>
 
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-[11px] text-amber-950 flex items-start gap-2">
-              <AlertTriangle size={15} className="text-amber-700 shrink-0 mt-0.5" />
+            <div className="p-3 bg-surface-muted rounded-2xl text-[11px] text-primary flex items-start gap-2 border border-border">
+              <Receipt size={15} className="text-accent shrink-0 mt-0.5" />
               <span>
-                <strong>Fee Forfeiture Safeguard:</strong> The guest domestic processing fee (1.5% + ₦100, capped at ₦2,000) was consumed by Paystack and is forfeited. The refund strictly credits the guest with the accommodation subtotal.
+                <strong>Paystack Official Reversal:</strong> Processing a refund returns the accommodation amount directly to the guest via Paystack, marks the reservation refunded, frees up calendar dates, and dispatches an automated notification email.
               </span>
             </div>
 
             <form onSubmit={handleProcessRefund} className="space-y-4 text-xs">
+              {/* Search Bar for Transactions / Bookings */}
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
-                  Select Confirmed Booking
+                  Search &amp; Select Booking
                 </label>
-                <select
-                  required
-                  value={refundBookingId}
-                  onChange={(e) => setRefundBookingId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
-                >
-                  <option value="">-- Choose a booking to refund --</option>
-                  {bookings.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.referenceCode || b.id.slice(0, 8)} — {b.guestName || b.guestEmail} ({formatNaira(b.totalAmount || b.totalPrice || 0)})
-                    </option>
-                  ))}
-                </select>
+                <div className="relative mb-2">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-primary-muted" />
+                  <input
+                    type="text"
+                    value={refundSearch}
+                    onChange={(e) => setRefundSearch(e.target.value)}
+                    placeholder="Search by ref, guest name, email, or property..."
+                    className="w-full pl-9 pr-3 py-2 rounded-xl border border-border bg-surface text-xs text-primary focus:outline-none focus:border-accent"
+                  />
+                </div>
+
+                {/* Filterable Selectable List of Bookings */}
+                <div className="max-h-44 overflow-y-auto border border-border rounded-xl divide-y divide-border bg-surface-muted/30">
+                  {bookings
+                    .filter((b) => b.status !== "CANCELLED" && b.status !== "REFUNDED")
+                    .filter((b) => {
+                      if (!refundSearch.trim()) return true;
+                      const q = refundSearch.toLowerCase();
+                      return (
+                        (b.referenceCode || b.id || "").toLowerCase().includes(q) ||
+                        (b.guestName || `${b.guestFirstName || ""} ${b.guestLastName || ""}`).toLowerCase().includes(q) ||
+                        (b.guestEmail || "").toLowerCase().includes(q) ||
+                        (b.propertyTitle || b.property?.title || "").toLowerCase().includes(q)
+                      );
+                    })
+                    .slice(0, 15)
+                    .map((b) => {
+                      const isSelected = refundBookingId === b.id;
+                      return (
+                        <div
+                          key={b.id}
+                          onClick={() => setRefundBookingId(b.id)}
+                          className={`p-2.5 cursor-pointer text-xs transition-colors flex items-center justify-between ${
+                            isSelected ? "bg-accent/15 border-l-4 border-l-accent" : "hover:bg-surface-muted"
+                          }`}
+                        >
+                          <div>
+                            <div className="font-mono font-bold text-primary flex items-center gap-1.5">
+                              <span>{b.referenceCode || b.id.slice(0, 8)}</span>
+                              <span className="text-[10px] text-primary-muted font-normal">
+                                ({b.propertyTitle || b.property?.title || "Stay"})
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-primary-secondary">
+                              {b.guestName || b.guestEmail}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold text-accent tabular-nums">
+                              {formatNaira(b.totalAmount || b.totalPrice || 0)}
+                            </div>
+                            <div className="text-[10px] text-primary-muted">
+                              {b.checkInDate || b.checkIn}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  {bookings.filter((b) => b.status !== "CANCELLED" && b.status !== "REFUNDED").length === 0 && (
+                    <div className="p-4 text-center text-primary-muted text-xs">
+                      No active bookings available for refund.
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Dynamic Calculation Preview */}
@@ -3467,7 +4184,7 @@ export default function AdminPortalPage() {
                       <span className="font-semibold text-primary">{formatNaira(gross)}</span>
                     </div>
                     <div className="flex justify-between text-rose-700">
-                      <span>Gateway Fee (Non-Refundable):</span>
+                      <span>Gateway Fee (1.5% + ₦100):</span>
                       <span className="font-semibold">-{formatNaira(fee)}</span>
                     </div>
                     <div className="pt-2 border-t border-border flex justify-between items-center">
@@ -3489,20 +4206,20 @@ export default function AdminPortalPage() {
                   type="text"
                   value={refundReason}
                   onChange={(e) => setRefundReason(e.target.value)}
-                  placeholder="e.g. Guest emergency travel cancellation / mutual agreement"
+                  placeholder="e.g. Guest travel cancellation / mutual agreement"
                   className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
                 />
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
-                  Internal Administrative Notes
+                  Internal Administrative Notes (Optional)
                 </label>
                 <textarea
                   rows={2}
                   value={refundNotes}
                   onChange={(e) => setRefundNotes(e.target.value)}
-                  placeholder="e.g. Approved by Lead Auditor; processed via Paystack dashboard reversal"
+                  placeholder="e.g. Approved by Admin; executed via Paystack refund API"
                   className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent resize-none"
                 />
               </div>
@@ -3513,6 +4230,7 @@ export default function AdminPortalPage() {
                   onClick={() => {
                     setShowRefundModal(false);
                     setRefundBookingId("");
+                    setRefundSearch("");
                   }}
                   className="px-4 py-2 border border-border rounded-xl text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer"
                 >
@@ -3526,7 +4244,7 @@ export default function AdminPortalPage() {
                   {isProcessingRefund ? (
                     <>
                       <Loader2 size={13} className="animate-spin" />
-                      <span>Executing Ledger...</span>
+                      <span>Processing Paystack Refund...</span>
                     </>
                   ) : (
                     <>

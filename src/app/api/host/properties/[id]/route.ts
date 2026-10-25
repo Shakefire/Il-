@@ -47,11 +47,20 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   }
 
   const { id } = await Promise.resolve(params);
+  const { searchParams } = new URL(req.url);
+  const confirmWithReservations = searchParams.get("confirm") === "true";
 
   try {
-    const result = await hostsService.deleteProperty(session.userId, id);
+    const result = await hostsService.deleteProperty(session.userId, id, confirmWithReservations);
     return NextResponse.json(result);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Failed to delete property listing" }, { status: err.statusCode || 400 });
+    return NextResponse.json(
+      {
+        error: err.message || "Failed to delete property listing",
+        requiresConfirmation: !!err.requiresConfirmation,
+        upcomingCount: err.upcomingCount || 0,
+      },
+      { status: err.statusCode || 400 }
+    );
   }
 }

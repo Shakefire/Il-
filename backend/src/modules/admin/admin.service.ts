@@ -184,28 +184,13 @@ export const adminService = {
       throw new Error("Property not found");
     }
 
-    // Guard against deleting property with active bookings
-    const activeBookings = await db
-      .select({ id: schema.bookings.id })
-      .from(schema.bookings)
-      .where(
-        and(
-          eq(schema.bookings.propertyId, id),
-          inArray(schema.bookings.status, ["CONFIRMED", "COMPLETED", "PAYMENT_PENDING"])
-        )
-      )
-      .limit(1);
-
-    if (activeBookings.length > 0) {
-      const err: any = new Error("Cannot delete property with active or pending reservations.");
-      err.statusCode = 400;
-      throw err;
-    }
-
+    // Clean up dependent child records safely before removing property
     await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, id));
     await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, id));
     await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, id));
     await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.propertyId, id));
+    await db.delete(schema.reviews).where(eq(schema.reviews.propertyId, id));
+    await db.delete(schema.bookings).where(eq(schema.bookings.propertyId, id));
     await db.delete(schema.properties).where(eq(schema.properties.id, id));
 
     // Insert audit log
@@ -215,11 +200,171 @@ export const adminService = {
       action: "PROPERTY_DELETED",
       entityType: "property",
       entityId: id,
-      details: `Property "${property.title}" permanently deleted by admin.`,
+      details: `Property "${property.title}" (ID: ${id}) permanently deleted by administrator. Removed from marketplace.`,
       ipAddress: ipAddress || null,
     });
 
-    return { success: true, message: "Property permanently deleted by administrator." };
+    return { success: true, message: `Property "${property.title}" permanently deleted and removed from marketplace.` };
+  },
+
+  async deleteHost(hostId: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+    const [host] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, hostId))
+      .limit(1);
+
+    if (!host) {
+      throw new Error("Host not found");
+    }
+
+    // 1. Delete all properties owned by this host
+    const hostProperties = await db
+      .select({ id: schema.properties.id })
+      .from(schema.properties)
+      .where(eq(schema.properties.hostId, hostId));
+
+    for (const prop of hostProperties) {
+      await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, prop.id));
+      await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, prop.id));
+      await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, prop.id));
+      await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.propertyId, prop.id));
+      await db.delete(schema.reviews).where(eq(schema.reviews.propertyId, prop.id));
+      await db.delete(schema.bookings).where(eq(schema.bookings.propertyId, prop.id));
+      await db.delete(schema.properties).where(eq(schema.properties.id, prop.id));
+    }
+
+    // 2. Delete payouts, earnings, verification logs, profile
+    await db.delete(schema.payouts).where(eq(schema.payouts.hostId, hostId));
+    await db.delete(schema.hostEarnings).where(eq(schema.hostEarnings.hostId, hostId));
+    await db.delete(schema.verificationLogs).where(eq(schema.verificationLogs.hostId, hostId));
+    await db.delete(schema.profiles).where(eq(schema.profiles.userId, hostId));
+
+    // 3. Delete user account
+    await db.delete(schema.users).where(eq(schema.users.id, hostId));
+
+    // 4. Audit log
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "HOST_DELETED",
+      entityType: "user",
+      entityId: hostId,
+      details: `Host account ${host.firstName} ${host.lastName} (${host.email}) and all ${hostProperties.length} listings permanently deleted.`,
+      ipAddress: ipAddress || null,
+    });
+
+    return { success: true, message: `Host ${host.firstName} ${host.lastName} and all associated records deleted successfully.` };
+  },
+
+  async deleteKyc(hostId: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+    const [host] = await db
+      .select({ id: schema.users.id, firstName: schema.users.firstName, lastName: schema.users.lastName, email: schema.users.email })
+      .from(schema.users)
+      .where(eq(schema.users.id, hostId))
+      .limit(1);
+
+    if (!host) {
+      throw new Error("Host not found");
+    }
+
+    // Delete verification logs
+    await db.delete(schema.verificationLogs).where(eq(schema.verificationLogs.hostId, hostId));
+
+    // Reset profile verification status and uploaded documents
+    await db
+      .update(schema.profiles)
+      .set({
+        verificationStatus: "UNVERIFIED",
+        isVerified: false,
+        idType: null,
+        idNumber: null,
+        identityDocumentUrl: null,
+        idDocumentBackUrl: null,
+        selfieUrl: null,
+        authorityDocType: null,
+        authorityDocUrl: null,
+        reviewFeedback: "KYC documents and submission were cleared by administrator.",
+        reviewedAt: null,
+        reviewedBy: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.profiles.userId, hostId));
+
+    // Audit log
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "KYC_REQUEST_DELETED",
+      entityType: "profile",
+      entityId: hostId,
+      details: `KYC submission for ${host.firstName} ${host.lastName} (${host.email}) was cleared and reset to UNVERIFIED.`,
+      ipAddress: ipAddress || null,
+    });
+
+    return { success: true, message: `KYC records for ${host.firstName} ${host.lastName} have been cleared.` };
+  },
+
+  async deleteBooking(bookingId: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+    const [booking] = await db
+      .select()
+      .from(schema.bookings)
+      .where(eq(schema.bookings.id, bookingId))
+      .limit(1);
+
+    if (!booking) {
+      throw new Error("Booking not found");
+    }
+
+    // Clean up availability blocks, payouts, refunds, payments
+    await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.bookingId, bookingId));
+    await db.delete(schema.payouts).where(eq(schema.payouts.bookingId, bookingId));
+    await db.delete(schema.refunds).where(eq(schema.refunds.bookingId, bookingId));
+    await db.delete(schema.payments).where(eq(schema.payments.bookingId, bookingId));
+    await db.delete(schema.reviews).where(eq(schema.reviews.bookingId, bookingId));
+    await db.delete(schema.bookings).where(eq(schema.bookings.id, bookingId));
+
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "BOOKING_DELETED",
+      entityType: "booking",
+      entityId: bookingId,
+      details: `Booking #${booking.referenceCode} (${booking.guestFirstName} ${booking.guestLastName}) permanently deleted by administrator.`,
+      ipAddress: ipAddress || null,
+    });
+
+    return { success: true, message: `Booking #${booking.referenceCode} deleted successfully.` };
+  },
+
+  async deleteTransaction(paymentId: string, adminId: string, ipAddress?: string) {
+    const db = getDb();
+    const [payment] = await db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.id, paymentId))
+      .limit(1);
+
+    if (!payment) {
+      throw new Error("Payment record not found");
+    }
+
+    await db.delete(schema.payments).where(eq(schema.payments.id, paymentId));
+
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "PAYMENT_DELETED",
+      entityType: "payment",
+      entityId: paymentId,
+      details: `Payment transaction ${payment.reference} (₦${(payment.amount / 100).toLocaleString()}) deleted by administrator.`,
+      ipAddress: ipAddress || null,
+    });
+
+    return { success: true, message: `Transaction ${payment.reference} deleted successfully.` };
   },
 
   async getBookings(pagination: PaginationParams) {

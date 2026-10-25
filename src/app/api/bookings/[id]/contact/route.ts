@@ -17,8 +17,10 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const token = searchParams.get("token") || req.headers.get("x-access-token");
 
-  // Determine authorized identity: token or session user ID/role
-  const authIdentifier = token || session?.userId || (session?.role === "admin" ? "admin" : undefined);
+  const emailParam = searchParams.get("email");
+
+  // Determine authorized identity: token, guest email, or session user ID/role
+  const authIdentifier = token || emailParam || session?.userId || (session?.role === "admin" ? "admin" : undefined);
 
   if (!authIdentifier) {
     return NextResponse.json(

@@ -67,24 +67,74 @@ function TripsPageContent() {
   const [accessError, setAccessError] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  // Fast booking lookup states
+  const [lookupRef, setLookupRef] = useState("");
+  const [lookupEmail, setLookupEmail] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
+  const handleLookupBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lookupRef.trim()) return;
+    setLookupLoading(true);
+    setLookupError(null);
+    try {
+      const emailQuery = lookupEmail.trim() ? `?email=${encodeURIComponent(lookupEmail.trim())}` : "";
+      const res = await fetch(`/api/bookings/${encodeURIComponent(lookupRef.trim())}${emailQuery}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Booking not found");
+      if (data.booking) {
+        const found = data.booking;
+        setBookings((prev) => [found, ...prev.filter((b) => b.id !== found.id)]);
+        try {
+          const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+          const merged = [found, ...stored.filter((b: any) => b.id !== found.id)];
+          localStorage.setItem("ile_guest_bookings", JSON.stringify(merged));
+        } catch {}
+        handleOpenAccessModal(found);
+      }
+    } catch (err: any) {
+      setLookupError(err.message || "Failed to locate booking");
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
   const paymentRef = searchParams.get("ref") || searchParams.get("reference") || searchParams.get("trxref");
 
+  // Load stored guest bookings from localStorage on mount
   useEffect(() => {
-    // Only redirect unauthenticated visitors if they are NOT handling an external payment return
-    if (!isLoading && !isAuthenticated && !paymentRef) {
-      router.push("/login?next=/trips");
-    }
-  }, [isLoading, isAuthenticated, router, paymentRef]);
+    try {
+      const stored = localStorage.getItem("ile_guest_bookings");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setBookings((prev) => {
+            const map = new Map<string, BookingItem>();
+            parsed.forEach((b: BookingItem) => map.set(b.id, b));
+            prev.forEach((b: BookingItem) => map.set(b.id, b));
+            return Array.from(map.values());
+          });
+          setLoadingBookings(false);
+        }
+      }
+    } catch {}
+  }, []);
 
   const loadBookings = useCallback(async () => {
     try {
       const res = await api.getUserBookings();
       if (res && Array.isArray(res.bookings)) {
-        setBookings(res.bookings);
+        setBookings((prev) => {
+          const map = new Map<string, BookingItem>();
+          prev.forEach((b: BookingItem) => map.set(b.id, b));
+          res.bookings.forEach((b: BookingItem) => map.set(b.id, b));
+          return Array.from(map.values());
+        });
         return res.bookings;
       }
     } catch (err) {
-      console.warn("Failed to load user bookings:", err);
+      console.warn("Notice: user bookings sync:", err);
     } finally {
       setLoadingBookings(false);
     }
@@ -106,18 +156,29 @@ function TripsPageContent() {
               type: "success",
               message: `Payment verified successfully (Ref: ${paymentRef})! Your stay is confirmed and access details are unlocked.`,
             });
-            const updated = await loadBookings();
-            // Match from user bookings or fallback to booking returned from verify
-            const matched =
-              updated.find((b: any) => paymentRef.includes(b.referenceCode) || b.id === paymentRef) ||
-              verifyRes.booking;
-            if (matched && isMounted) {
-              handleOpenAccessModal(matched);
+
+            if (verifyRes.booking) {
+              const confirmedB = verifyRes.booking;
+              try {
+                const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+                const merged = [confirmedB, ...stored.filter((b: any) => b.id !== confirmedB.id)];
+                localStorage.setItem("ile_guest_bookings", JSON.stringify(merged));
+              } catch {}
+
+              setBookings((prev) => [confirmedB, ...prev.filter((b) => b.id !== confirmedB.id)]);
+              setLoadingBookings(false);
+
+              if (confirmedB.privateDetails) {
+                setAccessDetails(confirmedB.privateDetails);
+              }
+              setSelectedBookingForAccess(confirmedB);
             }
+
+            await loadBookings();
           }
         } catch (err: any) {
           if (isMounted) {
-            console.warn("Payment auto-verification error:", err);
+            console.warn("Payment auto-verification notice:", err);
           }
         }
       };
@@ -132,6 +193,8 @@ function TripsPageContent() {
   useEffect(() => {
     if (isAuthenticated) {
       loadBookings();
+    } else {
+      setLoadingBookings(false);
     }
   }, [isAuthenticated, loadBookings]);
 
@@ -139,6 +202,14 @@ function TripsPageContent() {
     setSelectedBookingForAccess(booking);
     setLoadingAccess(true);
     setAccessError(null);
+
+    // If private details are already attached to the booking, load immediately
+    if ((booking as any).privateDetails) {
+      setAccessDetails((booking as any).privateDetails);
+      setLoadingAccess(false);
+      return;
+    }
+
     setAccessDetails(null);
 
     try {
@@ -214,22 +285,75 @@ function TripsPageContent() {
           </Link>
         </div>
 
-        {/* Empty State */}
+        {/* Empty State with Fast Lookup */}
         {bookings.length === 0 ? (
-          <div className="bg-white border border-[#E7E5E0] rounded-2xl p-12 text-center max-w-lg mx-auto space-y-4">
+          <div className="bg-white border border-[#E7E5E0] rounded-2xl p-8 sm:p-10 text-center max-w-lg mx-auto space-y-6 shadow-xs">
             <div className="w-16 h-16 rounded-2xl bg-[#EDF3F0] text-[#0B5D45] flex items-center justify-center mx-auto">
               <Calendar size={28} />
             </div>
-            <h2 className="text-xl font-bold text-[#171717]">No reservations yet</h2>
-            <p className="text-sm text-[#6B6B67] leading-relaxed">
-              When you reserve a stay across Abuja or Lagos, your confirmation, gate clearance passes, and host details will appear here.
-            </p>
-            <div className="pt-2">
+            <div>
+              <h2 className="text-xl font-bold text-[#171717]">Find Your Reservation &amp; Access Pass</h2>
+              <p className="text-xs text-[#6B6B67] leading-relaxed mt-1">
+                Completed a stay booking? Enter your booking reference (e.g. ILE-MVJLECF2...) to view your gate clearance pass and host contact details.
+              </p>
+            </div>
+
+            <form onSubmit={handleLookupBooking} className="space-y-3 text-left">
+              <div>
+                <label className="block text-[11px] font-semibold text-[#171717] uppercase mb-1">
+                  Booking Reference
+                </label>
+                <input
+                  required
+                  type="text"
+                  placeholder="e.g. ILE-MVJLECF2-0A8D57"
+                  value={lookupRef}
+                  onChange={(e) => setLookupRef(e.target.value.trim().toUpperCase())}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#D1D5DB] text-xs font-mono uppercase focus:border-[#0B5D45] focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-[#171717] uppercase mb-1">
+                  Guest Email (Optional)
+                </label>
+                <input
+                  type="email"
+                  placeholder="The email used during reservation"
+                  value={lookupEmail}
+                  onChange={(e) => setLookupEmail(e.target.value.trim())}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-[#D1D5DB] text-xs focus:border-[#0B5D45] focus:outline-none"
+                />
+              </div>
+              {lookupError && (
+                <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-lg border border-rose-200">
+                  {lookupError}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={lookupLoading || !lookupRef.trim()}
+                className="w-full py-2.5 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {lookupLoading ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Locating Reservation...</span>
+                  </>
+                ) : (
+                  <>
+                    <KeyRound size={14} />
+                    <span>View Stay &amp; Access Pass</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="pt-2 border-t border-[#F2F0EB]">
               <Link
                 href="/search"
-                className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-sm font-semibold transition-colors"
+                className="text-xs font-semibold text-[#0B5D45] hover:underline"
               >
-                Browse curated stays
+                Browse &amp; explore new stays →
               </Link>
             </div>
           </div>

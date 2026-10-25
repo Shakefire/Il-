@@ -4,19 +4,16 @@ import { getDb, schema } from "../../db/client";
 export const DEFAULT_COMMISSION_RATE = 0.10; // 10% platform commission
 
 /**
- * Calculates Paystack pass-through processing fee for Nigerian domestic transactions:
- * 1.5% + 100 NGN, capped at 2,000 NGN.
- * Paystack waives 100 NGN on transactions under 2,500 NGN.
+ * Calculates Paystack pass-through processing fee according to official Paystack ratio:
+ * 1.5% + 100 NGN (100 NGN waived on micro-transactions under 2,500 NGN).
+ * Dynamically computes the exact fee ratio without hardcoding a flat 2,000 NGN cap.
  */
 export function calculatePaystackFee(subtotal: number): number {
   if (!subtotal || subtotal <= 0) return 0;
-  let fee = 0;
   if (subtotal < 2500) {
-    fee = Math.ceil(subtotal / 0.985) - subtotal;
-  } else {
-    fee = Math.ceil((subtotal + 100) / 0.985) - subtotal;
+    return Math.ceil(subtotal / 0.985) - subtotal;
   }
-  return fee > 2000 ? 2000 : fee;
+  return Math.ceil((subtotal + 100) / 0.985) - subtotal;
 }
 
 /**

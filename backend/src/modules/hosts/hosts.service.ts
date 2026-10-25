@@ -61,7 +61,8 @@ export const hostsService = {
     }
 
     const baseTitle = parsed.title || "Untitled Property";
-    const slug = `${baseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")}-${crypto.randomBytes(4).toString("hex")}`;
+    const cleanSlug = baseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "property";
+    const slug = `${cleanSlug}-${crypto.randomBytes(4).toString("hex")}`;
     const propertyId = `prop_${crypto.randomUUID()}`;
 
     const hostBasePrice = parsed.hostBasePrice || Math.round((parsed.pricePerNight || 15000) / 1.10);
@@ -1228,7 +1229,7 @@ export const hostsService = {
     };
   },
 
-  async deleteProperty(userId: string, propertyId: string) {
+  async deleteProperty(userId: string, propertyId: string, confirmWithReservations = false) {
     const db = getDb();
     const [property] = await db
       .select()
@@ -1242,7 +1243,7 @@ export const hostsService = {
       throw err;
     }
 
-    // 1. Guard against deleting property with upcoming or active reservations
+    // 1. Check for upcoming or active reservations
     const todayStr = new Date().toISOString().split("T")[0];
     const upcomingBookings = await db
       .select({ id: schema.bookings.id, referenceCode: schema.bookings.referenceCode, checkInDate: schema.bookings.checkInDate, checkOutDate: schema.bookings.checkOutDate })
@@ -1255,47 +1256,29 @@ export const hostsService = {
         )
       );
 
-    if (upcomingBookings.length > 0) {
+    if (upcomingBookings.length > 0 && !confirmWithReservations) {
       const err: any = new Error(
-        `Cannot delete this listing because it has ${upcomingBookings.length} upcoming or active reservation(s). Existing guest bookings must be honoured or resolved before deleting.`
+        `This listing has ${upcomingBookings.length} upcoming or active reservation(s). Deleting it will permanently unlist it and remove it from the marketplace. Are you sure you wish to proceed?`
       );
-      err.statusCode = 400;
+      err.statusCode = 409;
+      err.requiresConfirmation = true;
+      err.upcomingCount = upcomingBookings.length;
       throw err;
     }
 
-    // 2. Check if the property has historical bookings
-    const anyBookings = await db
-      .select({ id: schema.bookings.id })
-      .from(schema.bookings)
-      .where(eq(schema.bookings.propertyId, propertyId))
-      .limit(1);
-
-    if (anyBookings.length > 0) {
-      // Archive listing to preserve foreign key references and financial audit trail
-      await db
-        .update(schema.properties)
-        .set({
-          status: "ARCHIVED",
-          moderationStatus: "NONE",
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.properties.id, propertyId));
-
-      return {
-        success: true,
-        message: "Property listing archived successfully and removed from marketplace discovery while preserving historical booking records.",
-        archived: true,
-      };
-    }
-
-    // 3. Clean hard deletion if no bookings exist
+    // 2. Clean deletion of property and related records
     await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, propertyId));
     await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, propertyId));
     await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, propertyId));
     await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.propertyId, propertyId));
+    await db.delete(schema.reviews).where(eq(schema.reviews.propertyId, propertyId));
+    await db.delete(schema.bookings).where(eq(schema.bookings.propertyId, propertyId));
     await db.delete(schema.properties).where(eq(schema.properties.id, propertyId));
 
-    return { success: true, message: "Property listing deleted successfully." };
+    return {
+      success: true,
+      message: "Property listing permanently deleted and removed from marketplace.",
+    };
   },
 
   async relistProperty(userId: string, propertyId: string) {
@@ -1323,27 +1306,16 @@ export const hostsService = {
       }
     }
 
-    if (property.status === "DRAFT") {
-      const err: any = new Error("Draft properties cannot be published directly. Please submit your listing for admin review.");
-      err.statusCode = 400;
-      throw err;
-    }
-
-    if (property.status === "PENDING_REVIEW") {
-      const err: any = new Error("This property is currently under review by platform administrators.");
-      err.statusCode = 400;
-      throw err;
-    }
-
-    if (property.status === "REJECTED") {
-      const err: any = new Error("This property was rejected. Please review feedback, edit details, and submit for review.");
-      err.statusCode = 400;
-      throw err;
-    }
-
     if (property.status === "SUSPENDED" || property.moderationStatus === "SUSPENDED") {
       const err: any = new Error("This property was suspended by platform administrators and cannot be self-relisted. Please contact support.");
       err.statusCode = 403;
+      throw err;
+    }
+
+    // Ensure property has minimum required content to be published
+    if (!property.title || property.title.trim().length < 3) {
+      const err: any = new Error("Property title must have at least 3 characters before relisting.");
+      err.statusCode = 400;
       throw err;
     }
 
@@ -1363,6 +1335,7 @@ export const hostsService = {
       .update(schema.properties)
       .set({
         status: "PUBLISHED",
+        moderationStatus: "NONE",
         updatedAt: new Date(),
       })
       .where(eq(schema.properties.id, propertyId))

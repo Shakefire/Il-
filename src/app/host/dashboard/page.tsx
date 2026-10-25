@@ -358,7 +358,20 @@ export default function HostDashboardPage() {
       loadProperties();
       loadStats();
     } catch (err: any) {
-      alert(err.message || "Failed to delete property.");
+      if (err.requiresConfirmation) {
+        if (confirm(`${err.message}\n\nClick OK to confirm and proceed with deletion anyway.`)) {
+          try {
+            await api.deleteHostProperty(propId, true);
+            setActionMessage("Listing permanently deleted and removed from marketplace.");
+            loadProperties();
+            loadStats();
+          } catch (retryErr: any) {
+            alert(retryErr.message || "Failed to delete property.");
+          }
+        }
+      } else {
+        alert(err.message || "Failed to delete property.");
+      }
     }
   };
 

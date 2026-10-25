@@ -71,7 +71,7 @@ export async function getPublishedProperties(pagination: { limit: number; offset
   const [totalResult] = await db
     .select({ total: count(schema.properties.id) })
     .from(schema.properties)
-    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
+    .leftJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
@@ -88,7 +88,7 @@ export async function getPublishedProperties(pagination: { limit: number; offset
       property: schema.properties,
     })
     .from(schema.properties)
-    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
+    .leftJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
@@ -200,7 +200,7 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
       hostStatus: schema.users.status,
     })
     .from(schema.properties)
-    .innerJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
+    .leftJoin(schema.users, eq(schema.properties.hostId, schema.users.id))
     .where(
       allowUnpublished
         ? matchCondition

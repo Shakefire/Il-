@@ -218,7 +218,7 @@ export default function BookingPanel({ property }: BookingPanelProps) {
             <span>{formatNaira(stayCost)}</span>
           </div>
           <div className="flex justify-between text-[#6B6B67]">
-            <span>Payment processing fee (Paystack)</span>
+            <span>Payment processing (Paystack 1.5% + ₦100)</span>
             <span>{formatNaira(processingFee)}</span>
           </div>
           <div className="pt-2.5 border-t border-[#E7E5E0]/70 flex justify-between font-bold text-[16px] text-[#171717]">

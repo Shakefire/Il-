@@ -79,18 +79,9 @@ export function middleware(request: NextRequest) {
 
   // 4. Private consumer account pages protection
   if (isUserAccountRoute) {
-    // If accessing /trips with a booking reference or access token, allow access without login redirect
+    // Trips page is accessible to both guests with confirmed tickets and authenticated users
     if (pathname.startsWith("/trips")) {
-      const searchParams = request.nextUrl.searchParams;
-      const hasBookingKey =
-        searchParams.has("ref") ||
-        searchParams.has("reference") ||
-        searchParams.has("trxref") ||
-        searchParams.has("token") ||
-        searchParams.has("payment");
-      if (hasBookingKey) {
-        return NextResponse.next();
-      }
+      return NextResponse.next();
     }
 
     if (!sessionToken || !jwtPayload) {

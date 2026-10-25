@@ -129,8 +129,9 @@ export const api = {
   async getBookingContact(bookingId: string, accessToken?: string) {
     const headers: Record<string, string> = { ...getAuthHeader() };
     if (accessToken) headers["X-Access-Token"] = accessToken;
+    const query = accessToken ? `?token=${encodeURIComponent(accessToken)}` : "";
 
-    const res = await fetch(`/api/bookings/${bookingId}/contact`, {
+    const res = await fetch(`/api/bookings/${bookingId}/contact${query}`, {
       headers,
       credentials: "include",
     });
@@ -269,14 +270,19 @@ export const api = {
     return body;
   },
 
-  async deleteHostProperty(propertyId: string) {
-    const res = await fetch(`/api/host/properties/${propertyId}`, {
+  async deleteHostProperty(propertyId: string, confirmWithReservations = false) {
+    const res = await fetch(`/api/host/properties/${propertyId}${confirmWithReservations ? "?confirm=true" : ""}`, {
       method: "DELETE",
       headers: getAuthHeader(),
       credentials: "include",
     });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error || "Failed to delete property listing");
+    if (!res.ok) {
+      const err: any = new Error(body.error || "Failed to delete property listing");
+      err.requiresConfirmation = body.requiresConfirmation;
+      err.upcomingCount = body.upcomingCount;
+      throw err;
+    }
     return body;
   },
 
@@ -449,8 +455,10 @@ export const api = {
   },
 
   async getAdminProperties(status?: string) {
-    const query = status ? `?status=${encodeURIComponent(status)}` : "";
-    const res = await fetch(`/api/admin/properties${query}`, {
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    params.set("limit", "100");
+    const res = await fetch(`/api/admin/properties?${params.toString()}`, {
       headers: getAuthHeader(),
       credentials: "include",
     });
@@ -623,6 +631,68 @@ export const api = {
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "Failed to reinstate host");
+    return body;
+  },
+
+  async deleteAdminHost(id: string) {
+    const res = await fetch(`/api/admin/hosts/${id}`, {
+      method: "DELETE",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to delete host");
+    return body;
+  },
+
+  async deleteAdminKyc(id: string) {
+    const res = await fetch(`/api/admin/hosts/${id}/kyc`, {
+      method: "DELETE",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to delete KYC record");
+    return body;
+  },
+
+  async deleteAdminBooking(id: string) {
+    const res = await fetch(`/api/admin/bookings/${id}`, {
+      method: "DELETE",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to delete booking");
+    return body;
+  },
+
+  async deleteAdminTransaction(id: string) {
+    const res = await fetch(`/api/admin/finance/transactions/${id}`, {
+      method: "DELETE",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to delete transaction");
+    return body;
+  },
+
+  async updateAdminPayoutBank(
+    payoutId: string,
+    data: { bankName: string; accountNumber: string; accountName: string; bankCode?: string; updateHostDefaultProfile?: boolean }
+  ) {
+    const res = await fetch(`/api/admin/finance/payouts/${payoutId}/bank-account`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to update payout bank details");
     return body;
   },
 
