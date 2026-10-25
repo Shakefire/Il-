@@ -160,6 +160,12 @@ export default function AdminPortalPage() {
   const [isProcessingRefund, setIsProcessingRefund] = useState(false);
   const [financeActionFeedback, setFinanceActionFeedback] = useState<string | null>(null);
 
+  // Platform Settings (Commission)
+  const [platformCommissionPct, setPlatformCommissionPct] = useState<number>(10);
+  const [editingCommission, setEditingCommission] = useState(false);
+  const [pendingCommissionPct, setPendingCommissionPct] = useState<number>(10);
+  const [savingCommission, setSavingCommission] = useState(false);
+
   // Profile Dropdown & Modal States
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -234,18 +240,23 @@ export default function AdminPortalPage() {
   const loadFinanceData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoadingFinance(true);
     try {
-      const [sumRes, tbRes, payRes, refRes, jrnRes] = await Promise.all([
+      const [sumRes, tbRes, payRes, refRes, jrnRes, settingsRes] = await Promise.all([
         api.getAdminFinancialSummary().catch(() => null),
         api.getAdminTrialBalance().catch(() => null),
         api.getAdminPayoutQueue().catch(() => ({ payouts: [] })),
         api.getAdminRefundQueue().catch(() => ({ refunds: [] })),
         api.getAdminJournals(50).catch(() => ({ journals: [] })),
+        fetch("/api/admin/settings").then(r => r.json()).catch(() => null),
       ]);
       if (sumRes) setFinancialSummary(sumRes);
       if (tbRes?.trialBalance) setTrialBalance(tbRes.trialBalance);
       if (payRes?.payouts) setPayoutsQueue(payRes.payouts);
       if (refRes?.refunds) setRefundsQueue(refRes.refunds);
       if (jrnRes?.journals) setJournals(jrnRes.journals);
+      if (settingsRes?.defaultHostCommissionPct !== undefined) {
+        setPlatformCommissionPct(settingsRes.defaultHostCommissionPct);
+        setPendingCommissionPct(settingsRes.defaultHostCommissionPct);
+      }
     } catch (err: any) {
       console.warn("[Admin] Could not load finance data:", err);
     } finally {
@@ -1986,10 +1997,10 @@ export default function AdminPortalPage() {
                         <DollarSign size={15} className="text-emerald-600" />
                       </div>
                       <div className="text-2xl font-bold text-emerald-800 tabular-nums">
-                        {formatNaira(Math.round((stats?.totalRevenue || 0) * 0.10))}
+                        {formatNaira(Math.round((stats?.totalRevenue || 0) * ((platformCommissionPct || 10) / 100)))}
                       </div>
                       <p className="text-[11px] text-primary-secondary">
-                        10% Ilé platform revenue
+                        {platformCommissionPct || 10}% Ilé platform revenue
                       </p>
                     </div>
 
@@ -2046,6 +2057,80 @@ export default function AdminPortalPage() {
                         {refundsQueue.filter((r) => r.status === "PROCESSED").length} processed reversals
                       </p>
                     </div>
+                  </div>
+
+                  {/* Platform Commission Rate Setting */}
+                  <div className="p-5 bg-surface rounded-2xl border border-border space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-bold text-sm text-primary">Platform Commission Rate</h4>
+                        <p className="text-xs text-primary-muted mt-0.5">Applied to all new bookings. Existing bookings retain the rate at time of booking.</p>
+                      </div>
+                      {!editingCommission ? (
+                        <button
+                          type="button"
+                          onClick={() => { setEditingCommission(true); setPendingCommissionPct(platformCommissionPct); }}
+                          className="px-3 py-1.5 text-xs font-semibold border border-border rounded-lg hover:bg-surface-muted transition-colors cursor-pointer"
+                        >
+                          Edit
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={0}
+                            max={50}
+                            step={1}
+                            value={pendingCommissionPct}
+                            onChange={(e) => setPendingCommissionPct(Number(e.target.value))}
+                            className="w-20 px-2.5 py-1.5 text-sm border border-border rounded-lg text-center font-semibold"
+                          />
+                          <span className="text-sm font-medium text-primary-muted">%</span>
+                          <button
+                            type="button"
+                            disabled={savingCommission}
+                            onClick={async () => {
+                              setSavingCommission(true);
+                              try {
+                                const res = await fetch("/api/admin/settings", {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ defaultHostCommissionPct: pendingCommissionPct }),
+                                });
+                                const data = await res.json();
+                                if (data.success) {
+                                  setPlatformCommissionPct(pendingCommissionPct);
+                                  setEditingCommission(false);
+                                  setFinanceActionFeedback(`Commission rate updated to ${pendingCommissionPct}%`);
+                                } else {
+                                  alert(data.error || "Failed to save");
+                                }
+                              } catch (err: any) {
+                                alert(err.message || "Failed to save");
+                              } finally {
+                                setSavingCommission(false);
+                              }
+                            }}
+                            className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-lg hover:bg-black transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            {savingCommission ? "Saving…" : "Save"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setEditingCommission(false); setPendingCommissionPct(platformCommissionPct); }}
+                            className="px-2 py-1.5 text-xs text-primary-muted hover:text-primary cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {!editingCommission && (
+                      <div className="flex items-center gap-3">
+                        <span className="text-3xl font-bold text-emerald-800 tabular-nums">{platformCommissionPct}%</span>
+                        <span className="text-xs text-primary-muted">deducted from host earnings on each confirmed booking</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Quick Action Operations Box */}

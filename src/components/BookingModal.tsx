@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import { X, Check, ShieldCheck, CreditCard, Building2, Lock, Key, MapPin, Phone, Loader2, AlertCircle, Smartphone, Mail } from "lucide-react";
+import { X, Check, ShieldCheck, Lock, Key, MapPin, Phone, Loader2, AlertCircle, Mail } from "lucide-react";
 import { Property } from "@/types";
 import { formatNaira, calculateNights, calculatePaystackFee } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -53,6 +53,29 @@ export default function BookingModal({
   // Server state for booking
   const [serverBooking, setServerBooking] = useState<any>(null);
   const [confirmedData, setConfirmedData] = useState<ConfirmedBookingDetails | null>(null);
+
+  // Handle modal close — cancel pending booking if user abandons before payment
+  const handleClose = async () => {
+    if (serverBooking && step === 3 && serverBooking.id && serverBooking.accessToken) {
+      // Fire-and-forget cancellation of the abandoned pending booking
+      try {
+        await fetch(`/api/bookings/${serverBooking.id}/cancel?token=${serverBooking.accessToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-access-token": serverBooking.accessToken },
+          body: JSON.stringify({
+            reason: "Guest closed booking modal before completing payment.",
+          }),
+        });
+      } catch {
+        // Best-effort; stale booking cleanup will handle it if this fails
+      }
+    }
+    setStep(1);
+    setServerBooking(null);
+    setConfirmedData(null);
+    setErrorMessage(null);
+    onClose();
+  };
 
   // Auto-prefill guest details from authenticated user session
   useEffect(() => {
@@ -170,7 +193,7 @@ export default function BookingModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="p-2 text-[#8B8B86] hover:text-[#171717] rounded-full hover:bg-[#FAFAF8] transition-colors"
             aria-label="Close modal"
           >
@@ -359,178 +382,73 @@ export default function BookingModal({
           {/* Step 3: Payment */}
           {step === 3 && (
             <div className="space-y-5">
-              {/* Amount summary */}
-              <div className="flex items-center justify-between pb-3 border-b border-[#E7E5E0]">
-                <div>
-                  <div className="text-[12px] uppercase tracking-wider font-semibold text-[#8B8B86]">Total Amount</div>
-                  <div className="text-[22px] font-bold text-[#171717] mt-0.5">
-                    {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}
-                  </div>
-                  <div className="text-[12px] text-[#6B6B67]">{nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}</div>
+              {/* Booking summary recap */}
+              <div className="flex gap-4 p-4 rounded-xl bg-[#FAFAF8] border border-[#E7E5E0]/60">
+                <div className="relative w-20 h-16 rounded-lg overflow-hidden shrink-0 bg-[#E7E5E0]">
+                  <Image
+                    src={property.coverImage}
+                    alt={property.title}
+                    fill
+                    className="object-cover"
+                  />
                 </div>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/15">
-                  <ShieldCheck size={13} />
-                  <span>Paystack Secured</span>
-                </span>
-              </div>
-
-              {/* Payment method selector */}
-              <div>
-                <p className="text-[12px] font-semibold uppercase tracking-wider text-[#8B8B86] mb-3">
-                  Select payment method
-                </p>
-                <div className="space-y-2.5">
-                  {/* Card & Digital Wallets */}
-                  <div
-                    onClick={() => setPaymentMethod("card")}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      paymentMethod === "card"
-                        ? "border-[#065F46] bg-[#EDF3F0]/50 ring-2 ring-[#065F46]/15 shadow-xs"
-                        : "border-[#D1D5DB] hover:border-[#9CA3AF] bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3.5">
-                        {/* Authentic Card Icon with EMV Chip & Brand Accents */}
-                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#065F46]/15 flex items-center justify-center shrink-0">
-                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="2" y="5" width="20" height="14" rx="3" stroke="#065F46" strokeWidth="1.8" />
-                            <path d="M2 9.5H22" stroke="#065F46" strokeWidth="1.8" />
-                            <rect x="4.5" y="12.5" width="3.5" height="2.5" rx="0.5" fill="#D97706" />
-                            <circle cx="15" cy="14" r="2.2" fill="#EB001B" />
-                            <circle cx="17.2" cy="14" r="2.2" fill="#F79E1B" fillOpacity="0.9" />
-                          </svg>
-                        </div>
-                        <div>
-                          <div className="text-[14.5px] font-semibold text-[#171717]">Card &amp; Digital Wallets</div>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#EB001B]/10 text-[#EB001B] border border-[#EB001B]/20">Mastercard</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#1A1F71]/10 text-[#1A1F71] border border-[#1A1F71]/20">Visa</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#008248]/10 text-[#008248] border border-[#008248]/20">Verve</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-stone-100 text-stone-600">Apple Pay</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "card" ? "border-[#065F46] bg-[#065F46]" : "border-[#D1D5DB]"}`}>
-                        {paymentMethod === "card" && <div className="w-2 h-2 rounded-full bg-white" />}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Direct Bank Transfer */}
-                  <div
-                    onClick={() => setPaymentMethod("transfer")}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      paymentMethod === "transfer"
-                        ? "border-[#065F46] bg-[#EDF3F0]/50 ring-2 ring-[#065F46]/15 shadow-xs"
-                        : "border-[#D1D5DB] hover:border-[#9CA3AF] bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3.5">
-                        {/* Authentic Nigerian Banking Vault Icon */}
-                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#065F46]/15 flex items-center justify-center shrink-0">
-                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3 9.5L12 4L21 9.5H3Z" stroke="#065F46" strokeWidth="1.8" strokeLinejoin="round" fill="#065F46" fillOpacity="0.12" />
-                            <path d="M5.5 10.5V17M9.8 10.5V17M14.2 10.5V17M18.5 10.5V17" stroke="#065F46" strokeWidth="1.8" strokeLinecap="round" />
-                            <path d="M2.5 17.5H21.5" stroke="#065F46" strokeWidth="1.8" strokeLinecap="round" />
-                            <path d="M4 20H20" stroke="#065F46" strokeWidth="1.8" strokeLinecap="round" />
-                          </svg>
-                        </div>
-                        <div>
-                          <div className="text-[14.5px] font-semibold text-[#171717]">Nigerian Bank Transfer</div>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#E45300]/10 text-[#E45300] border border-[#E45300]/20">GTBank</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#D30000]/10 text-[#D30000] border border-[#D30000]/20">Zenith</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#002D62]/10 text-[#002D62] border border-[#002D62]/20">Access</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#5B21B6]/10 text-[#6D28D9] border border-[#5B21B6]/20">Kuda</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "transfer" ? "border-[#065F46] bg-[#065F46]" : "border-[#D1D5DB]"}`}>
-                        {paymentMethod === "transfer" && <div className="w-2 h-2 rounded-full bg-white" />}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* USSD */}
-                  <div
-                    onClick={() => setPaymentMethod("ussd")}
-                    className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                      paymentMethod === "ussd"
-                        ? "border-[#065F46] bg-[#EDF3F0]/50 ring-2 ring-[#065F46]/15 shadow-xs"
-                        : "border-[#D1D5DB] hover:border-[#9CA3AF] bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3.5">
-                        {/* Authentic Mobile Dialer & Keypad Icon */}
-                        <div className="w-11 h-11 rounded-xl bg-[#EDF3F0] border border-[#065F46]/15 flex items-center justify-center shrink-0">
-                          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="5.5" y="2.5" width="13" height="19" rx="2.5" stroke="#065F46" strokeWidth="1.8" />
-                            <circle cx="12" cy="18" r="0.9" fill="#065F46" />
-                            <path d="M9 5.5H15" stroke="#065F46" strokeWidth="1.5" strokeLinecap="round" />
-                            <circle cx="9" cy="9" r="0.8" fill="#065F46" />
-                            <circle cx="12" cy="9" r="0.8" fill="#065F46" />
-                            <circle cx="15" cy="9" r="0.8" fill="#065F46" />
-                            <circle cx="9" cy="12" r="0.8" fill="#065F46" />
-                            <circle cx="12" cy="12" r="0.8" fill="#065F46" />
-                            <circle cx="15" cy="12" r="0.8" fill="#065F46" />
-                            <circle cx="9" cy="15" r="0.8" fill="#065F46" />
-                            <circle cx="12" cy="15" r="0.8" fill="#065F46" />
-                            <circle cx="15" cy="15" r="0.8" fill="#065F46" />
-                          </svg>
-                        </div>
-                        <div>
-                          <div className="text-[14.5px] font-semibold text-[#171717]">USSD &amp; Mobile Banking</div>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/20">*737# GTB</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/20">*919# UBA</span>
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EDF3F0] text-[#065F46] border border-[#065F46]/20">*901# Access</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${paymentMethod === "ussd" ? "border-[#065F46] bg-[#065F46]" : "border-[#D1D5DB]"}`}>
-                        {paymentMethod === "ussd" && <div className="w-2 h-2 rounded-full bg-white" />}
-                      </div>
-                    </div>
-                  </div>
+                <div className="min-w-0">
+                  <h4 className="text-[15px] font-medium text-[#171717] truncate">
+                    {property.title}
+                  </h4>
+                  <p className="text-[13px] text-[#6B6B67]">
+                    {nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}
+                  </p>
                 </div>
               </div>
 
-              {/* Post-payment delivery notice */}
-              <div className="p-3.5 bg-[#F5F9F7] rounded-xl border border-[#065F46]/20 flex items-start gap-3">
-                <Mail size={15} className="text-[#065F46] shrink-0 mt-0.5" />
-                <div className="text-[12.5px] text-[#4A4A45] leading-relaxed">
-                  <span className="font-semibold text-[#065F46]">Instant delivery after payment:</span>{" "}
-                  Booking confirmation, exact property address, estate gate pass code, and your host&apos;s direct contact will be emailed to{" "}
-                  <span className="font-medium text-[#171717]">{guestEmail || "your email"}</span>{" "}
-                  within seconds.
+              {/* Price breakdown */}
+              <div className="space-y-2 text-[14px]">
+                <div className="flex justify-between text-[#6B6B67]">
+                  <span>
+                    {formatNaira(property.pricePerNight)} × {nights} nights
+                  </span>
+                  <span>{formatNaira(clientStayCost)}</span>
+                </div>
+                <div className="flex justify-between text-[#6B6B67]">
+                  <span>Processing fee</span>
+                  <span>{formatNaira(clientProcessingFee)}</span>
+                </div>
+                <div className="pt-2.5 border-t border-[#E7E5E0] flex justify-between font-semibold text-[17px] text-[#171717]">
+                  <span>Total</span>
+                  <span>{formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
                 </div>
               </div>
 
-              <div className="pt-2 flex flex-col sm:flex-row gap-3">
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  className="px-5 py-3 border border-[#D1D5DB] hover:border-[#9CA3AF] text-[#171717] rounded-xl hover:bg-[#FAFAF8] active:scale-[0.99] text-[14px] font-medium transition-all cursor-pointer"
-                >
-                  Back
-                </button>
+              {/* Security notice */}
+              <div className="flex items-center gap-2.5 text-[12.5px] text-[#6B6B67]">
+                <Lock size={14} className="text-[#065F46] shrink-0" />
+                <span>Secured by Paystack. Card, bank transfer, and USSD accepted.</span>
+              </div>
+
+              {/* Action buttons */}
+              <div className="pt-1 flex flex-col gap-3">
                 <button
                   type="button"
                   onClick={() => handlePay("paystack")}
                   disabled={isProcessing}
-                  className="flex-1 py-3.5 bg-[#065F46] text-white rounded-xl font-semibold text-[15px] hover:bg-[#044E39] active:scale-[0.99] transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-60 cursor-pointer"
+                  className="w-full py-4 bg-[#065F46] text-white rounded-xl font-semibold text-[16px] hover:bg-[#044E39] active:scale-[0.99] transition-all flex items-center justify-center gap-2.5 shadow-sm disabled:opacity-60 cursor-pointer"
                 >
                   {isProcessing ? (
                     <>
-                      <Loader2 size={16} className="animate-spin" />
-                      <span>Connecting to Paystack…</span>
+                      <Loader2 size={18} className="animate-spin" />
+                      <span>Connecting…</span>
                     </>
                   ) : (
-                    <span>Confirm &amp; Pay {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
+                    <span>Pay {formatNaira(serverBooking ? serverBooking.totalPrice : clientTotal)}</span>
                   )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  className="w-full py-2.5 text-[14px] font-medium text-[#6B6B67] hover:text-[#171717] transition-colors cursor-pointer"
+                >
+                  ← Back to guest details
                 </button>
               </div>
             </div>
@@ -615,7 +533,7 @@ export default function BookingModal({
               <div className="pt-2">
                 <button
                   type="button"
-                  onClick={onClose}
+                  onClick={handleClose}
                   className="w-full py-3 bg-[#171717] text-white rounded-xl font-medium text-[15px] hover:bg-black active:scale-[0.99] transition-all cursor-pointer"
                 >
                   Done

@@ -7,7 +7,7 @@
 
 import { env } from "../../config/env";
 import { getDb, schema } from "../../db/client";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, sql } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendEmail,
@@ -428,10 +428,11 @@ export async function processSuccessfulPayment(data: {
         booking.accommodationSubtotal ||
         (booking.nightlyPrice * booking.numberOfNights) ||
         (booking.totalAmount - (booking.serviceFee || 0));
+      const commissionRate = (booking.hostCommissionPct || 10) / 100;
       const commission =
         booking.hostCommissionAmount && booking.hostCommissionAmount > 0
           ? booking.hostCommissionAmount
-          : Math.round(gross * 0.1);
+          : Math.round(gross * commissionRate);
       const net =
         booking.hostNetAmount && booking.hostNetAmount > 0
           ? booking.hostNetAmount
@@ -507,6 +508,7 @@ export async function processFailedPayment(data: {
 
   if (!payment) return { processed: false, message: "Payment not found" };
 
+  // Mark payment as FAILED
   await db
     .update(schema.payments)
     .set({ status: "FAILED" })
@@ -518,13 +520,41 @@ export async function processFailedPayment(data: {
     .where(eq(schema.bookings.id, payment.bookingId))
     .limit(1);
 
-  if (booking) {
+  if (booking && booking.status !== "CONFIRMED" && booking.status !== "CANCELLED") {
+    // Cancel the booking and release availability blocks
+    await db
+      .update(schema.bookings)
+      .set({
+        status: "CANCELLED",
+        cancellationReason: data.reason || "Payment was not completed.",
+        cancelledAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.bookings.id, booking.id));
+
+    // Release availability blocks so dates return to live calendar
+    await db
+      .delete(schema.availabilityBlocks)
+      .where(eq(schema.availabilityBlocks.bookingId, booking.id));
+
+    // Neutralize any pending host earnings & payouts
+    await db
+      .update(schema.hostEarnings)
+      .set({ status: "CANCELLED" })
+      .where(eq(schema.hostEarnings.bookingId, booking.id));
+
+    await db
+      .update(schema.payouts)
+      .set({ status: "CANCELLED", updatedAt: new Date() })
+      .where(eq(schema.payouts.bookingId, booking.id));
+
     const [property] = await db
       .select({ title: schema.properties.title })
       .from(schema.properties)
       .where(eq(schema.properties.id, booking.propertyId))
       .limit(1);
 
+    // Notify guest of payment failure
     sendEmail(
       bookingPaymentFailedEmail({
         guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
@@ -538,7 +568,62 @@ export async function processFailedPayment(data: {
     ).catch((err) => console.warn("[Payments] Failed to send payment failed email:", err));
   }
 
-  return { processed: true, message: "Payment marked failed and guest notified." };
+  return { processed: true, message: "Payment marked failed, booking cancelled, and dates released." };
+}
+
+// ─── Expire Stale Pending Bookings ───
+
+export async function expireStalePendingBookings(maxAgeMinutes = 30): Promise<{
+  expired: number;
+  bookingIds: string[];
+}> {
+  const db = getDb();
+  const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+
+  // Find all PAYMENT_PENDING bookings older than the cutoff
+  const staleBookings = await db
+    .select({ id: schema.bookings.id, referenceCode: schema.bookings.referenceCode })
+    .from(schema.bookings)
+    .where(
+      and(
+        eq(schema.bookings.status, "PAYMENT_PENDING"),
+        sql`${schema.bookings.createdAt} < ${cutoff.toISOString()}`
+      )
+    );
+
+  const expiredIds: string[] = [];
+
+  for (const booking of staleBookings) {
+    await db
+      .update(schema.bookings)
+      .set({
+        status: "CANCELLED",
+        cancellationReason: "Payment not completed within the time limit.",
+        cancelledAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.bookings.id, booking.id));
+
+    await db
+      .delete(schema.availabilityBlocks)
+      .where(eq(schema.availabilityBlocks.bookingId, booking.id));
+
+    // Mark related payments as expired
+    await db
+      .update(schema.payments)
+      .set({ status: "FAILED" })
+      .where(
+        and(
+          eq(schema.payments.bookingId, booking.id),
+          eq(schema.payments.status, "INITIALIZED")
+        )
+      );
+
+    expiredIds.push(booking.id);
+    console.log(`[Payments] Expired stale booking: ${booking.referenceCode}`);
+  }
+
+  return { expired: expiredIds.length, bookingIds: expiredIds };
 }
 
 // ─── Paystack Webhook Handler ───
@@ -598,6 +683,94 @@ export async function handlePaystackWebhook(
     });
 
     return { processed: true, message: "Webhook charge.failed processed." };
+  }
+
+  // 4. Handle 'refund.processed'
+  if (event.event === "refund.processed") {
+    const refundData = event.data;
+    const db = getDb();
+
+    // Update refund record status if we can match by Paystack refund ID
+    const paystackRefundId = String(refundData.id || "");
+    if (paystackRefundId) {
+      await db
+        .update(schema.refunds)
+        .set({
+          status: "PROCESSED",
+          processedAt: new Date(),
+          paystackRefundId: paystackRefundId,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+    }
+
+    // Also try to match by transaction reference if refund has it
+    if (refundData.transaction?.reference) {
+      const [payment] = await db
+        .select()
+        .from(schema.payments)
+        .where(eq(schema.payments.reference, refundData.transaction.reference))
+        .limit(1);
+
+      if (payment) {
+        // Update booking status to REFUNDED
+        await db
+          .update(schema.bookings)
+          .set({ status: "REFUNDED", updatedAt: new Date() })
+          .where(eq(schema.bookings.id, payment.bookingId));
+
+        // Send refund confirmation email
+        const [booking] = await db
+          .select()
+          .from(schema.bookings)
+          .where(eq(schema.bookings.id, payment.bookingId))
+          .limit(1);
+
+        if (booking) {
+          const [property] = await db
+            .select({ title: schema.properties.title })
+            .from(schema.properties)
+            .where(eq(schema.properties.id, booking.propertyId))
+            .limit(1);
+
+          const refundAmountNaira = Math.round((refundData.amount || 0) / 100);
+          sendEmail(
+            bookingRefundEmail({
+              guestName: `${booking.guestFirstName} ${booking.guestLastName}`.trim(),
+              guestEmail: booking.guestEmail,
+              propertyTitle: property?.title || "Property",
+              referenceCode: booking.referenceCode,
+              refundAmount: refundAmountNaira,
+              currency: "NGN",
+              status: "PROCESSED",
+            })
+          ).catch((e) => console.warn("[Payments] Failed to send refund confirmation email:", e));
+        }
+      }
+    }
+
+    return { processed: true, message: "Webhook refund.processed handled." };
+  }
+
+  // 5. Handle 'refund.failed'
+  if (event.event === "refund.failed") {
+    const refundData = event.data;
+    const db = getDb();
+    const paystackRefundId = String(refundData.id || "");
+
+    if (paystackRefundId) {
+      await db
+        .update(schema.refunds)
+        .set({
+          status: "FAILED",
+          adminNotes: `Paystack refund failed: ${refundData.gateway_response || "Unknown reason"}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+    }
+
+    console.error(`[Payments] Paystack refund failed for refund ID: ${paystackRefundId}`);
+    return { processed: true, message: "Webhook refund.failed handled." };
   }
 
   return { processed: false, message: `Ignored unhandled event: ${event.event}` };

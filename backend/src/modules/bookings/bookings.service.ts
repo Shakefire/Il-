@@ -628,10 +628,11 @@ export const bookingsService = {
           booking.accommodationSubtotal ||
           (booking.nightlyPrice * booking.numberOfNights) ||
           booking.totalAmount;
+        const commissionRate = (booking.hostCommissionPct || 10) / 100;
         const commission =
           booking.hostCommissionAmount && booking.hostCommissionAmount > 0
             ? booking.hostCommissionAmount
-            : Math.round(gross * 0.1);
+            : Math.round(gross * commissionRate);
         const net =
           booking.hostNetAmount && booking.hostNetAmount > 0
             ? booking.hostNetAmount
