@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, desc, inArray, lt, gt, gte } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
+import { BankResolutionService, maskAccountNumber } from "../payments/bank-resolution.service";
 
 export const HostPropertyDraftSchema = z.object({
   title: z.string().min(2).default("Untitled Listing"),
@@ -865,11 +866,25 @@ export const hostsService = {
     if (data.authorityDocType) profUpdates.authorityDocType = data.authorityDocType;
     if (data.authorityDocUrl) profUpdates.authorityDocUrl = data.authorityDocUrl;
 
-    // Nigerian Bank Details
-    if (data.bankName) profUpdates.bankName = data.bankName;
-    if (data.bankCode) profUpdates.bankCode = data.bankCode;
-    if (data.bankAccountNumber) profUpdates.bankAccountNumber = data.bankAccountNumber.trim();
-    if (data.bankAccountName) profUpdates.bankAccountName = data.bankAccountName.trim();
+    // Nigerian Bank Details - verify with Paystack resolution if bank details provided
+    if (data.bankAccountNumber && data.bankCode) {
+      const cleanAcc = String(data.bankAccountNumber).replace(/\D/g, "").trim();
+      const cleanCode = String(data.bankCode).trim();
+      const resolution = await BankResolutionService.resolveBankAccount(cleanAcc, cleanCode, userId);
+      if (!resolution.resolved || !resolution.accountName) {
+        throw new Error(resolution.error || "Bank account could not be verified by Paystack.");
+      }
+      profUpdates.bankName = resolution.bankName || data.bankName;
+      profUpdates.bankCode = cleanCode;
+      profUpdates.bankAccountNumber = cleanAcc;
+      profUpdates.bankAccountName = resolution.accountName;
+      profUpdates.bankAccountVerifiedAt = new Date();
+    } else {
+      if (data.bankName) profUpdates.bankName = data.bankName;
+      if (data.bankCode) profUpdates.bankCode = data.bankCode;
+      if (data.bankAccountNumber) profUpdates.bankAccountNumber = data.bankAccountNumber.trim();
+      if (data.bankAccountName) profUpdates.bankAccountName = data.bankAccountName.trim();
+    }
 
     const [updatedProfile] = await db
       .update(schema.profiles)

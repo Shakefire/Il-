@@ -11,22 +11,26 @@ import { enrichProperty } from "../properties/properties.service";
 export async function getUnavailablePropertyIds(checkIn: string, checkOut: string): Promise<Set<string>> {
   const db = getDb();
 
-  // Clean up stale PAYMENT_PENDING availability blocks older than 30 minutes
-  const thirtyMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  // Clean up stale or cancelled availability blocks
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
   const staleBlocks = await db
-    .select({ id: schema.availabilityBlocks.id, bookingId: schema.availabilityBlocks.bookingId })
+    .select({ id: schema.availabilityBlocks.id, bookingId: schema.availabilityBlocks.bookingId, status: schema.bookings.status })
     .from(schema.availabilityBlocks)
     .innerJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
     .where(
-      and(
-        eq(schema.bookings.status, "PAYMENT_PENDING"),
-        lt(schema.bookings.createdAt, thirtyMinAgo)
+      or(
+        eq(schema.bookings.status, "CANCELLED"),
+        eq(schema.bookings.status, "FAILED"),
+        and(
+          eq(schema.bookings.status, "PAYMENT_PENDING"),
+          lt(schema.bookings.createdAt, fiveMinAgo)
+        )
       )
     );
   for (const stale of staleBlocks) {
     await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, stale.id));
-    if (stale.bookingId) {
-      await db.update(schema.bookings).set({ status: "CANCELLED" }).where(eq(schema.bookings.id, stale.bookingId));
+    if (stale.bookingId && stale.status === "PAYMENT_PENDING") {
+      await db.update(schema.bookings).set({ status: "CANCELLED", updatedAt: new Date() }).where(eq(schema.bookings.id, stale.bookingId));
     }
   }
 

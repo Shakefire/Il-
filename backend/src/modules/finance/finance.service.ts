@@ -2,6 +2,7 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { LedgerService } from "./ledger.service";
 import { env } from "../../config/env";
+import { BankResolutionService, maskAccountNumber } from "../payments/bank-resolution.service";
 
 export class FinanceService {
   /**
@@ -118,50 +119,105 @@ export class FinanceService {
 
   /**
    * Admin Updates Payout Bank Details for a Host Payout
+   * Uses real Paystack NUBAN resolution to ensure destination validity before updating payout snapshot.
    */
   static async updatePayoutBankAccount(
     adminId: string,
     params: {
       payoutId: string;
-      bankName: string;
+      bankName?: string;
       bankCode?: string;
       accountNumber: string;
-      accountName: string;
+      accountName?: string;
       updateHostDefaultProfile?: boolean;
     }
   ) {
     const db = getDb();
-    const { payoutId, bankName, bankCode, accountNumber, accountName, updateHostDefaultProfile = true } = params;
+    const { payoutId, updateHostDefaultProfile = true } = params;
 
     const [payout] = await db.select().from(schema.payouts).where(eq(schema.payouts.id, payoutId)).limit(1);
     if (!payout) {
       throw new Error(`Payout ${payoutId} not found`);
     }
 
+    if (payout.status === "PAID") {
+      throw new Error("Cannot change bank details of an already disbursed payout.");
+    }
+
+    const effectiveBankCode = params.bankCode || payout.bankCode;
+    if (!effectiveBankCode) {
+      throw new Error("Bank code is required for Paystack account verification.");
+    }
+
+    // 1. Authoritative Paystack resolution
+    const resolution = await BankResolutionService.resolveBankAccount(
+      params.accountNumber,
+      effectiveBankCode,
+      `admin_${adminId}`
+    );
+
+    if (!resolution.resolved || !resolution.accountName) {
+      throw new Error(
+        resolution.error || "The bank account could not be verified by Paystack NUBAN inquiry."
+      );
+    }
+
+    const verifiedBankName = resolution.bankName || params.bankName || payout.bankName || "Verified Bank";
+    const verifiedAccountName = resolution.accountName;
+    const verifiedAccountNumber = resolution.accountNumber || params.accountNumber.trim();
+    const verifiedAt = new Date();
+
+    const previousBank = payout.bankName;
+    const previousMasked = maskAccountNumber(payout.accountNumber);
+
+    // 2. Update the payout snapshot with the verified account
     const [updated] = await db
       .update(schema.payouts)
       .set({
-        bankName,
-        bankCode: bankCode || payout.bankCode,
-        accountNumber,
-        accountName,
-        updatedAt: new Date(),
+        bankName: verifiedBankName,
+        bankCode: effectiveBankCode,
+        accountNumber: verifiedAccountNumber,
+        accountName: verifiedAccountName,
+        updatedAt: verifiedAt,
       })
       .where(eq(schema.payouts.id, payoutId))
       .returning();
 
+    // 3. Optionally update host profile as default
     if (updateHostDefaultProfile && payout.hostId) {
       await db
         .update(schema.profiles)
         .set({
-          bankName,
-          bankCode: bankCode || undefined,
-          bankAccountNumber: accountNumber,
-          bankAccountName: accountName,
-          updatedAt: new Date(),
+          bankName: verifiedBankName,
+          bankCode: effectiveBankCode,
+          bankAccountNumber: verifiedAccountNumber,
+          bankAccountName: verifiedAccountName,
+          bankAccountVerifiedAt: verifiedAt,
+          updatedAt: verifiedAt,
         })
         .where(eq(schema.profiles.userId, payout.hostId));
     }
+
+    // 4. Audit Log
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: adminId,
+      action: "ADMIN_UPDATE_PAYOUT_BANK",
+      entityType: "PAYOUT",
+      entityId: payoutId,
+      details: JSON.stringify({
+        payoutId,
+        hostId: payout.hostId,
+        previousBank,
+        previousAccountMasked: previousMasked,
+        newBank: verifiedBankName,
+        newAccountMasked: maskAccountNumber(verifiedAccountNumber),
+        resolvedAccountName: verifiedAccountName,
+        updateHostDefaultProfile,
+        adminId,
+      }),
+      createdAt: verifiedAt,
+    });
 
     return updated;
   }

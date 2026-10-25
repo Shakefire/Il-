@@ -56,7 +56,7 @@ export default function BookingModal({
 
   // Handle modal close — cancel pending booking if user abandons before payment
   const handleClose = async () => {
-    if (serverBooking && step === 3 && serverBooking.id && serverBooking.accessToken) {
+    if (serverBooking?.id && serverBooking?.accessToken && step !== 4) {
       // Fire-and-forget cancellation of the abandoned pending booking
       try {
         await fetch(`/api/bookings/${serverBooking.id}/cancel?token=${serverBooking.accessToken}`, {
@@ -87,24 +87,38 @@ export default function BookingModal({
     }
   }, [user, isOpen]);
 
-  // Cancel pending booking on page unload (refresh, back button, tab close)
+  // Cancel pending booking on page unload or browser backward navigation (popstate)
   useEffect(() => {
-    if (!serverBooking?.id || !serverBooking?.accessToken || step !== 3) return;
+    if (!serverBooking?.id || !serverBooking?.accessToken || step === 4) return;
 
-    const cancelPending = () => {
+    const cancelPending = (reason = "Guest left page before completing payment.") => {
       const url = `/api/bookings/${serverBooking.id}/cancel?token=${serverBooking.accessToken}`;
-      const body = JSON.stringify({ reason: "Guest left page before completing payment." });
-      // Use sendBeacon for reliability during page unload
-      if (navigator.sendBeacon) {
+      const body = JSON.stringify({ reason });
+      if (typeof navigator !== "undefined" && navigator.sendBeacon) {
         const blob = new Blob([body], { type: "application/json" });
         navigator.sendBeacon(url, blob);
       } else {
-        fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "x-access-token": serverBooking.accessToken }, body, keepalive: true }).catch(() => {});
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-access-token": serverBooking.accessToken },
+          body,
+          keepalive: true,
+        }).catch(() => {});
       }
     };
 
-    window.addEventListener("beforeunload", cancelPending);
-    return () => window.removeEventListener("beforeunload", cancelPending);
+    const handleBeforeUnload = () => cancelPending("Page refresh or browser close");
+    const handlePopState = () => cancelPending("Browser back navigation");
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("popstate", handlePopState);
+      // If unmounting without reaching step 4 confirmation, ensure pending booking is cancelled
+      cancelPending("Component unmount / navigation");
+    };
   }, [serverBooking, step]);
 
   if (!isOpen) return null;

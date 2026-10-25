@@ -179,6 +179,15 @@ function TripsPageContent() {
         } catch (err: any) {
           if (isMounted) {
             console.warn("Payment auto-verification notice:", err);
+            setPaymentNotice({
+              type: "error",
+              message: "Payment was not completed or could not be verified on Paystack. Any temporary date hold has been released.",
+            });
+            try {
+              const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+              const filtered = stored.filter((b: any) => !b.id?.includes(paymentRef) && b.referenceCode !== paymentRef);
+              localStorage.setItem("ile_guest_bookings", JSON.stringify(filtered));
+            } catch {}
           }
         }
       };

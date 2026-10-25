@@ -1,47 +1,80 @@
 import { NextRequest, NextResponse } from "next/server";
-import { env } from "@/../backend/src/config/env";
+import { BankResolutionService } from "@/../backend/src/modules/payments/bank-resolution.service";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/banks/resolve?account_number=0001234567&bank_code=058
+/**
+ * GET /api/banks/resolve?account_number=0001234567&bank_code=058
+ * Backwards-compatible NUBAN inquiry endpoint delegating to BankResolutionService.
+ */
 export async function GET(req: NextRequest) {
   try {
-    const accountNumber = req.nextUrl.searchParams.get("account_number");
-    const bankCode = req.nextUrl.searchParams.get("bank_code");
+    const accountNumber = req.nextUrl.searchParams.get("account_number") || req.nextUrl.searchParams.get("accountNumber");
+    const bankCode = req.nextUrl.searchParams.get("bank_code") || req.nextUrl.searchParams.get("bankCode");
 
     if (!accountNumber || !bankCode) {
       return NextResponse.json(
-        { error: "Both account_number and bank_code are required." },
+        { resolved: false, error: "Both account_number and bank_code are required." },
         { status: 400 }
       );
     }
 
-    if (!env.PAYSTACK_SECRET_KEY) {
-      return NextResponse.json({ error: "Payment gateway not configured." }, { status: 503 });
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown-ip";
+
+    const result = await BankResolutionService.resolveBankAccount(
+      String(accountNumber),
+      String(bankCode),
+      ip
+    );
+
+    if (!result.resolved) {
+      return NextResponse.json(result, { status: 422 });
     }
 
-    const url = `https://api.paystack.co/bank/resolve?account_number=${encodeURIComponent(accountNumber)}&bank_code=${encodeURIComponent(bankCode)}`;
+    return NextResponse.json(result);
+  } catch (err: any) {
+    console.error("[API /api/banks/resolve] Error:", err.message);
+    return NextResponse.json(
+      { resolved: false, error: err.message || "Failed to resolve account." },
+      { status: 500 }
+    );
+  }
+}
 
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}` },
-    });
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json({ resolved: false, error: "Invalid request body." }, { status: 400 });
+    }
 
-    const body = await res.json();
+    const accountNumber = body.accountNumber || body.account_number;
+    const bankCode = body.bankCode || body.bank_code;
 
-    if (!res.ok || !body.status) {
+    if (!accountNumber || !bankCode) {
       return NextResponse.json(
-        { error: body.message || "Could not resolve account. Please verify your details.", resolved: false },
-        { status: res.status === 422 ? 422 : 400 }
+        { resolved: false, error: "Both accountNumber and bankCode are required." },
+        { status: 400 }
       );
     }
 
-    return NextResponse.json({
-      resolved: true,
-      accountName: body.data.account_name,
-      accountNumber: body.data.account_number,
-      bankId: body.data.bank_id,
-    });
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown-ip";
+
+    const result = await BankResolutionService.resolveBankAccount(
+      String(accountNumber),
+      String(bankCode),
+      ip
+    );
+
+    if (!result.resolved) {
+      return NextResponse.json(result, { status: 422 });
+    }
+
+    return NextResponse.json(result);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message, resolved: false }, { status: 500 });
+    return NextResponse.json(
+      { resolved: false, error: err.message || "Failed to resolve account." },
+      { status: 500 }
+    );
   }
 }

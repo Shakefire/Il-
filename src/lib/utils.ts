@@ -75,4 +75,16 @@ export function calculatePaystackFee(subtotal: number): number {
   return Math.ceil((subtotal + 100) / 0.985) - subtotal;
 }
 
+/**
+ * Masks a Nigerian bank account number for secure display.
+ * e.g. "0123456789" -> "•••• •••• 6789"
+ */
+export function maskAccountNumber(acc?: string | null): string {
+  if (!acc) return "—";
+  const cleaned = acc.trim();
+  if (cleaned.length < 4) return "••••";
+  return `•••• •••• ${cleaned.slice(-4)}`;
+}
+
+
 

@@ -31,7 +31,11 @@ import {
   Landmark,
   Wallet,
   ArrowUpRight,
+  Edit2,
+  X,
+  AlertCircle,
 } from "lucide-react";
+import BankAccountInput, { BankAccountValue } from "@/components/bank/BankAccountInput";
 import { api } from "@/lib/api";
 import { formatNaira } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
@@ -224,6 +228,33 @@ export default function HostDashboardPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [onboardingStatus, setOnboardingStatus] = useState<any>(null);
+
+  // Host Payout Bank Account Edit Modal States
+  const [showEditBankModal, setShowEditBankModal] = useState(false);
+  const [bankModalValue, setBankModalValue] = useState<BankAccountValue | null>(null);
+  const [savingBank, setSavingBank] = useState(false);
+  const [bankSuccessNotice, setBankSuccessNotice] = useState<string | null>(null);
+  const [bankErrorNotice, setBankErrorNotice] = useState<string | null>(null);
+
+  const handleSavePayoutAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bankModalValue?.isResolved || !bankModalValue?.isConfirmed) return;
+    setSavingBank(true);
+    setBankErrorNotice(null);
+    try {
+      const res = await api.updateHostPayoutAccount({
+        bankCode: bankModalValue.bankCode,
+        accountNumber: bankModalValue.accountNumber,
+      });
+      setBankSuccessNotice(res.message || "Payout bank account updated successfully!");
+      setShowEditBankModal(false);
+      loadOnboardingStatus();
+    } catch (err: any) {
+      setBankErrorNotice(err.message || "Failed to update payout account.");
+    } finally {
+      setSavingBank(false);
+    }
+  };
   const [isBannerDismissed, setIsBannerDismissed] = useState(false);
   const [showRemainingStepsModal, setShowRemainingStepsModal] = useState(false);
 
@@ -1481,6 +1512,23 @@ export default function HostDashboardPage() {
         {/* Tab 4: Settlements & Financials */}
         {activeTab === "financials" && (
           <div className="space-y-6">
+            {/* Success Notice if Payout Account Updated */}
+            {bankSuccessNotice && (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs text-emerald-900 animate-in fade-in">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={16} className="text-[#0B5D45] shrink-0" />
+                  <span className="font-semibold">{bankSuccessNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBankSuccessNotice(null)}
+                  className="p-1 text-emerald-700 hover:text-emerald-900 rounded cursor-pointer"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
             {/* Top Cards: Bank info & Platform Policy */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Card 1: Verified Settlement Bank Account */}
@@ -1513,17 +1561,32 @@ export default function HostDashboardPage() {
                     <p className="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
                       No NUBAN bank account connected. Required to receive booking settlements.
                     </p>
-                    <Link
-                      href="/host/onboarding"
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5D45] hover:underline mt-2"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBankErrorNotice(null);
+                        setShowEditBankModal(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0B5D45] hover:underline mt-2 cursor-pointer"
                     >
-                      <span>Add Bank Account in Profile</span>
+                      <span>Connect Settlement Bank</span>
                       <ArrowRight size={13} />
-                    </Link>
+                    </button>
                   </div>
                 )}
-                <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
-                  Direct NGN settlement via Paystack Transfer
+                <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2 flex items-center justify-between">
+                  <span>Direct NGN settlement</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBankErrorNotice(null);
+                      setShowEditBankModal(true);
+                    }}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#0B5D45] hover:text-[#084936] hover:underline cursor-pointer"
+                  >
+                    <Edit2 size={11} />
+                    <span>{onboardingStatus?.profile?.bankAccountNumber ? "Change Account" : "Add Account"}</span>
+                  </button>
                 </div>
               </div>
 
@@ -2288,6 +2351,74 @@ export default function HostDashboardPage() {
             </div>
           )}
         </AnimatePresence>
+
+        {/* ── Modal: Update Host Payout Bank Account (Real Paystack Resolution) ── */}
+        {showEditBankModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 space-y-5 text-[#171717] shadow-2xl border border-[#E7E5E0]">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E7E5E0]">
+                <div className="flex items-center gap-2">
+                  <Landmark size={20} className="text-[#0B5D45]" />
+                  <h3 className="font-bold text-base text-[#171717]">
+                    {onboardingStatus?.profile?.bankAccountNumber ? "Update Settlement Bank Account" : "Add Settlement Bank Account"}
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEditBankModal(false)}
+                  className="p-1.5 text-[#6B6B67] hover:text-[#171717] rounded-lg cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {bankErrorNotice && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center gap-2 animate-in fade-in">
+                  <AlertCircle size={15} className="shrink-0 text-rose-600" />
+                  <span>{bankErrorNotice}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSavePayoutAccount} className="space-y-4">
+                <BankAccountInput
+                  initialBankName={onboardingStatus?.profile?.bankName}
+                  initialBankCode={onboardingStatus?.profile?.bankCode}
+                  initialAccountNumber={onboardingStatus?.profile?.bankAccountNumber}
+                  initialAccountName={onboardingStatus?.profile?.bankAccountName}
+                  showConfirmationStep={true}
+                  onChange={(val) => setBankModalValue(val)}
+                />
+
+                <div className="pt-3 flex items-center justify-end gap-3 border-t border-[#E7E5E0]">
+                  <button
+                    type="button"
+                    onClick={() => setShowEditBankModal(false)}
+                    className="px-4 py-2 border border-[#E7E5E0] rounded-xl text-xs font-semibold text-[#6B6B67] hover:bg-stone-50 transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingBank || !bankModalValue?.isResolved || !bankModalValue?.isConfirmed}
+                    className="px-5 py-2.5 bg-[#0B5D45] hover:bg-[#084936] text-white text-xs font-semibold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {savingBank ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Verifying &amp; Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck size={14} />
+                        <span>Save Verified Account</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </motion.div>
     </div>
   );

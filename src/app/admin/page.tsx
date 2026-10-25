@@ -63,8 +63,9 @@ import {
   Pencil,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatNaira, calculatePaystackFee } from "@/lib/utils";
+import { formatNaira, calculatePaystackFee, maskAccountNumber } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import BankAccountInput, { BankAccountValue } from "@/components/bank/BankAccountInput";
 
 type AdminModule = "dashboard" | "compliance" | "properties" | "financials" | "security";
 
@@ -147,8 +148,12 @@ export default function AdminPortalPage() {
   // Payout bank account edit modal
   const [editPayoutModal, setEditPayoutModal] = useState<any | null>(null);
   const [editBankName, setEditBankName] = useState("");
+  const [editBankCode, setEditBankCode] = useState("");
   const [editAccountNumber, setEditAccountNumber] = useState("");
   const [editAccountName, setEditAccountName] = useState("");
+  const [editBankResolved, setEditBankResolved] = useState(false);
+  const [editBankConfirmed, setEditBankConfirmed] = useState(false);
+  const [revealDisburseAccount, setRevealDisburseAccount] = useState(false);
   const [isUpdatingBank, setIsUpdatingBank] = useState(false);
 
   // Refund modal
@@ -748,15 +753,16 @@ export default function AdminPortalPage() {
 
   const handleUpdatePayoutBank = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editPayoutModal) return;
+    if (!editPayoutModal || !editBankResolved || !editBankConfirmed) return;
     setIsUpdatingBank(true);
     try {
       await api.updateAdminPayoutBank(editPayoutModal.id, {
         bankName: editBankName.trim(),
+        bankCode: editBankCode.trim(),
         accountNumber: editAccountNumber.trim(),
         accountName: editAccountName.trim(),
       });
-      setFinanceActionFeedback(`Payout bank account updated to ${editBankName} (${editAccountNumber})!`);
+      setFinanceActionFeedback(`Payout destination verified and updated to ${editBankName} (${maskAccountNumber(editAccountNumber)})!`);
       setEditPayoutModal(null);
       loadFinanceData();
     } catch (err: any) {
@@ -3593,7 +3599,7 @@ export default function AdminPortalPage() {
                     </div>
                     <div className="flex justify-between items-center py-1 border-b border-border">
                       <span className="text-primary-muted">10-Digit NUBAN Account:</span>
-                      <span className="font-mono font-bold text-primary tracking-wider">{selectedHost.profile?.bankAccountNumber || "—"}</span>
+                      <span className="font-mono font-bold text-primary tracking-wider">{maskAccountNumber(selectedHost.profile?.bankAccountNumber)}</span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-b border-border">
                       <span className="text-primary-muted">Account Holder Name:</span>
@@ -3970,9 +3976,25 @@ export default function AdminPortalPage() {
                 <span className="text-primary-muted">NUBAN Bank:</span>
                 <span className="font-semibold text-primary">{disburseModalPayout.bankName || "Bank"}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex justify-between items-center">
                 <span className="text-primary-muted">Account Number:</span>
-                <span className="font-mono font-bold text-primary tracking-wider">{disburseModalPayout.accountNumber || "—"}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono font-bold text-primary tracking-wider">
+                    {revealDisburseAccount
+                      ? disburseModalPayout.accountNumber || "—"
+                      : maskAccountNumber(disburseModalPayout.accountNumber)}
+                  </span>
+                  {disburseModalPayout.accountNumber && (
+                    <button
+                      type="button"
+                      onClick={() => setRevealDisburseAccount((prev) => !prev)}
+                      className="text-[10px] text-accent hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Eye size={12} />
+                      <span>{revealDisburseAccount ? "Hide" : "Reveal"}</span>
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="flex justify-between">
                 <span className="text-primary-muted">Account Name:</span>
@@ -4078,50 +4100,23 @@ export default function AdminPortalPage() {
             </div>
 
             <form onSubmit={handleUpdatePayoutBank} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
-                  Bank Name
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={editBankName}
-                  onChange={(e) => setEditBankName(e.target.value)}
-                  placeholder="e.g. Guaranty Trust Bank, Access Bank, Zenith Bank"
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
-                />
-              </div>
+              <BankAccountInput
+                initialBankName={editPayoutModal.bankName}
+                initialBankCode={editPayoutModal.bankCode}
+                initialAccountNumber={editPayoutModal.accountNumber}
+                initialAccountName={editPayoutModal.accountName}
+                showConfirmationStep={true}
+                onChange={(val) => {
+                  setEditBankName(val.bankName);
+                  setEditBankCode(val.bankCode);
+                  setEditAccountNumber(val.accountNumber);
+                  setEditAccountName(val.accountName);
+                  setEditBankResolved(val.isResolved);
+                  setEditBankConfirmed(val.isConfirmed);
+                }}
+              />
 
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
-                  10-Digit NUBAN Account Number
-                </label>
-                <input
-                  required
-                  type="text"
-                  maxLength={10}
-                  value={editAccountNumber}
-                  onChange={(e) => setEditAccountNumber(e.target.value.replace(/\D/g, ""))}
-                  placeholder="0123456789"
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary font-mono text-xs focus:outline-none focus:border-accent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
-                  Beneficiary Account Name
-                </label>
-                <input
-                  required
-                  type="text"
-                  value={editAccountName}
-                  onChange={(e) => setEditAccountName(e.target.value)}
-                  placeholder="e.g. John Chukwuemeka Adebayo"
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
-                />
-              </div>
-
-              <div className="pt-2 flex items-center justify-end gap-3">
+              <div className="pt-2 flex items-center justify-end gap-3 border-t border-border">
                 <button
                   type="button"
                   onClick={() => setEditPayoutModal(null)}
@@ -4131,18 +4126,18 @@ export default function AdminPortalPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isUpdatingBank || !editAccountNumber || !editBankName}
+                  disabled={isUpdatingBank || !editBankResolved || !editBankConfirmed}
                   className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
                 >
                   {isUpdatingBank ? (
                     <>
                       <Loader2 size={13} className="animate-spin" />
-                      <span>Saving...</span>
+                      <span>Verifying &amp; Saving...</span>
                     </>
                   ) : (
                     <>
-                      <CheckCircle2 size={14} />
-                      <span>Save Bank Details</span>
+                      <ShieldCheck size={14} />
+                      <span>Update Verified Payout Bank</span>
                     </>
                   )}
                 </button>

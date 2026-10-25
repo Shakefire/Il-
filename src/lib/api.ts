@@ -203,6 +203,49 @@ export const api = {
     return res.json();
   },
 
+  async getHostPayoutAccount() {
+    const res = await fetch("/api/host/payout-account", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) throw new Error("Failed to load payout account");
+    return res.json();
+  },
+
+  async updateHostPayoutAccount(data: { bankCode: string; accountNumber: string }) {
+    const res = await fetch("/api/host/payout-account", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to update payout account");
+    return body;
+  },
+
+  async getBanks() {
+    const res = await fetch("/api/banks");
+    if (!res.ok) throw new Error("Failed to load supported Nigerian banks");
+    return res.json();
+  },
+
+  async resolveBankAccount(accountNumber: string, bankCode: string) {
+    const res = await fetch("/api/bank-accounts/resolve", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ accountNumber, bankCode }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not resolve bank account details");
+    return body;
+  },
+
   async getHostProperties() {
     const res = await fetch("/api/host/properties", {
       headers: getAuthHeader(),

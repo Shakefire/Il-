@@ -23,6 +23,7 @@ import { api } from "@/lib/api";
 import { compressFile } from "@/lib/imageCompression";
 import DocumentPreviewModal from "@/components/onboarding/DocumentPreviewModal";
 import StepMotion from "@/components/onboarding/StepMotion";
+import BankAccountInput from "@/components/bank/BankAccountInput";
 
 interface PaystackBank {
   name: string;
@@ -51,19 +52,6 @@ export default function AuthorityStepPage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
-  // Bank fetching
-  const [banks, setBanks] = useState<PaystackBank[]>([]);
-  const [loadingBanks, setLoadingBanks] = useState(true);
-  const [bankSearch, setBankSearch] = useState("");
-
-  // Account resolution
-  const [resolving, setResolving] = useState(false);
-  const [resolvedName, setResolvedName] = useState<string | null>(null);
-  const [resolveError, setResolveError] = useState<string | null>(null);
-
-  // Selected bank code (for API calls)
-  const [selectedBankCode, setSelectedBankCode] = useState<string>("");
-
   // Document preview modal
   const [previewModal, setPreviewModal] = useState<{
     isOpen: boolean;
@@ -83,58 +71,6 @@ export default function AuthorityStepPage() {
       updateData({ authorityDocType: "utility_bill" });
     }
   }, [data.authorityDocType, updateData]);
-
-  // Fetch banks from Paystack on mount
-  useEffect(() => {
-    async function fetchBanks() {
-      try {
-        const res = await fetch("/api/banks");
-        const data = await res.json();
-        if (data.banks) {
-          setBanks(data.banks.sort((a: PaystackBank, b: PaystackBank) => a.name.localeCompare(b.name)));
-        }
-      } catch {
-        console.warn("Failed to fetch banks");
-      } finally {
-        setLoadingBanks(false);
-      }
-    }
-    fetchBanks();
-  }, []);
-
-  // Auto-resolve NUBAN when bank + 10-digit account number are set
-  useEffect(() => {
-    if (!selectedBankCode || !data.bankAccountNumber || data.bankAccountNumber.length !== 10) {
-      setResolvedName(null);
-      setResolveError(null);
-      return;
-    }
-
-    let cancelled = false;
-    async function resolve() {
-      setResolving(true);
-      setResolvedName(null);
-      setResolveError(null);
-      try {
-        const res = await fetch(`/api/banks/resolve?account_number=${data.bankAccountNumber}&bank_code=${selectedBankCode}`);
-        const body = await res.json();
-        if (cancelled) return;
-        if (body.resolved) {
-          setResolvedName(body.accountName);
-          updateData({ bankAccountName: body.accountName });
-        } else {
-          setResolveError(body.error || "Could not verify account");
-        }
-      } catch {
-        if (!cancelled) setResolveError("Network error verifying account");
-      } finally {
-        if (!cancelled) setResolving(false);
-      }
-    }
-
-    const timer = setTimeout(resolve, 400);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [selectedBankCode, data.bankAccountNumber]);
 
   // Validation functions
   const validateField = (field: string) => {
@@ -305,7 +241,7 @@ export default function AuthorityStepPage() {
     }
 
     if (!data.bankAccountName || data.bankAccountName.trim().length < 3) {
-      currentErrors.bankAccountName = "Please enter the account holder name registered with your bank.";
+      currentErrors.bankAccountName = "Please wait for your Nigerian bank account to be resolved and verified by Paystack.";
     }
 
     setErrors(currentErrors);
@@ -532,187 +468,42 @@ export default function AuthorityStepPage() {
             </p>
           </div>
 
-          <div className="space-y-4">
-            {/* Field 1: Bank Name Selector (Full width) */}
-            <div>
-              <label htmlFor="bankName" className="block text-xs font-semibold text-[#111827] mb-1.5">
-                Bank Name <span className="text-[#065F46]">*</span>
-              </label>
-              <div className="relative">
-                <select
-                  id="bankName"
-                  value={data.bankName || ""}
-                  onChange={(e) => {
-                    const bank = banks.find((b) => b.name === e.target.value);
-                    updateData({ bankName: e.target.value, bankCode: bank?.code || "" });
-                    setSelectedBankCode(bank?.code || "");
-                    if (errors.bankName) {
-                      setErrors((prev) => {
-                        const next = { ...prev };
-                        delete next.bankName;
-                        return next;
-                      });
-                    }
-                  }}
-                  onBlur={() => handleBlur("bankName")}
-                  disabled={loadingBanks}
-                  className="w-full h-11 px-3.5 pr-10 rounded-lg border border-[#D1D5DB] hover:border-[#9CA3AF] bg-white text-sm text-[#111827] font-medium focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 outline-none appearance-none cursor-pointer transition-colors duration-150"
-                >
-                  <option value="" disabled>
-                    {loadingBanks ? "Loading banks…" : "Select your bank"}
-                  </option>
-                  {banks.map((bank) => (
-                    <option key={bank.code} value={bank.name}>
-                      {bank.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={16}
-                  className="text-[#6B7280] pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2"
-                />
-              </div>
+          <BankAccountInput
+            initialBankName={data.bankName}
+            initialBankCode={data.bankCode}
+            initialAccountNumber={data.bankAccountNumber}
+            initialAccountName={data.bankAccountName}
+            showConfirmationStep={false}
+            onChange={(val) => {
+              updateData({
+                bankName: val.bankName,
+                bankCode: val.bankCode,
+                bankAccountNumber: val.accountNumber,
+                bankAccountName: val.accountName,
+              });
+              if (val.isResolved) {
+                setErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.bankName;
+                  delete next.bankAccountNumber;
+                  delete next.bankAccountName;
+                  return next;
+                });
+              }
+            }}
+          />
 
-              {touched.bankName && errors.bankName && (
-                <p role="alert" className="mt-1.5 text-xs text-rose-600 font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
-                  <AlertCircle size={13} className="shrink-0" />
-                  <span>{errors.bankName}</span>
-                </p>
-              )}
-            </div>
+          {touched.bankAccountName && errors.bankAccountName && (
+            <p role="alert" className="text-xs text-rose-600 font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+              <AlertCircle size={13} className="shrink-0" />
+              <span>{errors.bankAccountName}</span>
+            </p>
+          )}
 
-            {/* Field 2 & 3: Account Number & Account Holder Name (2-column on desktop, stacked on mobile) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {/* Account Number */}
-              <div>
-                <label htmlFor="bankAccountNumber" className="block text-xs font-semibold text-[#111827] mb-1.5">
-                  10-Digit Account Number <span className="text-[#065F46]">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    id="bankAccountNumber"
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={10}
-                    value={data.bankAccountNumber || ""}
-                    onChange={(e) => {
-                      const cleaned = e.target.value.replace(/\D/g, "");
-                      updateData({ bankAccountNumber: cleaned });
-                      setResolvedName(null);
-                      setResolveError(null);
-                      if (cleaned.length === 10 && errors.bankAccountNumber) {
-                        setErrors((prev) => {
-                          const next = { ...prev };
-                          delete next.bankAccountNumber;
-                          return next;
-                        });
-                      }
-                    }}
-                    onBlur={() => handleBlur("bankAccountNumber")}
-                    placeholder="e.g. 0123456789"
-                    aria-required="true"
-                    aria-invalid={Boolean(touched.bankAccountNumber && errors.bankAccountNumber)}
-                    className={`w-full h-11 px-3.5 rounded-lg border text-sm bg-white outline-none font-mono tracking-wider transition-colors duration-150 ${
-                      touched.bankAccountNumber && errors.bankAccountNumber
-                        ? "border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15 text-rose-900"
-                        : "border-[#D1D5DB] text-[#111827] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15"
-                    }`}
-                  />
-                  {data.bankAccountNumber && data.bankAccountNumber.length === 10 && (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4.5 h-4.5 rounded-full bg-[#065F46] text-white flex items-center justify-center shadow-xs animate-in fade-in zoom-in-90 duration-150">
-                      <Check size={11} strokeWidth={3} />
-                    </div>
-                  )}
-                </div>
-
-                {touched.bankAccountNumber && errors.bankAccountNumber ? (
-                  <p role="alert" className="mt-1.5 text-xs text-rose-600 font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
-                    <AlertCircle size={13} className="shrink-0" />
-                    <span>{errors.bankAccountNumber}</span>
-                  </p>
-                ) : (
-                  <p className="mt-1 text-[11px] text-[#6B7280]">
-                    10-digit Nigerian NUBAN
-                  </p>
-                )}
-              </div>
-
-              {/* Account Holder Name */}
-              <div>
-                <label htmlFor="bankAccountName" className="block text-xs font-semibold text-[#111827] mb-1.5">
-                  Account Holder Name <span className="text-[#065F46]">*</span>
-                </label>
-                <div className="relative">
-                  <input
-                    id="bankAccountName"
-                    type="text"
-                    value={resolvedName || data.bankAccountName || ""}
-                    onChange={(e) => {
-                      if (!resolvedName) {
-                        updateData({ bankAccountName: e.target.value });
-                        if (e.target.value.trim().length >= 3 && errors.bankAccountName) {
-                          setErrors((prev) => {
-                            const next = { ...prev };
-                            delete next.bankAccountName;
-                            return next;
-                          });
-                        }
-                      }
-                    }}
-                    readOnly={!!resolvedName}
-                    onBlur={() => handleBlur("bankAccountName")}
-                    placeholder={resolving ? "Verifying…" : "e.g. Chukwuma Adeleke"}
-                    aria-required="true"
-                    aria-invalid={Boolean(touched.bankAccountName && errors.bankAccountName)}
-                    className={`w-full h-11 px-3.5 pr-10 rounded-lg border text-sm outline-none transition-colors duration-150 ${
-                      resolvedName
-                        ? "border-[#065F46] bg-[#F0FDF9] text-[#065F46] font-medium"
-                        : touched.bankAccountName && errors.bankAccountName
-                          ? "border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15 text-rose-900 bg-white"
-                          : "border-[#D1D5DB] text-[#111827] hover:border-[#9CA3AF] focus:border-[#065F46] focus:ring-2 focus:ring-[#065F46]/15 bg-white"
-                    }`}
-                  />
-                  {resolving && (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                      <Loader2 size={16} className="animate-spin text-[#065F46]" />
-                    </div>
-                  )}
-                  {resolvedName && !resolving && (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-[#065F46] text-white flex items-center justify-center animate-in fade-in zoom-in-90 duration-150">
-                      <Check size={12} strokeWidth={3} />
-                    </div>
-                  )}
-                </div>
-
-                {resolveError ? (
-                  <p className="mt-1.5 text-xs text-amber-600 font-medium flex items-center gap-1.5">
-                    <AlertCircle size={13} className="shrink-0" />
-                    <span>{resolveError}</span>
-                  </p>
-                ) : resolvedName ? (
-                  <p className="mt-1 text-[11px] text-[#065F46] font-medium">
-                    ✓ Verified by Paystack
-                  </p>
-                ) : touched.bankAccountName && errors.bankAccountName ? (
-                  <p role="alert" className="mt-1.5 text-xs text-rose-600 font-medium flex items-center gap-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
-                    <AlertCircle size={13} className="shrink-0" />
-                    <span>{errors.bankAccountName}</span>
-                  </p>
-                ) : (
-                  <p className="mt-1 text-[11px] text-[#6B7280]">
-                    {selectedBankCode && data.bankAccountNumber?.length === 10
-                      ? "Verifying with your bank…"
-                      : "Auto-verified when bank and account number are entered"}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {/* Quiet Payout Notice */}
-            <div className="pt-2 flex items-start gap-2 text-[12px] text-[#6B7280]">
-              <ShieldCheck size={16} className="text-[#065F46] shrink-0 mt-0.5" />
-              <span>Payouts are sent to this account within 24 hours after a guest checks in.</span>
-            </div>
+          {/* Quiet Payout Notice */}
+          <div className="pt-2 flex items-start gap-2 text-[12px] text-[#6B7280]">
+            <ShieldCheck size={16} className="text-[#065F46] shrink-0 mt-0.5" />
+            <span>Payouts are sent to this account within 24 hours after a guest checks in.</span>
           </div>
         </div>
 

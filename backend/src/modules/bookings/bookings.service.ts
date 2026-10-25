@@ -132,7 +132,8 @@ export const bookingsService = {
           )
         );
 
-      // Filter out stale blocks from abandoned PAYMENT_PENDING bookings older than 10 mins
+      // Filter out stale blocks from abandoned PAYMENT_PENDING bookings older than 5 mins
+      // or from the same guest re-attempting / refreshing
       const now = Date.now();
       const activeConflicts: typeof potentialConflicts = [];
 
@@ -143,30 +144,55 @@ export const bookingsService = {
         }
 
         const [linkedBooking] = await tx
-          .select({ status: schema.bookings.status, createdAt: schema.bookings.createdAt })
+          .select({
+            status: schema.bookings.status,
+            createdAt: schema.bookings.createdAt,
+            guestEmail: schema.bookings.guestEmail,
+            guestId: schema.bookings.guestId,
+          })
           .from(schema.bookings)
           .where(eq(schema.bookings.id, block.bookingId))
           .limit(1);
 
         if (!linkedBooking) {
-          activeConflicts.push(block);
-          continue;
-        }
-
-        // Cancelled bookings do not block
-        if (linkedBooking.status === "CANCELLED") {
+          // Orphaned block without booking — clean up immediately
           await tx
             .delete(schema.availabilityBlocks)
             .where(eq(schema.availabilityBlocks.id, block.id));
           continue;
         }
 
-        // Unpaid bookings older than 10 minutes expire
-        const ageMs = now - new Date(linkedBooking.createdAt).getTime();
-        if (linkedBooking.status === "PAYMENT_PENDING" && ageMs > 10 * 60 * 1000) {
+        // Cancelled or Failed bookings do not block
+        if (linkedBooking.status === "CANCELLED" || linkedBooking.status === "FAILED") {
+          await tx
+            .delete(schema.availabilityBlocks)
+            .where(eq(schema.availabilityBlocks.id, block.id));
+          continue;
+        }
+
+        // Check if this pending booking belongs to the SAME guest attempting a re-booking / refresh
+        const isSameGuest =
+          (linkedBooking.guestEmail && linkedBooking.guestEmail.toLowerCase() === parsed.guestEmail.toLowerCase().trim()) ||
+          (session?.userId && linkedBooking.guestId === session.userId);
+
+        if (linkedBooking.status === "PAYMENT_PENDING" && isSameGuest) {
+          // Supersede the guest's previous abandoned pending booking and release its block
           await tx
             .update(schema.bookings)
-            .set({ status: "CANCELLED", updatedAt: new Date() })
+            .set({ status: "CANCELLED", cancellationReason: "Superseded by new booking attempt.", updatedAt: new Date() })
+            .where(eq(schema.bookings.id, block.bookingId));
+          await tx
+            .delete(schema.availabilityBlocks)
+            .where(eq(schema.availabilityBlocks.id, block.id));
+          continue;
+        }
+
+        // Unpaid bookings older than 5 minutes expire
+        const ageMs = now - new Date(linkedBooking.createdAt).getTime();
+        if (linkedBooking.status === "PAYMENT_PENDING" && ageMs > 5 * 60 * 1000) {
+          await tx
+            .update(schema.bookings)
+            .set({ status: "CANCELLED", cancellationReason: "Expired unpaid booking hold.", updatedAt: new Date() })
             .where(eq(schema.bookings.id, block.bookingId));
           await tx
             .delete(schema.availabilityBlocks)
@@ -423,30 +449,64 @@ export const bookingsService = {
 
     const canonicalPropertyId = prop ? prop.id : propertyId;
 
-    const conflicting = await db
-      .select()
+    // Only count blocks where booking is CONFIRMED or block is a manual host block (no bookingId)
+    // Clean up any orphaned, cancelled, or expired holds along the way
+    const blocks = await db
+      .select({
+        id: schema.availabilityBlocks.id,
+        bookingId: schema.availabilityBlocks.bookingId,
+        bookingStatus: schema.bookings.status,
+        bookingCreatedAt: schema.bookings.createdAt,
+      })
       .from(schema.availabilityBlocks)
+      .leftJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
       .where(
         and(
           eq(schema.availabilityBlocks.propertyId, canonicalPropertyId),
-          and(
-            lt(schema.availabilityBlocks.startDate, checkOutDate),
-            gt(schema.availabilityBlocks.endDate, checkInDate)
-          )
+          lt(schema.availabilityBlocks.startDate, checkOutDate),
+          gt(schema.availabilityBlocks.endDate, checkInDate)
         )
       );
+
+    const now = Date.now();
+    const activeConflicts = [];
+
+    for (const b of blocks) {
+      if (!b.bookingId) {
+        // Manual host block
+        activeConflicts.push(b);
+        continue;
+      }
+      if (!b.bookingStatus || b.bookingStatus === "CANCELLED" || b.bookingStatus === "FAILED") {
+        // Clean up orphaned or cancelled block
+        await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, b.id));
+        continue;
+      }
+      if (b.bookingStatus === "PAYMENT_PENDING") {
+        const ageMs = now - (b.bookingCreatedAt ? new Date(b.bookingCreatedAt).getTime() : 0);
+        if (ageMs > 5 * 60 * 1000) {
+          // Expired pending booking hold
+          await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, b.id));
+          await db.update(schema.bookings).set({ status: "CANCELLED", updatedAt: new Date() }).where(eq(schema.bookings.id, b.bookingId));
+          continue;
+        }
+      }
+      if (b.bookingStatus === "CONFIRMED") {
+        activeConflicts.push(b);
+      }
+    }
 
     const checkIn = new Date(checkInDate + "T00:00:00Z");
     const checkOut = new Date(checkOutDate + "T00:00:00Z");
     const totalNights = Math.max(1, Math.round((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24)));
 
     return {
-      available: conflicting.length === 0,
+      available: activeConflicts.length === 0,
       propertyId: canonicalPropertyId,
       checkInDate,
       checkOutDate,
       totalNights,
-      conflictsCount: conflicting.length,
+      conflictsCount: activeConflicts.length,
     };
   },
 

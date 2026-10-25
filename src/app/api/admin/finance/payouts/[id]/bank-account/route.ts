@@ -17,8 +17,8 @@ export async function PATCH(
 
   try {
     const body = await req.json();
-    if (!body.bankName || !body.accountNumber || !body.accountName) {
-      return NextResponse.json({ error: "Bank name, account number, and account name are required" }, { status: 400 });
+    if (!body.accountNumber) {
+      return NextResponse.json({ error: "Account number is required" }, { status: 400 });
     }
 
     const updated = await FinanceService.updatePayoutBankAccount(session.userId, {

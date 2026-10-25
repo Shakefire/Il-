@@ -28,36 +28,7 @@ import { authApi } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { compressFile } from "@/lib/imageCompression";
 import FintechLivenessModal from "@/components/FintechLivenessModal";
-
-const NIGERIAN_BANKS = [
-  "Access Bank",
-  "Citibank Nigeria",
-  "Ecobank Nigeria",
-  "Fidelity Bank",
-  "First Bank of Nigeria",
-  "First City Monument Bank (FCMB)",
-  "Guaranty Trust Bank (GTBank)",
-  "Heritage Bank",
-  "Jaiz Bank",
-  "Keystone Bank",
-  "Kuda Bank",
-  "Moniepoint MFB",
-  "OPay",
-  "Palmpay",
-  "Polaris Bank",
-  "Providus Bank",
-  "Stanbic IBTC Bank",
-  "Standard Chartered Bank",
-  "Sterling Bank",
-  "SunTrust Bank",
-  "Taj Bank",
-  "Titan Trust Bank",
-  "Union Bank of Nigeria",
-  "United Bank for Africa (UBA)",
-  "Unity Bank",
-  "Wema Bank / ALAT",
-  "Zenith Bank",
-];
+import BankAccountInput from "@/components/bank/BankAccountInput";
 
 const NIGERIAN_CITIES = [
   "Abuja",
@@ -152,7 +123,8 @@ export default function OwnerOnboardingWizard() {
   // Stage 4 State: Authority Proof & Nigerian Bank Details
   const [authorityDocType, setAuthorityDocType] = useState("deed_of_ownership");
   const [authorityDocUrl, setAuthorityDocUrl] = useState("");
-  const [bankName, setBankName] = useState("Guaranty Trust Bank (GTBank)");
+  const [bankName, setBankName] = useState("");
+  const [bankCode, setBankCode] = useState("");
   const [bankAccountNumber, setBankAccountNumber] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
 
@@ -215,7 +187,8 @@ export default function OwnerOnboardingWizard() {
             setSelfieUrl(res.profile.selfieUrl || "");
             setAuthorityDocType(res.profile.authorityDocType || "deed_of_ownership");
             setAuthorityDocUrl(res.profile.authorityDocUrl || "");
-            setBankName(res.profile.bankName || "Guaranty Trust Bank (GTBank)");
+            setBankName(res.profile.bankName || "");
+            setBankCode(res.profile.bankCode || "");
             setBankAccountNumber(res.profile.bankAccountNumber || "");
             setBankAccountName(res.profile.bankAccountName || "");
 
@@ -468,6 +441,7 @@ export default function OwnerOnboardingWizard() {
         authorityDocType,
         authorityDocUrl,
         bankName,
+        bankCode,
         bankAccountNumber,
         bankAccountName,
       });
@@ -1206,50 +1180,19 @@ export default function OwnerOnboardingWizard() {
                   Earnings from confirmed reservations are disbursed directly to this Nigerian bank account via NIBSS / Paystack.
                 </p>
 
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Select Bank *</label>
-                    <select
-                      value={bankName}
-                      onChange={(e) => setBankName(e.target.value)}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none bg-white"
-                    >
-                      {NIGERIAN_BANKS.map((b) => (
-                        <option key={b} value={b}>
-                          {b}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        10-Digit NUBAN Account Number *
-                      </label>
-                      <input
-                        type="text"
-                        maxLength={10}
-                        required
-                        value={bankAccountNumber}
-                        onChange={(e) => setBankAccountNumber(e.target.value.replace(/\D/g, ""))}
-                        placeholder="0123456789"
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm font-mono tracking-wider focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Account Holder Name *</label>
-                      <input
-                        type="text"
-                        required
-                        value={bankAccountName}
-                        onChange={(e) => setBankAccountName(e.target.value)}
-                        placeholder="Must match your verified identity"
-                        className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-[#0B5D45] focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                </div>
+                <BankAccountInput
+                  initialBankName={bankName}
+                  initialBankCode={bankCode}
+                  initialAccountNumber={bankAccountNumber}
+                  initialAccountName={bankAccountName}
+                  showConfirmationStep={false}
+                  onChange={(val) => {
+                    setBankName(val.bankName);
+                    setBankCode(val.bankCode);
+                    setBankAccountNumber(val.accountNumber);
+                    setBankAccountName(val.accountName);
+                  }}
+                />
               </div>
 
               <div className="flex items-center justify-between pt-4 border-t border-gray-100">

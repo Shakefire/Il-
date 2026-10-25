@@ -31,6 +31,7 @@ export interface OnboardingState {
   authorityDocType: string;
   authorityDocUrl: string;
   bankName: string;
+  bankCode: string;
   bankAccountNumber: string;
   bankAccountName: string;
 
@@ -77,7 +78,8 @@ const defaultState: OnboardingState = {
 
   authorityDocType: "utility_bill",
   authorityDocUrl: "",
-  bankName: "Guaranty Trust Bank (GTBank)",
+  bankName: "",
+  bankCode: "",
   bankAccountNumber: "",
   bankAccountName: "",
 
@@ -157,9 +159,10 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
             idFrontUrl: profile.identityDocumentUrl || profile.idFrontUrl || localDraft.idFrontUrl || "",
             idBackUrl: profile.idDocumentBackUrl || profile.idBackUrl || localDraft.idBackUrl || "",
             selfieUrl: profile.selfieUrl || localDraft.selfieUrl || "",
-            authorityDocType: profile.authorityDocType || localDraft.authorityDocType || "deed_of_ownership",
+            authorityDocType: profile.authorityDocType || localDraft.authorityDocType || "utility_bill",
             authorityDocUrl: profile.authorityDocUrl || localDraft.authorityDocUrl || "",
-            bankName: profile.bankName || localDraft.bankName || "Guaranty Trust Bank (GTBank)",
+            bankName: profile.bankName || localDraft.bankName || "",
+            bankCode: profile.bankCode || localDraft.bankCode || "",
             bankAccountNumber: profile.bankAccountNumber || localDraft.bankAccountNumber || "",
             bankAccountName: profile.bankAccountName || localDraft.bankAccountName || "",
             verificationStatus: res.verificationStatus || "REGISTERED",
@@ -266,6 +269,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
           authorityDocType: data.authorityDocType,
           authorityDocUrl: data.authorityDocUrl,
           bankName: data.bankName,
+          bankCode: data.bankCode,
           bankAccountNumber: data.bankAccountNumber,
           bankAccountName: data.bankAccountName,
         });
