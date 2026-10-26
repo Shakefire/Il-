@@ -111,7 +111,7 @@ export const hostsService = {
       unitNumber: parsed.unitNumber || null,
       contactName: parsed.contactName || (user ? `${user.firstName} ${user.lastName}` : "Host"),
       contactPhone: parsed.contactPhone || user?.phone || "+2348000000000",
-      contactEmail: parsed.contactEmail || user?.email || "host@ile.ng",
+      contactEmail: parsed.contactEmail || user?.email || "host@ilestays.ng",
       checkInInstructions: parsed.checkInInstructions || null,
       accessGateCode: parsed.accessGateCode || null,
     });

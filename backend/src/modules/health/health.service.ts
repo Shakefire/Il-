@@ -74,8 +74,8 @@ export async function checkSystemHealth(): Promise<ServiceHealthStatus> {
   // 3. Resend Email check
   let resendStatus: "CONFIGURED & TESTED" | "CONFIGURED" | "NOT_CONFIGURED" | "ERROR" = "NOT_CONFIGURED";
   let resendError: string | undefined;
-  const emailDomain = env.RESEND_DOMAIN || "notifications.9jaroommate.com";
-  if (env.EMAIL_API_KEY) {
+  const emailDomain = env.RESEND_DOMAIN || "notifications.ilestays.ng";
+  if (env.EMAIL_API_KEY || env.RESEND_API_KEY) {
     const resendProbe = await testResendConnectivity();
     if (resendProbe.connected) {
       resendStatus = "CONFIGURED & TESTED";

@@ -381,7 +381,7 @@ export default function BecomeAHostPage() {
                 : status === "REJECTED"
                 ? hostProfile?.reviewFeedback || "Your host application was not approved. Please update your details and resubmit for review."
                 : status === "SUSPENDED"
-                ? "Your host partner account has been suspended by administration. Please contact support@ile.ng for assistance."
+                ? "Your host partner account has been suspended by administration. Please contact support@ilestays.ng for assistance."
                 : "To maintain quality standards and guest security across Nigeria, all property partners must complete identity verification and submit proof of ownership or management authority before listing."}
             </p>
           </div>
@@ -404,7 +404,7 @@ export default function BecomeAHostPage() {
               </div>
             ) : status === "SUSPENDED" ? (
               <a
-                href="mailto:support@ile.ng"
+                href="mailto:support@ilestays.ng"
                 className="w-full py-3 px-4 rounded-xl bg-stone-900 text-white hover:bg-black active:scale-[0.99] text-sm font-semibold transition-all text-center"
               >
                 Contact Support

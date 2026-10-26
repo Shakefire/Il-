@@ -183,7 +183,7 @@ async function runTests() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      email: "admin@ile.ng",
+      email: "admin@ilestays.ng",
       password: "Password123!",
     }),
   });

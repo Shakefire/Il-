@@ -77,47 +77,13 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // POST /api/bookings/:id/pay — Process payment (legacy / fallback)
-  fastify.post("/:id/pay", async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const { method, accessToken } = (request.body || {}) as { method?: string; accessToken?: string };
-
-    const headerToken = request.headers["x-access-token"] as string | undefined;
-    const providedAccessToken = accessToken || headerToken;
-
-    let isAuthorized = false;
-
-    if (providedAccessToken) {
-      try {
-        const bookingData = await bookingsService.getBooking(id);
-        if (bookingData.booking.accessToken === providedAccessToken) {
-          isAuthorized = true;
-        }
-      } catch { /* booking not found */ }
-    }
-
-    if (!isAuthorized) {
-      const session = extractSession(request);
-      if (session) {
-        try {
-          const bookingData = await bookingsService.getBooking(id);
-          if (session.userId === bookingData.booking.guestId || session.role === "admin") {
-            isAuthorized = true;
-          }
-        } catch { /* booking not found */ }
-      }
-    }
-
-    if (!isAuthorized) {
-      return reply.status(401).send({ error: "Unauthorized: Provide a valid access token or log in." });
-    }
-
-    try {
-      const result = await bookingsService.processPayment(id, method || "CARD", providedAccessToken || "");
-      return reply.send(result);
-    } catch (error: any) {
-      return reply.status(400).send({ error: error.message });
-    }
+  // POST /api/bookings/:id/pay — DECOMMISSIONED (P0 Security Remediation)
+  // Direct payment bypass is permanently disabled. Payments must be initialized via /api/payments/initialize
+  // and authoritatively verified through Paystack gateway / webhooks.
+  fastify.post("/:id/pay", async (_request, reply) => {
+    return reply.status(410).send({
+      error: "Endpoint decommissioned. Direct payment bypassing Paystack is forbidden. All payments must be verified via Paystack gateway.",
+    });
   });
 
   // GET /api/bookings/:id — Get booking details

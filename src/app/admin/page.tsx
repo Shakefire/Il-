@@ -60,6 +60,10 @@ import {
   ArrowRight,
   TrendingUp,
   Trash2,
+  BookOpen,
+  BarChart3,
+  ClipboardList,
+  History,
   Pencil,
 } from "lucide-react";
 import { api } from "@/lib/api";
@@ -128,7 +132,7 @@ export default function AdminPortalPage() {
   const [downloadSuccessNotice, setDownloadSuccessNotice] = useState<string | null>(null);
 
   // ── Financial Center States ──
-  const [financeSubTab, setFinanceSubTab] = useState<"overview" | "transactions" | "payouts" | "refunds" | "records">("overview");
+  const [financeSubTab, setFinanceSubTab] = useState<"overview" | "transactions" | "payouts" | "refunds" | "settlements" | "ledger" | "reports" | "audit" | "reconciliation" | "records">("overview");
   const [financialSummary, setFinancialSummary] = useState<any>(null);
   const [trialBalance, setTrialBalance] = useState<any>(null);
   const [payoutsQueue, setPayoutsQueue] = useState<any[]>([]);
@@ -139,11 +143,43 @@ export default function AdminPortalPage() {
   const [transactionSearchQuery, setTransactionSearchQuery] = useState("");
   const [transactionStatusFilter, setTransactionStatusFilter] = useState("ALL");
 
+  // Ledger Explorer
+  const [journalsLoading, setJournalsLoading] = useState(false);
+  const [selectedJournal, setSelectedJournal] = useState<any>(null);
+
+  // Settlements
+  const [settlementsReport, setSettlementsReport] = useState<any[]>([]);
+  const [settlementsLoading, setSettlementsLoading] = useState(false);
+
+  // Reports
+  const [collectionsReport, setCollectionsReport] = useState<any>(null);
+  const [payoutsReport, setPayoutsReport] = useState<any>(null);
+  const [refundsReport, setRefundsReport] = useState<any>(null);
+  const [reportsSubTab, setReportsSubTab] = useState<"collections" | "payouts" | "refunds">("collections");
+  const [reportDateFrom, setReportDateFrom] = useState("");
+  const [reportDateTo, setReportDateTo] = useState("");
+  const [reportsLoading, setReportsLoading] = useState(false);
+
+  // Audit Trail
+  const [auditLogData, setAuditLogData] = useState<any[]>([]);
+  const [auditLogLoading, setAuditLogLoading] = useState(false);
+
+  // Reconciliation
+  const [reconciliationData, setReconciliationData] = useState<any>(null);
+  const [reconciliationLoading, setReconciliationLoading] = useState(false);
+
   // Payout disburse modal
   const [disburseModalPayout, setDisburseModalPayout] = useState<any | null>(null);
+  const [disburseMethod, setDisburseMethod] = useState<"automated" | "manual">("automated");
   const [disburseTransferRef, setDisburseTransferRef] = useState("");
   const [disburseNotes, setDisburseNotes] = useState("");
   const [isDisbursing, setIsDisbursing] = useState(false);
+
+  // Paystack Balance & Settlement Automation
+  const [paystackBalance, setPaystackBalance] = useState<{ balanceNaira: number; currency: string } | null>(null);
+  const [loadingBalance, setLoadingBalance] = useState(false);
+  const [isProcessingSettlements, setIsProcessingSettlements] = useState(false);
+  const [showSettlementConfirmModal, setShowSettlementConfirmModal] = useState(false);
 
   // Payout bank account edit modal
   const [editPayoutModal, setEditPayoutModal] = useState<any | null>(null);
@@ -245,19 +281,26 @@ export default function AdminPortalPage() {
   const loadFinanceData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoadingFinance(true);
     try {
-      const [sumRes, tbRes, payRes, refRes, jrnRes, settingsRes] = await Promise.all([
+      const [sumRes, tbRes, payRes, refRes, jrnRes, settingsRes, balRes] = await Promise.all([
         api.getAdminFinancialSummary().catch(() => null),
         api.getAdminTrialBalance().catch(() => null),
         api.getAdminPayoutQueue().catch(() => ({ payouts: [] })),
         api.getAdminRefundQueue().catch(() => ({ refunds: [] })),
         api.getAdminJournals(50).catch(() => ({ journals: [] })),
         fetch("/api/admin/settings").then(r => r.json()).catch(() => null),
+        api.getAdminTransferBalance().catch(() => null),
       ]);
       if (sumRes) setFinancialSummary(sumRes);
       if (tbRes?.trialBalance) setTrialBalance(tbRes.trialBalance);
       if (payRes?.payouts) setPayoutsQueue(payRes.payouts);
       if (refRes?.refunds) setRefundsQueue(refRes.refunds);
       if (jrnRes?.journals) setJournals(jrnRes.journals);
+      if (balRes?.success) {
+        setPaystackBalance({
+          balanceNaira: balRes.balanceNaira || 0,
+          currency: balRes.currency || "NGN",
+        });
+      }
       if (settingsRes?.defaultHostCommissionPct !== undefined) {
         setPlatformCommissionPct(settingsRes.defaultHostCommissionPct);
         setPendingCommissionPct(settingsRes.defaultHostCommissionPct);
@@ -269,17 +312,129 @@ export default function AdminPortalPage() {
     }
   }, []);
 
+  const refreshPaystackBalance = async () => {
+    setLoadingBalance(true);
+    try {
+      const res = await api.getAdminTransferBalance();
+      if (res.success) {
+        setPaystackBalance({
+          balanceNaira: res.balanceNaira || 0,
+          currency: res.currency || "NGN",
+        });
+        setFinanceActionFeedback(`Paystack balance updated: ${formatNaira(res.balanceNaira)}`);
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to retrieve Paystack balance");
+    } finally {
+      setLoadingBalance(false);
+    }
+  };
+
+  const handleProcessDueSettlements = async () => {
+    setIsProcessingSettlements(true);
+    try {
+      const res = await api.processDueSettlements();
+      setShowSettlementConfirmModal(false);
+      setFinanceActionFeedback(res.message || `Processed ${res.processedCount || 0} settlements successfully.`);
+      await loadFinanceData(true);
+    } catch (err: any) {
+      alert(err.message || "Failed to process due settlements");
+    } finally {
+      setIsProcessingSettlements(false);
+    }
+  };
+
+  // ── New Finance Data Fetchers ──
+  const fetchJournalsFull = useCallback(async () => {
+    setJournalsLoading(true);
+    try {
+      const res = await fetch("/api/admin/finance/journals?limit=100", { credentials: "include" });
+      const data = await res.json();
+      if (data.journals) setJournals(data.journals);
+    } catch (e) { console.warn("Failed to load journals", e); }
+    finally { setJournalsLoading(false); }
+  }, []);
+
+  const fetchSettlementsReport = useCallback(async () => {
+    setSettlementsLoading(true);
+    try {
+      const res = await fetch("/api/admin/finance/reports/settlements?limit=200", { credentials: "include" });
+      const data = await res.json();
+      if (data.settlements) setSettlementsReport(data.settlements);
+    } catch (e) { console.warn("Failed to load settlements", e); }
+    finally { setSettlementsLoading(false); }
+  }, []);
+
+  const fetchAuditLog = useCallback(async () => {
+    setAuditLogLoading(true);
+    try {
+      const res = await fetch("/api/admin/finance/audit-log?limit=100", { credentials: "include" });
+      const data = await res.json();
+      if (data.logs) setAuditLogData(data.logs);
+    } catch (e) { console.warn("Failed to load audit log", e); }
+    finally { setAuditLogLoading(false); }
+  }, []);
+
+  const fetchReconciliation = useCallback(async () => {
+    setReconciliationLoading(true);
+    try {
+      const res = await fetch("/api/admin/finance/reconciliation", { credentials: "include" });
+      const data = await res.json();
+      setReconciliationData(data);
+    } catch (e) { console.warn("Failed to load reconciliation", e); }
+    finally { setReconciliationLoading(false); }
+  }, []);
+
+  const fetchReport = useCallback(async (type: string) => {
+    setReportsLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "200" });
+      if (reportDateFrom) params.set("from", reportDateFrom);
+      if (reportDateTo) params.set("to", reportDateTo);
+      const res = await fetch(`/api/admin/finance/reports/${type}?${params}`, { credentials: "include" });
+      const data = await res.json();
+      if (type === "collections") setCollectionsReport(data);
+      if (type === "payouts") setPayoutsReport(data);
+      if (type === "refunds") setRefundsReport(data);
+    } catch (e) { console.warn("Failed to load report", e); }
+    finally { setReportsLoading(false); }
+  }, [reportDateFrom, reportDateTo]);
+
+  const handleRefundAction = async (refundId: string, action: "approve" | "reject" | "process", adminNotes?: string) => {
+    try {
+      const res = await fetch(`/api/admin/finance/refunds/${refundId}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ adminNotes }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Action failed");
+      setFinanceActionFeedback(`Refund ${action === "approve" ? "approved" : action === "reject" ? "rejected" : "processed"} successfully.`);
+      const refundsRes = await fetch("/api/admin/finance/refunds", { credentials: "include" });
+      const refundsData = await refundsRes.json();
+      if (refundsData.refunds) setRefundsQueue(refundsData.refunds);
+    } catch (e: any) {
+      alert(`Error: ${e.message}`);
+    }
+  };
+
   const handleDisbursePayout = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!disburseModalPayout) return;
     setIsDisbursing(true);
     setFinanceActionFeedback(null);
     try {
+      const isManual = disburseMethod === "manual";
       await api.disburseAdminPayout(disburseModalPayout.id, {
-        transferRef: disburseTransferRef || undefined,
+        transferRef: isManual ? (disburseTransferRef.trim() || undefined) : undefined,
         notes: disburseNotes || undefined,
       });
-      setFinanceActionFeedback(`Payout of ${formatNaira(disburseModalPayout.amount)} successfully disbursed to ${disburseModalPayout.accountName || "Host"}!`);
+      setFinanceActionFeedback(
+        `Payout of ${formatNaira(disburseModalPayout.amount)} successfully ${
+          isManual ? "recorded as disbursed" : "dispatched via automated Paystack Transfer"
+        } to ${disburseModalPayout.accountName || "Host"}!`
+      );
       setDisburseModalPayout(null);
       setDisburseTransferRef("");
       setDisburseNotes("");
@@ -449,7 +604,7 @@ export default function AdminPortalPage() {
       action: "KYC_ENCRYPTED_FILE_DOWNLOAD",
       entityType: "HOST_DOSSIER",
       entityId: selectedHost?.id,
-      adminEmail: user?.email || "admin@ile.ng",
+      adminEmail: user?.email || "admin@ilestays.ng",
       notes: `Admin securely downloaded encrypted ${docLabel} for physical compliance audit.`,
       createdAt: new Date().toISOString(),
       ipAddress: "127.0.0.1",
@@ -1053,7 +1208,7 @@ export default function AdminPortalPage() {
                   Ilé Administrator
                 </span>
                 <span className="text-[10px] text-[#6B6B67] block truncate">
-                  {user?.email || "admin@ile.ng"}
+                  {user?.email || "admin@ilestays.ng"}
                 </span>
               </div>
             </div>
@@ -1955,7 +2110,12 @@ export default function AdminPortalPage() {
                   { id: "transactions", label: `Transactions (${bookings.length})`, icon: CreditCard },
                   { id: "payouts", label: `Host Payouts (${payoutsQueue.filter((p) => p.status !== "PAID").length})`, icon: Landmark },
                   { id: "refunds", label: `Refunds (${refundsQueue.length})`, icon: Receipt },
-                  { id: "records", label: `Financial Records (${auditLogs.length})`, icon: FileText },
+                  { id: "settlements", label: "Settlements", icon: CheckCircle2 },
+                  { id: "ledger", label: "Ledger", icon: BookOpen },
+                  { id: "reports", label: "Reports", icon: BarChart3 },
+                  { id: "audit", label: "Audit Trail", icon: History },
+                  { id: "reconciliation", label: "Reconciliation", icon: ClipboardList },
+                  { id: "records", label: `Records`, icon: FileText },
                 ].map((tab) => {
                   const Icon = tab.icon;
                   const isActive = financeSubTab === tab.id;
@@ -1963,7 +2123,13 @@ export default function AdminPortalPage() {
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setFinanceSubTab(tab.id as any)}
+                      onClick={() => {
+                        setFinanceSubTab(tab.id as any);
+                        if (tab.id === "ledger") fetchJournalsFull();
+                        if (tab.id === "settlements") fetchSettlementsReport();
+                        if (tab.id === "audit") fetchAuditLog();
+                        if (tab.id === "reconciliation") fetchReconciliation();
+                      }}
                       className={`pb-3 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
                         isActive
                           ? "border-accent text-accent"
@@ -2139,6 +2305,50 @@ export default function AdminPortalPage() {
                     )}
                   </div>
 
+                  {/* Paystack Balance & Settlement Automation Card */}
+                  <div className="p-5 bg-gradient-to-r from-emerald-950 via-[#0B5D45] to-emerald-900 text-white rounded-2xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-emerald-200">
+                          Live Paystack Transfer Balance
+                        </span>
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      </div>
+                      <div className="flex items-baseline gap-3">
+                        <span className="text-3xl font-extrabold tracking-tight tabular-nums">
+                          {paystackBalance ? formatNaira(paystackBalance.balanceNaira) : "₦0.00"}
+                        </span>
+                        <span className="text-xs text-emerald-200">
+                          {paystackBalance?.currency || "NGN"} Available for Automated Host Payouts
+                        </span>
+                      </div>
+                      <p className="text-xs text-emerald-100/80">
+                        Funds dedicated to host settlement disbursements via Paystack Transfers API.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto">
+                      <button
+                        type="button"
+                        disabled={loadingBalance}
+                        onClick={refreshPaystackBalance}
+                        className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-white/20 disabled:opacity-50"
+                      >
+                        <RotateCw size={13} className={loadingBalance ? "animate-spin" : ""} />
+                        <span>{loadingBalance ? "Checking..." : "Refresh Balance"}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowSettlementConfirmModal(true)}
+                        className="px-4 py-2 rounded-xl bg-white text-emerald-950 hover:bg-emerald-50 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+                      >
+                        <Zap size={13} className="text-[#0B5D45]" />
+                        <span>Process Due Settlements</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Quick Action Operations Box */}
                   <div className="p-5 bg-surface rounded-2xl border border-border flex flex-wrap items-center justify-between gap-4">
                     <div>
@@ -2146,6 +2356,14 @@ export default function AdminPortalPage() {
                       <p className="text-xs text-primary-muted mt-0.5">Quickly access payout execution, manual refund reversals, or download data.</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setShowSettlementConfirmModal(true)}
+                        className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+                      >
+                        <Zap size={14} />
+                        <span>Run Settlements</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => setFinanceSubTab("payouts")}
@@ -2412,13 +2630,18 @@ export default function AdminPortalPage() {
                 <div className="space-y-4">
                   {/* Status Filters Bar */}
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {[
                         { id: "ALL", label: "All Payouts", count: payoutsQueue.length },
                         {
                           id: "READY_FOR_PAYOUT",
                           label: "Ready for Disbursement",
                           count: payoutsQueue.filter((p) => p.status === "READY_FOR_PAYOUT").length,
+                        },
+                        {
+                          id: "PROCESSING",
+                          label: "In-Flight Transfers",
+                          count: payoutsQueue.filter((p) => p.status === "PROCESSING").length,
                         },
                         {
                           id: "HELD",
@@ -2428,7 +2651,17 @@ export default function AdminPortalPage() {
                         {
                           id: "PAID",
                           label: "Disbursed",
-                          count: payoutsQueue.filter((p) => p.status === "PAID").length,
+                          count: payoutsQueue.filter((p) => p.status === "PAID" || p.status === "DISBURSED").length,
+                        },
+                        {
+                          id: "FAILED",
+                          label: "Failed Transfers",
+                          count: payoutsQueue.filter((p) => p.status === "FAILED").length,
+                        },
+                        {
+                          id: "REVERSED",
+                          label: "Reversed by Bank",
+                          count: payoutsQueue.filter((p) => p.status === "REVERSED").length,
                         },
                       ].map((filter) => (
                         <button
@@ -2519,33 +2752,58 @@ export default function AdminPortalPage() {
                                   {p.scheduledFor ? new Date(p.scheduledFor).toLocaleDateString() : "Immediate"}
                                 </td>
                                 <td className="py-3 px-3 whitespace-nowrap">
-                                  <span
-                                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider ${
-                                      p.status === "PAID"
-                                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                                        : p.status === "READY_FOR_PAYOUT"
-                                        ? "bg-blue-50 text-blue-800 border-blue-200"
-                                        : "bg-amber-50 text-amber-800 border-amber-200"
-                                    }`}
-                                  >
-                                    {p.status}
-                                  </span>
+                                  <div>
+                                    <span
+                                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase tracking-wider inline-flex items-center gap-1 ${
+                                        p.status === "PAID" || p.status === "DISBURSED"
+                                          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                                          : p.status === "READY_FOR_PAYOUT"
+                                          ? "bg-blue-50 text-blue-800 border-blue-200"
+                                          : p.status === "PROCESSING"
+                                          ? "bg-indigo-50 text-indigo-800 border-indigo-200"
+                                          : p.status === "FAILED"
+                                          ? "bg-rose-50 text-rose-800 border-rose-200"
+                                          : p.status === "REVERSED"
+                                          ? "bg-amber-50 text-amber-900 border-amber-300"
+                                          : "bg-amber-50 text-amber-800 border-amber-200"
+                                      }`}
+                                    >
+                                      {p.status === "PROCESSING" && <Loader2 size={10} className="animate-spin" />}
+                                      <span>{p.status}</span>
+                                    </span>
+                                    {p.status === "FAILED" && p.transferFailureReason && (
+                                      <div className="text-[10px] text-rose-600 mt-1 max-w-[180px] truncate font-medium" title={p.transferFailureReason}>
+                                        {p.transferFailureReason}
+                                      </div>
+                                    )}
+                                    {p.status === "REVERSED" && p.notes && (
+                                      <div className="text-[10px] text-amber-800 mt-1 max-w-[180px] truncate" title={p.notes}>
+                                        {p.notes}
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="py-3 px-3 text-right whitespace-nowrap">
-                                  {p.status === "PAID" ? (
+                                  {p.status === "PAID" || p.status === "DISBURSED" ? (
                                     <div className="text-[11px] text-primary-muted">
                                       <span className="font-mono">{p.paystackTransferRef || "Disbursed"}</span>
                                     </div>
+                                  ) : p.status === "PROCESSING" ? (
+                                    <span className="inline-flex items-center gap-1 text-[11px] text-indigo-700 font-semibold">
+                                      <Loader2 size={12} className="animate-spin" /> In-Flight
+                                    </span>
                                   ) : (
                                     <button
                                       type="button"
                                       onClick={() => {
                                         setDisburseModalPayout(p);
-                                        setDisburseTransferRef(`TRF-${Date.now().toString(36).toUpperCase()}`);
+                                        setDisburseMethod("automated");
+                                        setDisburseTransferRef("");
+                                        setDisburseNotes("");
                                       }}
                                       className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs"
                                     >
-                                      Authorize &amp; Disburse
+                                      {p.status === "FAILED" ? "Retry Transfer" : "Authorize & Disburse"}
                                     </button>
                                   )}
                                 </td>
@@ -2606,6 +2864,7 @@ export default function AdminPortalPage() {
                             <th className="py-2.5 px-3">Net Refunded</th>
                             <th className="py-2.5 px-3">Reason / Notes</th>
                             <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -2633,9 +2892,20 @@ export default function AdminPortalPage() {
                                 <span className="text-[10px] text-primary-muted">{r.adminNotes}</span>
                               </td>
                               <td className="py-3 px-3 whitespace-nowrap">
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200 uppercase">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${r.status==="PROCESSED"?"bg-emerald-50 text-emerald-800 border-emerald-200":r.status==="APPROVED"?"bg-blue-50 text-blue-800 border-blue-200":r.status==="REJECTED"?"bg-rose-50 text-rose-700 border-rose-200":"bg-amber-50 text-amber-700 border-amber-200"}`}>
                                   {r.status}
                                 </span>
+                              </td>
+                              <td className="py-3 px-3 whitespace-nowrap">
+                                {r.status === "REQUESTED" && (
+                                  <div className="flex gap-1.5">
+                                    <button onClick={()=>handleRefundAction(r.id,"approve")} className="px-2 py-1 text-[10px] font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">Approve</button>
+                                    <button onClick={()=>{const notes=prompt("Rejection reason:");if(notes!==null)handleRefundAction(r.id,"reject",notes);}} className="px-2 py-1 text-[10px] font-bold bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors">Reject</button>
+                                  </div>
+                                )}
+                                {r.status === "APPROVED" && (
+                                  <button onClick={()=>handleRefundAction(r.id,"process")} className="px-2 py-1 text-[10px] font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Process Now</button>
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -2716,6 +2986,301 @@ export default function AdminPortalPage() {
                       </table>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* ── Settlements Tab ── */}
+              {financeSubTab === "settlements" && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-primary">Host Settlements</h3>
+                      <p className="text-xs text-primary-muted mt-0.5">Check-in revenue recognition and host payout eligibility by booking.</p>
+                    </div>
+                    <button onClick={fetchSettlementsReport} className="text-xs bg-accent text-white px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5">
+                      <RotateCw size={12} />Refresh
+                    </button>
+                  </div>
+                  {settlementsLoading ? (
+                    <div className="text-xs text-primary-muted py-10 text-center flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" />Loading settlements…</div>
+                  ) : settlementsReport.length === 0 ? (
+                    <div className="text-xs text-primary-muted py-10 text-center">No settlement records. Click Refresh to load.</div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-border">
+                      <table className="w-full text-left text-xs divide-y divide-border min-w-[920px]">
+                        <thead className="bg-surface-muted">
+                          <tr>{["Booking Ref","Property","Host","Check-In","Check-Out","Gross","Commission","Host Net","Payout Status"].map(h=><th key={h} className="px-3 py-2.5 font-semibold text-primary-muted uppercase tracking-wider text-[10px]">{h}</th>)}</tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {settlementsReport.map((s:any)=>(
+                            <tr key={s.payoutId||s.bookingId} className="hover:bg-surface-muted/40 transition-colors">
+                              <td className="px-3 py-2 font-mono text-[10px] text-primary-muted">{s.bookingRef||"—"}</td>
+                              <td className="px-3 py-2 text-primary font-medium max-w-[160px] truncate">{s.propertyName||"—"}</td>
+                              <td className="px-3 py-2"><div className="font-medium text-primary">{s.hostName||"—"}</div><div className="text-[10px] text-primary-muted">{s.hostEmail||""}</div></td>
+                              <td className="px-3 py-2 text-primary-muted whitespace-nowrap">{s.checkInDate||"—"}</td>
+                              <td className="px-3 py-2 text-primary-muted whitespace-nowrap">{s.checkOutDate||"—"}</td>
+                              <td className="px-3 py-2 tabular-nums font-medium">{formatNaira(s.totalAmount||0)}</td>
+                              <td className="px-3 py-2 text-rose-700 tabular-nums">{formatNaira(s.hostCommissionAmount||0)}</td>
+                              <td className="px-3 py-2 font-bold text-emerald-700 tabular-nums">{formatNaira(s.hostNetAmount||0)}</td>
+                              <td className="px-3 py-2">
+                                <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${s.payoutStatus==="PAID"?"bg-emerald-100 text-emerald-700":s.payoutStatus==="READY_FOR_PAYOUT"?"bg-blue-100 text-blue-700":s.payoutStatus==="PROCESSING"?"bg-amber-100 text-amber-700":s.payoutStatus==="HELD"?"bg-slate-100 text-slate-600":"bg-rose-100 text-rose-700"}`}>{s.payoutStatus||"HELD"}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <a href="/api/admin/finance/reports/settlements?format=csv" download className="inline-flex items-center gap-1.5 text-xs text-accent border border-accent/30 px-3 py-1.5 rounded-lg hover:bg-accent/5 transition-colors"><Download size={12}/>Export CSV</a>
+                </div>
+              )}
+
+              {/* ── Ledger Explorer Tab ── */}
+              {financeSubTab === "ledger" && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-primary">General Ledger</h3>
+                      <p className="text-xs text-primary-muted mt-0.5">Double-entry journal entries. Total debits always equal total credits.</p>
+                    </div>
+                    <button onClick={fetchJournalsFull} className="text-xs bg-accent text-white px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5">
+                      <RotateCw size={12} />Refresh
+                    </button>
+                  </div>
+                  {journalsLoading ? (
+                    <div className="text-xs text-primary-muted py-10 text-center flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin" />Loading journals…</div>
+                  ) : journals.length === 0 ? (
+                    <div className="text-xs text-primary-muted py-10 text-center">No journal entries yet. Journals are posted when bookings are paid, checked in, refunded, or hosts are paid.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {journals.map((j:any)=>(
+                        <div key={j.id} className="border border-border rounded-xl overflow-hidden bg-surface">
+                          <button type="button" onClick={()=>setSelectedJournal(selectedJournal?.id===j.id?null:j)} className="w-full flex items-start justify-between px-4 py-3 hover:bg-surface-muted/50 transition-colors text-left">
+                            <div className="space-y-0.5 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-[10px] text-primary-muted">{j.journalNumber}</span>
+                                <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-bold ${j.eventType?.includes("PAYMENT")?"bg-blue-100 text-blue-700":j.eventType?.includes("PAYOUT")?"bg-emerald-100 text-emerald-700":j.eventType?.includes("REFUND")?"bg-rose-100 text-rose-700":j.eventType?.includes("CHECKIN")?"bg-amber-100 text-amber-700":"bg-slate-100 text-slate-600"}`}>{j.eventType?.replace(/_/g," ")||"JOURNAL"}</span>
+                              </div>
+                              <div className="text-xs font-medium text-primary">{j.narration}</div>
+                              <div className="text-[10px] text-primary-muted">Ref: {j.reference}</div>
+                            </div>
+                            <div className="text-[10px] text-primary-muted whitespace-nowrap ml-4 pt-0.5">{j.postedAt?new Date(j.postedAt).toLocaleDateString("en-NG",{day:"numeric",month:"short",year:"numeric"}):"—"}</div>
+                          </button>
+                          {selectedJournal?.id===j.id&&j.entries&&(
+                            <div className="border-t border-border px-4 py-3 bg-surface-muted/30">
+                              <table className="w-full text-xs">
+                                <thead><tr>
+                                  <th className="text-left font-semibold text-primary-muted pb-1.5 text-[10px] uppercase">Account</th>
+                                  <th className="text-left font-semibold text-primary-muted pb-1.5 text-[10px] uppercase">Code</th>
+                                  <th className="text-left font-semibold text-primary-muted pb-1.5 text-[10px] uppercase">Dr / Cr</th>
+                                  <th className="text-right font-semibold text-primary-muted pb-1.5 text-[10px] uppercase">Amount</th>
+                                </tr></thead>
+                                <tbody className="divide-y divide-border/50">
+                                  {j.entries.map((e:any)=>(
+                                    <tr key={e.id}>
+                                      <td className="py-1.5 text-primary">{e.accountName}</td>
+                                      <td className="py-1.5 font-mono text-[10px] text-primary-muted">{e.accountCode}</td>
+                                      <td className={`py-1.5 font-bold text-[10px] ${e.entryType==="DEBIT"?"text-rose-600":"text-emerald-600"}`}>{e.entryType}</td>
+                                      <td className="py-1.5 text-right tabular-nums font-medium">{formatNaira(e.amount||0)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="border-t border-border">
+                                    <td colSpan={3} className="py-1.5 text-xs font-bold text-primary-muted">Balanced (Dr = Cr)</td>
+                                    <td className="py-1.5 text-right tabular-nums font-bold text-primary">{formatNaira(j.entries.filter((e:any)=>e.entryType==="DEBIT").reduce((s:number,e:any)=>s+(e.amount||0),0))}</td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Reports Tab ── */}
+              {financeSubTab === "reports" && (
+                <div className="space-y-5">
+                  <div>
+                    <h3 className="text-sm font-bold text-primary">Financial Reports</h3>
+                    <p className="text-xs text-primary-muted mt-0.5">Period-based revenue, payout, and refund analysis with CSV export.</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="text-xs text-primary-muted font-medium">From:</label>
+                    <input type="date" value={reportDateFrom} onChange={e=>setReportDateFrom(e.target.value)} className="text-xs border border-border rounded-lg px-2 py-1.5 bg-surface text-primary" />
+                    <label className="text-xs text-primary-muted font-medium">To:</label>
+                    <input type="date" value={reportDateTo} onChange={e=>setReportDateTo(e.target.value)} className="text-xs border border-border rounded-lg px-2 py-1.5 bg-surface text-primary" />
+                    <button onClick={()=>fetchReport(reportsSubTab)} disabled={reportsLoading} className="text-xs bg-accent text-white px-3 py-1.5 rounded-lg font-medium disabled:opacity-50 flex items-center gap-1.5">
+                      {reportsLoading?<><Loader2 size={11} className="animate-spin"/>Loading…</>:<><Activity size={11}/>Run Report</>}
+                    </button>
+                    <a href={`/api/admin/finance/reports/${reportsSubTab}?format=csv${reportDateFrom?`&from=${reportDateFrom}`:""}${reportDateTo?`&to=${reportDateTo}`:""}`} download className="inline-flex items-center gap-1.5 text-xs border border-border text-primary px-3 py-1.5 rounded-lg hover:bg-surface-muted transition-colors"><Download size={11}/>Export CSV</a>
+                  </div>
+                  <div className="flex gap-4 border-b border-border">
+                    {[{id:"collections",label:"Collections"},{id:"payouts",label:"Payouts"},{id:"refunds",label:"Refunds"}].map(t=>(
+                      <button key={t.id} type="button" onClick={()=>{setReportsSubTab(t.id as any);fetchReport(t.id);}} className={`pb-2 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap ${reportsSubTab===t.id?"border-accent text-accent":"border-transparent text-primary-muted hover:text-primary"}`}>{t.label}</button>
+                    ))}
+                  </div>
+
+                  {reportsSubTab==="collections"&&(
+                    <div className="space-y-4">
+                      {collectionsReport&&<div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="p-4 bg-surface border border-border rounded-xl"><div className="text-[10px] font-semibold uppercase tracking-wider text-primary-muted">Gross Collected</div><div className="text-xl font-bold tabular-nums mt-1">{formatNaira(collectionsReport.totals?.totalGross||0)}</div></div>
+                        <div className="p-4 bg-surface border border-border rounded-xl"><div className="text-[10px] font-semibold uppercase tracking-wider text-primary-muted">Paystack Fees</div><div className="text-xl font-bold text-rose-700 tabular-nums mt-1">{formatNaira(collectionsReport.totals?.totalFees||0)}</div></div>
+                        <div className="p-4 bg-surface border border-border rounded-xl"><div className="text-[10px] font-semibold uppercase tracking-wider text-primary-muted">Net Received</div><div className="text-xl font-bold text-emerald-700 tabular-nums mt-1">{formatNaira(collectionsReport.totals?.totalNet||0)}</div></div>
+                      </div>}
+                      <div className="overflow-x-auto rounded-xl border border-border">
+                        <table className="w-full text-left text-xs divide-y divide-border min-w-[700px]">
+                          <thead className="bg-surface-muted"><tr>{["Booking Ref","Property","Guest","Gross","Fee","Net","Paid At"].map(h=><th key={h} className="px-3 py-2.5 font-semibold text-primary-muted uppercase tracking-wider text-[10px]">{h}</th>)}</tr></thead>
+                          <tbody className="divide-y divide-border">
+                            {(collectionsReport?.rows||[]).map((r:any,i:number)=>(
+                              <tr key={i} className="hover:bg-surface-muted/40">
+                                <td className="px-3 py-2 font-mono text-[10px]">{r.bookingRef}</td><td className="px-3 py-2">{r.propertyName}</td><td className="px-3 py-2 text-primary-muted">{r.guestEmail}</td>
+                                <td className="px-3 py-2 tabular-nums">{formatNaira(r.amount||0)}</td><td className="px-3 py-2 text-rose-700 tabular-nums">{formatNaira(r.paystackFeeAmount||0)}</td><td className="px-3 py-2 text-emerald-700 font-medium tabular-nums">{formatNaira(r.netAmount||0)}</td>
+                                <td className="px-3 py-2 text-primary-muted">{r.paidAt?new Date(r.paidAt).toLocaleDateString("en-NG"):"—"}</td>
+                              </tr>
+                            ))}
+                            {!collectionsReport?.rows?.length&&<tr><td colSpan={7} className="px-3 py-8 text-center text-primary-muted text-xs">Click "Run Report" to load data.</td></tr>}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {reportsSubTab==="payouts"&&(
+                    <div className="space-y-4">
+                      {payoutsReport&&<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="p-4 bg-surface border border-border rounded-xl"><div className="text-[10px] font-semibold uppercase tracking-wider text-primary-muted">Total Disbursed</div><div className="text-xl font-bold text-emerald-700 tabular-nums mt-1">{formatNaira(payoutsReport.totals?.totalDisbursed||0)}</div></div>
+                        <div className="p-4 bg-surface border border-border rounded-xl"><div className="text-[10px] font-semibold uppercase tracking-wider text-primary-muted">Pending</div><div className="text-xl font-bold tabular-nums mt-1">{formatNaira(payoutsReport.totals?.totalPending||0)}</div></div>
+                      </div>}
+                      <div className="overflow-x-auto rounded-xl border border-border">
+                        <table className="w-full text-left text-xs divide-y divide-border min-w-[700px]">
+                          <thead className="bg-surface-muted"><tr>{["Booking Ref","Property","Host","Amount","Status","Disbursed At","Transfer Ref"].map(h=><th key={h} className="px-3 py-2.5 font-semibold text-primary-muted uppercase tracking-wider text-[10px]">{h}</th>)}</tr></thead>
+                          <tbody className="divide-y divide-border">
+                            {(payoutsReport?.rows||[]).map((r:any,i:number)=>(
+                              <tr key={i} className="hover:bg-surface-muted/40">
+                                <td className="px-3 py-2 font-mono text-[10px]">{r.bookingRef}</td><td className="px-3 py-2">{r.propertyName}</td><td className="px-3 py-2">{r.hostName}</td>
+                                <td className="px-3 py-2 tabular-nums font-medium">{formatNaira(r.amount||0)}</td>
+                                <td className="px-3 py-2"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.status==="PAID"?"bg-emerald-100 text-emerald-700":"bg-amber-100 text-amber-700"}`}>{r.status}</span></td>
+                                <td className="px-3 py-2 text-primary-muted">{r.disbursedAt?new Date(r.disbursedAt).toLocaleDateString("en-NG"):"—"}</td>
+                                <td className="px-3 py-2 font-mono text-[10px] text-primary-muted">{r.paystackTransferRef||"—"}</td>
+                              </tr>
+                            ))}
+                            {!payoutsReport?.rows?.length&&<tr><td colSpan={7} className="px-3 py-8 text-center text-primary-muted text-xs">Click "Run Report" to load data.</td></tr>}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {reportsSubTab==="refunds"&&(
+                    <div className="space-y-4">
+                      {refundsReport&&<div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="p-4 bg-surface border border-border rounded-xl"><div className="text-[10px] font-semibold uppercase tracking-wider text-primary-muted">Total Refunded</div><div className="text-xl font-bold text-rose-700 tabular-nums mt-1">{formatNaira(refundsReport.totals?.totalRefunded||0)}</div></div>
+                        <div className="p-4 bg-surface border border-border rounded-xl"><div className="text-[10px] font-semibold uppercase tracking-wider text-primary-muted">Fees Retained</div><div className="text-xl font-bold tabular-nums mt-1">{formatNaira(refundsReport.totals?.totalFeeRetained||0)}</div></div>
+                      </div>}
+                      <div className="overflow-x-auto rounded-xl border border-border">
+                        <table className="w-full text-left text-xs divide-y divide-border min-w-[750px]">
+                          <thead className="bg-surface-muted"><tr>{["Booking Ref","Property","Guest","Gross","Fee Kept","Refunded","Status","Date"].map(h=><th key={h} className="px-3 py-2.5 font-semibold text-primary-muted uppercase tracking-wider text-[10px]">{h}</th>)}</tr></thead>
+                          <tbody className="divide-y divide-border">
+                            {(refundsReport?.rows||[]).map((r:any,i:number)=>(
+                              <tr key={i} className="hover:bg-surface-muted/40">
+                                <td className="px-3 py-2 font-mono text-[10px]">{r.bookingRef}</td><td className="px-3 py-2">{r.propertyName}</td><td className="px-3 py-2 text-primary-muted">{r.guestEmail}</td>
+                                <td className="px-3 py-2 tabular-nums">{formatNaira(r.grossPaid||0)}</td><td className="px-3 py-2 text-primary-muted tabular-nums">{formatNaira(r.nonRefundableProcessingFee||0)}</td><td className="px-3 py-2 text-rose-700 font-medium tabular-nums">{formatNaira(r.refundableAmount||0)}</td>
+                                <td className="px-3 py-2"><span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${r.status==="PROCESSED"?"bg-emerald-100 text-emerald-700":r.status==="APPROVED"?"bg-blue-100 text-blue-700":r.status==="REJECTED"?"bg-rose-100 text-rose-700":"bg-amber-100 text-amber-700"}`}>{r.status}</span></td>
+                                <td className="px-3 py-2 text-primary-muted">{r.processedAt?new Date(r.processedAt).toLocaleDateString("en-NG"):"—"}</td>
+                              </tr>
+                            ))}
+                            {!refundsReport?.rows?.length&&<tr><td colSpan={8} className="px-3 py-8 text-center text-primary-muted text-xs">Click "Run Report" to load data.</td></tr>}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Audit Trail Tab ── */}
+              {financeSubTab === "audit" && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-primary">Financial Audit Trail</h3>
+                      <p className="text-xs text-primary-muted mt-0.5">Append-only log of all sensitive financial actions by admin users.</p>
+                    </div>
+                    <button onClick={fetchAuditLog} className="text-xs bg-accent text-white px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5">
+                      {auditLogLoading?<><Loader2 size={11} className="animate-spin"/>Loading…</>:<><RotateCw size={12}/>Refresh</>}
+                    </button>
+                  </div>
+                  {auditLogData.length===0?(
+                    <div className="text-xs text-primary-muted py-10 text-center">No financial audit events yet. Click Refresh to load.</div>
+                  ):(
+                    <div className="overflow-x-auto rounded-xl border border-border">
+                      <table className="w-full text-left text-xs divide-y divide-border min-w-[700px]">
+                        <thead className="bg-surface-muted"><tr>{["Action","Entity","Entity ID","Performed By","IP","Date"].map(h=><th key={h} className="px-3 py-2.5 font-semibold text-primary-muted uppercase tracking-wider text-[10px]">{h}</th>)}</tr></thead>
+                        <tbody className="divide-y divide-border">
+                          {auditLogData.map((log:any)=>(
+                            <tr key={log.id} className="hover:bg-surface-muted/40">
+                              <td className="px-3 py-2 font-medium text-primary text-[10px]">{log.action}</td>
+                              <td className="px-3 py-2 text-primary-muted">{log.entityType}</td>
+                              <td className="px-3 py-2 font-mono text-[10px] text-primary-muted">{log.entityId}</td>
+                              <td className="px-3 py-2">{log.userName||log.userId||"System"}</td>
+                              <td className="px-3 py-2 text-primary-muted">{log.ipAddress||"—"}</td>
+                              <td className="px-3 py-2 text-primary-muted whitespace-nowrap">{log.createdAt?new Date(log.createdAt).toLocaleString("en-NG"):"—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Reconciliation Tab ── */}
+              {financeSubTab === "reconciliation" && (
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-primary">Reconciliation</h3>
+                      <p className="text-xs text-primary-muted mt-0.5">Compare local financial records and verify ledger balance.</p>
+                    </div>
+                    <button onClick={fetchReconciliation} className="text-xs bg-accent text-white px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5">
+                      {reconciliationLoading?<><Loader2 size={11} className="animate-spin"/>Loading…</>:<><RotateCw size={12}/>Refresh</>}
+                    </button>
+                  </div>
+                  {reconciliationData?(
+                    <div className="space-y-4">
+                      <div className={`p-4 rounded-xl border ${reconciliationData.ledger?.isBalanced?"border-emerald-300 bg-emerald-50":"border-rose-300 bg-rose-50"}`}>
+                        <div className="flex items-center gap-2 font-bold text-xs">
+                          {reconciliationData.ledger?.isBalanced?<CheckCircle2 size={14} className="text-emerald-600"/>:<AlertTriangle size={14} className="text-rose-600"/>}
+                          <span className={reconciliationData.ledger?.isBalanced?"text-emerald-800":"text-rose-800"}>
+                            Ledger: {reconciliationData.ledger?.isBalanced?"BALANCED ✓ — Total Debits = Total Credits":"IMBALANCED — Investigate immediately"}
+                          </span>
+                        </div>
+                        {reconciliationData.ledger&&<div className="text-xs text-primary-muted mt-1 ml-5">Debits: {formatNaira(reconciliationData.ledger.totalDebits||0)} | Credits: {formatNaira(reconciliationData.ledger.totalCredits||0)}</div>}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        {[
+                          {label:"Payments",data:reconciliationData.payments},
+                          {label:"Host Payouts",data:reconciliationData.payouts},
+                          {label:"Refunds",data:reconciliationData.refunds},
+                          {label:"Webhooks",data:reconciliationData.webhooks},
+                        ].map(({label,data})=>(
+                          <div key={label} className="p-4 bg-surface border border-border rounded-xl space-y-2">
+                            <div className="text-[10px] font-bold uppercase tracking-wider text-primary-muted">{label}</div>
+                            {data&&Object.entries(data).map(([k,v])=>(
+                              <div key={k} className="flex justify-between text-xs gap-2"><span className="text-primary-muted capitalize">{k}</span><span className="font-mono font-medium tabular-nums">{typeof v==="number"&&(k.toLowerCase().includes("amount")||k.toLowerCase().includes("gross"))?formatNaira(v as number):String(v)}</span></div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-primary-muted">Generated at: {reconciliationData.generatedAt?new Date(reconciliationData.generatedAt).toLocaleString("en-NG"):"—"}</p>
+                    </div>
+                  ):(
+                    <div className="text-xs text-primary-muted py-10 text-center">Click Refresh to run reconciliation check.</div>
+                  )}
                 </div>
               )}
             </div>
@@ -2800,7 +3365,7 @@ export default function AdminPortalPage() {
                           </span>
                         </td>
                         <td className="py-2 px-3 text-primary-secondary font-mono text-[11px]">
-                          {log.adminEmail || "admin@ile.ng"}
+                          {log.adminEmail || "admin@ilestays.ng"}
                         </td>
                         <td className="py-2 px-3 text-primary">
                           {log.notes || log.details || "Administrative event verified."}
@@ -3109,7 +3674,7 @@ export default function AdminPortalPage() {
                                 action: "SUPPORT_MASQUERADE_INITIATED",
                                 entityType: "HOST_USER",
                                 entityId: selectedHost.id,
-                                adminEmail: user?.email || "admin@ile.ng",
+                                adminEmail: user?.email || "admin@ilestays.ng",
                                 notes: `Admin initiated support masquerade session for Host ${selectedHost.email}.`,
                                 createdAt: new Date().toISOString(),
                                 ipAddress: "127.0.0.1",
@@ -3922,7 +4487,7 @@ export default function AdminPortalPage() {
               <div className="p-3 bg-surface-muted rounded-xl border border-border flex justify-between items-center">
                 <div>
                   <span className="font-semibold block text-primary">Ilé Administrator</span>
-                  <span className="text-[10px] text-primary-muted">admin@ile.ng</span>
+                  <span className="text-[10px] text-primary-muted">admin@ilestays.ng</span>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-status-success-bg text-status-success-text border border-status-success-border">
                   Super Admin
@@ -3931,7 +4496,7 @@ export default function AdminPortalPage() {
               <div className="p-3 bg-surface-muted rounded-xl border border-border flex justify-between items-center">
                 <div>
                   <span className="font-semibold block text-primary">Abuja KYC Desk</span>
-                  <span className="text-[10px] text-primary-muted">compliance.abj@ile.ng</span>
+                  <span className="text-[10px] text-primary-muted">compliance.abj@ilestays.ng</span>
                 </div>
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-status-info-bg text-status-info-text border border-status-info-border">
                   Compliance Officer
@@ -4009,21 +4574,86 @@ export default function AdminPortalPage() {
             </div>
 
             <form onSubmit={handleDisbursePayout} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
-                  Paystack Transfer Reference / Bank Ref
+              {/* Method Toggle: Automated Paystack Transfer vs Manual Wire */}
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-primary">
+                  Disbursement Execution Method
                 </label>
-                <input
-                  type="text"
-                  value={disburseTransferRef}
-                  onChange={(e) => setDisburseTransferRef(e.target.value)}
-                  placeholder="e.g. TRF_20261022_9921"
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary font-mono text-xs focus:outline-none focus:border-accent"
-                />
-                <span className="text-[10px] text-primary-muted mt-0.5 block">
-                  Reference recorded in ledger journal for reconciliation.
-                </span>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDisburseMethod("automated");
+                      setDisburseTransferRef("");
+                    }}
+                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
+                      disburseMethod === "automated"
+                        ? "bg-accent/10 border-accent text-accent font-semibold"
+                        : "bg-surface border-border text-primary-muted hover:border-primary/40"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-primary">
+                      <Zap size={14} className={disburseMethod === "automated" ? "text-accent" : "text-primary-muted"} />
+                      <span>Automated Paystack</span>
+                    </div>
+                    <span className="text-[10.5px] text-primary-secondary leading-tight">
+                      Dispatched via Paystack Transfers API with generated ILE_TRF_ reference.
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDisburseMethod("manual");
+                      setDisburseTransferRef(`TRF-${Date.now().toString(36).toUpperCase()}`);
+                    }}
+                    className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer ${
+                      disburseMethod === "manual"
+                        ? "bg-accent/10 border-accent text-accent font-semibold"
+                        : "bg-surface border-border text-primary-muted hover:border-primary/40"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs text-primary">
+                      <CreditCard size={14} className={disburseMethod === "manual" ? "text-accent" : "text-primary-muted"} />
+                      <span>Manual Bank Wire</span>
+                    </div>
+                    <span className="text-[10.5px] text-primary-secondary leading-tight">
+                      Record an offline transfer executed via bank app with a custom reference code.
+                    </span>
+                  </button>
+                </div>
               </div>
+
+              {disburseMethod === "automated" ? (
+                <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-emerald-950 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-xs">
+                    <CheckCircle2 size={13} className="text-emerald-700" />
+                    <span>Direct Host Transfer Gateway</span>
+                  </div>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    Ilé will resolve/create the Paystack recipient code and dispatch{" "}
+                    <strong>{formatNaira(disburseModalPayout.amount || 0)}</strong> directly to{" "}
+                    <strong>{disburseModalPayout.accountName || "Host"}</strong> ({disburseModalPayout.bankName}).
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                    Manual Wire Reference Code
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={disburseTransferRef}
+                    onChange={(e) => setDisburseTransferRef(e.target.value)}
+                    placeholder="e.g. TRF_20261022_9921"
+                    className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary font-mono text-xs focus:outline-none focus:border-accent"
+                  />
+                  <span className="text-[10px] text-primary-muted mt-0.5 block">
+                    Bank session ID, NIBSS reference, or external wire code recorded in the ledger.
+                  </span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
@@ -4033,7 +4663,7 @@ export default function AdminPortalPage() {
                   rows={2}
                   value={disburseNotes}
                   onChange={(e) => setDisburseNotes(e.target.value)}
-                  placeholder="e.g. Manual bank wire verified via GTBank business portal"
+                  placeholder="e.g. Verified via GTBank corporate portal or routine check-in release"
                   className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent resize-none"
                 />
               </div>
@@ -4054,17 +4684,81 @@ export default function AdminPortalPage() {
                   {isDisbursing ? (
                     <>
                       <Loader2 size={13} className="animate-spin" />
-                      <span>Posting Ledger...</span>
+                      <span>{disburseMethod === "automated" ? "Dispatching Paystack Transfer..." : "Posting Ledger..."}</span>
                     </>
                   ) : (
                     <>
                       <CheckCircle2 size={14} />
-                      <span>Confirm &amp; Disburse Payout</span>
+                      <span>{disburseMethod === "automated" ? "Authorize & Dispatch Transfer" : "Confirm & Record Payout"}</span>
                     </>
                   )}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Process Due Check-In Settlements ── */}
+      {showSettlementConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-surface rounded-3xl max-w-md w-full p-6 space-y-5 text-primary shadow-2xl border border-border">
+            <div className="flex items-center justify-between pb-3 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Zap size={20} className="text-[#0B5D45]" />
+                <h3 className="font-bold text-base text-primary">Process Due Check-In Settlements</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSettlementConfirmModal(false)}
+                className="p-1.5 text-primary-muted hover:text-primary rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs leading-relaxed text-primary-secondary">
+              <p>
+                This operation evaluates all confirmed bookings where guests safely checked in more than 24 hours ago (clearing the guest dispute protection escrow window).
+              </p>
+              <div className="p-3 bg-surface-muted rounded-xl border border-border space-y-1">
+                <div className="font-bold text-primary flex items-center gap-1.5">
+                  <ShieldCheck size={14} className="text-[#0B5D45]" />
+                  <span>Double-Entry Escrow Settlement</span>
+                </div>
+                <p className="text-[11px] text-primary-muted">
+                  For each eligible booking, the ledger moves funds from Escrow (Liability) to Payout Payable (Liability) and Platform Commission (Revenue), transitioning the payout to <span className="font-bold text-blue-700">READY_FOR_PAYOUT</span>.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-3 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setShowSettlementConfirmModal(false)}
+                className="px-4 py-2 border border-border rounded-xl text-xs font-semibold hover:bg-surface-muted transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingSettlements}
+                onClick={handleProcessDueSettlements}
+                className="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
+              >
+                {isProcessingSettlements ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" />
+                    <span>Processing Settlements...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap size={14} />
+                    <span>Run Check-In Settlements</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

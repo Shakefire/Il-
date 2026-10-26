@@ -52,10 +52,10 @@ export default function MessagesComingSoonPage() {
           <div className="pt-2 border-t border-[#F0EFEB] flex items-center justify-between text-xs sm:text-sm text-[#8B8B86]">
             <span>Guest Desk:</span>
             <a
-              href="mailto:concierge@ile.ng"
+              href="mailto:hello@ilestays.ng"
               className="text-[#0B5D45] hover:text-[#084936] font-medium transition-colors"
             >
-              concierge@ile.ng
+              hello@ilestays.ng
             </a>
           </div>
         </div>

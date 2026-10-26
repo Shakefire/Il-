@@ -86,30 +86,16 @@ export const api = {
     return body;
   },
 
+  // DECOMMISSIONED (P0 Security Remediation)
+  // Direct payment bypass is permanently removed. Use initializePayment + verifyPayment.
   async payBooking(
-    bookingId: string,
-    data: {
-      paymentMethod?: string;
-      paymentReference?: string;
-    },
-    accessToken?: string
-  ) {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      ...getAuthHeader(),
-    };
-    if (accessToken) headers["X-Access-Token"] = accessToken;
-
-    const res = await fetch(`/api/bookings/${bookingId}/pay`, {
-      method: "POST",
-      headers,
-      credentials: "include",
-      body: JSON.stringify(data),
-    });
-
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || "Payment processing failed");
-    return body;
+    _bookingId: string,
+    _data: { paymentMethod?: string; paymentReference?: string },
+    _accessToken?: string
+  ): Promise<never> {
+    throw new Error(
+      "Direct booking payment bypass is disabled. Payments must be verified via Paystack gateway."
+    );
   },
 
   async getBooking(bookingId: string, accessToken?: string) {
@@ -751,15 +737,20 @@ export const api = {
   },
 
   // Payments API (Paystack Integration)
-  async initializePayment(bookingIdOrRef: string) {
+  async initializePayment(bookingIdOrRef: string, accessToken?: string) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...getAuthHeader(),
+    };
+    if (accessToken) {
+      headers["X-Access-Token"] = accessToken;
+    }
+
     const res = await fetch("/api/payments/initialize", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...getAuthHeader(),
-      },
+      headers,
       credentials: "include",
-      body: JSON.stringify({ bookingId: bookingIdOrRef }),
+      body: JSON.stringify({ bookingId: bookingIdOrRef, accessToken }),
     });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || "Failed to initialize payment");
@@ -874,5 +865,29 @@ export const api = {
     });
     if (!res.ok) throw new Error("Failed to load journals");
     return res.json();
+  },
+
+  async getAdminTransferBalance() {
+    const res = await fetch("/api/admin/finance/transfers/balance", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to load Paystack transfer balance");
+    return body;
+  },
+
+  async processDueSettlements() {
+    const res = await fetch("/api/admin/finance/settlements/process-due", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to process due settlements");
+    return body;
   },
 };

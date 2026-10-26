@@ -18,15 +18,15 @@ services:
       - key: EMAIL_PROVIDER
         value: resend
       - key: EMAIL_FROM
-        value: noreply@notifications.9jaroommate.com
+        value: Ilé <hello@notifications.ilestays.ng>
       - key: RESEND_DOMAIN
-        value: notifications.9jaroommate.com
+        value: notifications.ilestays.ng
       - key: R2_ACCOUNT_ID
         value: c1c242c15972c98b84e9d48c43d1127f
       - key: R2_BUCKET_NAME
         value: storageapp
       - key: R2_FOLDER_PREFIX
-        value: storageapp/9jaroommate.com/
+        value: storageapp/ilestays.ng/
       - key: GEOCODING_API_URL
         value: https://nominatim.openstreetmap.org
       - key: DATABASE_URL

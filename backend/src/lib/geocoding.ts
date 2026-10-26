@@ -248,7 +248,7 @@ export async function resolveLocation(query: string): Promise<GeocodedLocation |
       `${baseUrl}/search?q=${encoded}&countrycodes=ng&format=json&limit=1`,
       {
         headers: {
-          "User-Agent": "IleAccommodationMarketplace/1.0 (contact@ile.ng)",
+          "User-Agent": "IleAccommodationMarketplace/1.0 (info@ilestays.ng)",
         },
       }
     );

@@ -15,18 +15,32 @@ export async function GET(
   try {
     const result = await verifyPayment(reference);
     if (!result.verified) {
-      // Payment not successful on Paystack — cancel booking and release dates
-      try {
-        await processFailedPayment({
-          reference,
-          reason: result.error || "Payment was not completed on Paystack.",
-        });
-      } catch (cancelErr) {
-        console.warn("[API] Failed to cancel booking after unverified payment:", cancelErr);
+      if (result.status === "failed") {
+        // Terminal failure from payment provider — cancel booking and release dates
+        try {
+          await processFailedPayment({
+            reference,
+            reason: result.error || "Payment was declined by financial institution.",
+          });
+        } catch (cancelErr) {
+          console.warn("[API] Failed to cancel booking after declined payment:", cancelErr);
+        }
+        return NextResponse.json(
+          { verified: false, status: "failed", error: result.error || "Payment was declined." },
+          { status: 400 }
+        );
       }
+
+      // Transient status (pending, ongoing, abandoned, or network timeout)
+      // Do NOT release availability blocks prematurely; preserve blocks while pending.
       return NextResponse.json(
-        { verified: false, error: result.error || "Payment could not be verified." },
-        { status: 400 }
+        {
+          verified: false,
+          status: result.status || "pending",
+          pending: true,
+          error: result.error || "Payment verification is pending or incomplete.",
+        },
+        { status: 200 }
       );
     }
     return NextResponse.json(result);

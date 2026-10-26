@@ -65,8 +65,11 @@ export const payouts = pgTable("payouts", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   approvedBy: varchar("approved_by", { length: 100 }).references(() => users.id, { onDelete: "set null" }),
   disbursedAt: timestamp("disbursed_at", { withTimezone: true }),
+  paystackRecipientCode: varchar("paystack_recipient_code", { length: 100 }),
   paystackTransferCode: text("paystack_transfer_code"),
   paystackTransferRef: text("paystack_transfer_ref"),
+  transferStatus: varchar("transfer_status", { length: 50 }).notNull().default("UNINITIATED"), // 'UNINITIATED' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'REVERSED'
+  transferFailureReason: text("transfer_failure_reason"),
   receiptUrl: text("receipt_url"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

@@ -65,7 +65,13 @@ function TripsPageContent() {
   const [accessDetails, setAccessDetails] = useState<PrivateAccessDetails | null>(null);
   const [loadingAccess, setLoadingAccess] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
-  const [paymentNotice, setPaymentNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [paymentNotice, setPaymentNotice] = useState<{
+    type: "success" | "pending" | "error";
+    title: string;
+    message: string;
+    ref?: string;
+  } | null>(null);
+  const [reverifying, setReverifying] = useState(false);
 
   // Fast booking lookup states
   const [lookupRef, setLookupRef] = useState("");
@@ -142,62 +148,80 @@ function TripsPageContent() {
   }, []);
 
   // Check for Paystack redirect parameters and auto-verify
+  const verifyAndRefresh = useCallback(async (targetRef?: string) => {
+    const ref = targetRef || paymentRef;
+    if (!ref) return;
+
+    setReverifying(true);
+    try {
+      const verifyRes = await api.verifyPayment(ref);
+
+      if (verifyRes && verifyRes.verified) {
+        setPaymentNotice({
+          type: "success",
+          title: "Payment Confirmed & Stay Secured",
+          message: `Your payment was successfully verified with Paystack (Ref: ${ref})! Your booking is confirmed and access details are unlocked.`,
+          ref,
+        });
+
+        if (verifyRes.booking) {
+          const confirmedB = verifyRes.booking;
+          try {
+            const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+            const merged = [confirmedB, ...stored.filter((b: any) => b.id !== confirmedB.id)];
+            localStorage.setItem("ile_guest_bookings", JSON.stringify(merged));
+          } catch {}
+
+          setBookings((prev) => [confirmedB, ...prev.filter((b) => b.id !== confirmedB.id)]);
+          setLoadingBookings(false);
+
+          if (confirmedB.privateDetails) {
+            setAccessDetails(confirmedB.privateDetails);
+          }
+          setSelectedBookingForAccess(confirmedB);
+        }
+
+        await loadBookings();
+      } else if (verifyRes && (verifyRes.pending || verifyRes.status === "pending")) {
+        setPaymentNotice({
+          type: "pending",
+          title: "Payment Processing with Paystack",
+          message: `Payment reference ${ref} is currently being verified with Paystack. We are awaiting final settlement confirmation — please do not initiate a second payment.`,
+          ref,
+        });
+      } else {
+        setPaymentNotice({
+          type: "error",
+          title: "Payment Unsuccessful",
+          message: verifyRes?.error || `Payment for reference ${ref} could not be confirmed or was declined. Any temporary hold has been released.`,
+          ref,
+        });
+        try {
+          const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+          const filtered = stored.filter((b: any) => !b.id?.includes(ref) && b.referenceCode !== ref);
+          localStorage.setItem("ile_guest_bookings", JSON.stringify(filtered));
+        } catch {}
+      }
+    } catch (err: any) {
+      console.warn("Payment auto-verification notice:", err);
+      setPaymentNotice({
+        type: "error",
+        title: "Payment Verification Notice",
+        message: err.message || "Payment was not completed or could not be verified on Paystack. If you were debited, your bank will auto-reverse or contact support@ilestays.ng.",
+        ref,
+      });
+    } finally {
+      setReverifying(false);
+    }
+  }, [paymentRef, loadBookings]);
+
   useEffect(() => {
     const paymentStatus = searchParams.get("payment");
 
-    if (paymentRef && (paymentStatus === "success" || paymentStatus === "mock" || searchParams.has("trxref"))) {
-      let isMounted = true;
-      const verifyAndRefresh = async () => {
-        try {
-          const verifyRes = await api.verifyPayment(paymentRef);
-          if (!isMounted) return;
-          if (verifyRes && verifyRes.verified) {
-            setPaymentNotice({
-              type: "success",
-              message: `Payment verified successfully (Ref: ${paymentRef})! Your stay is confirmed and access details are unlocked.`,
-            });
-
-            if (verifyRes.booking) {
-              const confirmedB = verifyRes.booking;
-              try {
-                const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
-                const merged = [confirmedB, ...stored.filter((b: any) => b.id !== confirmedB.id)];
-                localStorage.setItem("ile_guest_bookings", JSON.stringify(merged));
-              } catch {}
-
-              setBookings((prev) => [confirmedB, ...prev.filter((b) => b.id !== confirmedB.id)]);
-              setLoadingBookings(false);
-
-              if (confirmedB.privateDetails) {
-                setAccessDetails(confirmedB.privateDetails);
-              }
-              setSelectedBookingForAccess(confirmedB);
-            }
-
-            await loadBookings();
-          }
-        } catch (err: any) {
-          if (isMounted) {
-            console.warn("Payment auto-verification notice:", err);
-            setPaymentNotice({
-              type: "error",
-              message: "Payment was not completed or could not be verified on Paystack. Any temporary date hold has been released.",
-            });
-            try {
-              const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
-              const filtered = stored.filter((b: any) => !b.id?.includes(paymentRef) && b.referenceCode !== paymentRef);
-              localStorage.setItem("ile_guest_bookings", JSON.stringify(filtered));
-            } catch {}
-          }
-        }
-      };
-
-      verifyAndRefresh();
-      return () => {
-        isMounted = false;
-      };
+    if (paymentRef && (paymentStatus === "success" || searchParams.has("trxref"))) {
+      verifyAndRefresh(paymentRef);
     }
-  }, [searchParams, loadBookings, paymentRef]);
+  }, [searchParams, paymentRef, verifyAndRefresh]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -247,34 +271,117 @@ function TripsPageContent() {
     (b) => b.checkOutDate < todayStr || b.status === "CANCELLED"
   );
 
+  const renderBookingStatusBadge = (status: string) => {
+    switch (status) {
+      case "CONFIRMED":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
+            Confirmed
+          </span>
+        );
+      case "CHECKED_IN":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-teal-100 text-teal-800">
+            Checked In
+          </span>
+        );
+      case "AWAITING_PAYMENT":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
+            Awaiting Payment
+          </span>
+        );
+      case "REFUND_PENDING":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
+            Refund Processing
+          </span>
+        );
+      case "REFUNDED":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">
+            Refunded
+          </span>
+        );
+      case "CANCELLED":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-rose-100 text-rose-800">
+            Cancelled
+          </span>
+        );
+      case "COMPLETED":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-gray-100 text-gray-700">
+            Completed
+          </span>
+        );
+      default:
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-100 text-stone-800">
+            {status}
+          </span>
+        );
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#FAFAF8] py-10 px-4 sm:px-6 lg:px-8">
       <div className="max-w-5xl mx-auto space-y-8">
         {/* Payment Verification Banner */}
         {paymentNotice && (
           <div
-            className={`p-4 rounded-2xl flex items-center justify-between shadow-sm animate-in fade-in ${
+            className={`p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm border animate-in fade-in ${
               paymentNotice.type === "success"
-                ? "bg-emerald-50 border border-emerald-200 text-emerald-900"
-                : "bg-red-50 border border-red-200 text-red-900"
+                ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+                : paymentNotice.type === "pending"
+                ? "bg-amber-50 border-amber-200 text-amber-950"
+                : "bg-rose-50 border-rose-200 text-rose-950"
             }`}
           >
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                <CheckCircle2 size={20} />
+            <div className="flex items-start gap-3">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                  paymentNotice.type === "success"
+                    ? "bg-emerald-100 text-emerald-700"
+                    : paymentNotice.type === "pending"
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-rose-100 text-rose-700"
+                }`}
+              >
+                {paymentNotice.type === "success" && <CheckCircle2 size={20} />}
+                {paymentNotice.type === "pending" && <Loader2 size={20} className="animate-spin" />}
+                {paymentNotice.type === "error" && <AlertCircle size={20} />}
               </div>
-              <div>
-                <h4 className="font-bold text-sm">Paystack Payment Successful</h4>
-                <p className="text-xs text-emerald-800">{paymentNotice.message}</p>
+              <div className="space-y-1">
+                <h4 className="font-bold text-sm tracking-tight">{paymentNotice.title}</h4>
+                <p className="text-xs leading-relaxed opacity-90">{paymentNotice.message}</p>
+                {paymentNotice.ref && (
+                  <p className="text-[11px] font-mono opacity-75">Paystack Reference: {paymentNotice.ref}</p>
+                )}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => setPaymentNotice(null)}
-              className="text-emerald-700 hover:text-emerald-900 font-bold p-1 text-sm"
-            >
-              ✕
-            </button>
+
+            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+              {paymentNotice.type === "pending" && (
+                <button
+                  type="button"
+                  disabled={reverifying}
+                  onClick={() => verifyAndRefresh(paymentNotice.ref)}
+                  className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50"
+                >
+                  {reverifying ? <Loader2 size={13} className="animate-spin" /> : null}
+                  <span>Re-check Status</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setPaymentNotice(null)}
+                className="p-1 rounded-md opacity-70 hover:opacity-100 transition-opacity"
+                aria-label="Dismiss notice"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
         )}
 
@@ -406,15 +513,7 @@ function TripsPageContent() {
 
                         <div className="space-y-1.5">
                           <div className="flex items-center gap-2">
-                            <span
-                              className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                                b.status === "CONFIRMED"
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : "bg-amber-100 text-amber-800"
-                              }`}
-                            >
-                              {b.status}
-                            </span>
+                            {renderBookingStatusBadge(b.status)}
                             <span className="text-xs font-mono text-[#8B8B86]">
                               #{b.referenceCode}
                             </span>
@@ -452,14 +551,34 @@ function TripsPageContent() {
                         <p className="text-base font-bold text-[#171717] self-start md:self-end">
                           {formatNaira(b.totalAmount)}
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenAccessModal(b)}
-                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-sm"
-                        >
-                          <KeyRound size={14} />
-                          <span>View Access &amp; Gate Pass</span>
-                        </button>
+                        {b.status === "AWAITING_PAYMENT" ? (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const res = await api.initializePayment(b.id, b.referenceCode);
+                                if (res.authorizationUrl) {
+                                  window.location.href = res.authorizationUrl;
+                                }
+                              } catch (err: any) {
+                                alert(err.message || "Failed to initialize payment gateway.");
+                              }
+                            }}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700 text-xs font-semibold transition-colors shadow-sm"
+                          >
+                            <CreditCard size={14} />
+                            <span>Complete Payment</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenAccessModal(b)}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-sm"
+                          >
+                            <KeyRound size={14} />
+                            <span>View Access &amp; Gate Pass</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -485,9 +604,7 @@ function TripsPageContent() {
                           {b.checkInDate} — {b.checkOutDate} · {formatNaira(b.totalAmount)}
                         </p>
                       </div>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded bg-neutral-100 text-[#6B6B67]">
-                        {b.status}
-                      </span>
+                      {renderBookingStatusBadge(b.status)}
                     </div>
                   ))}
                 </div>

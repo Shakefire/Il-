@@ -50,6 +50,8 @@ export async function buildApp(): Promise<FastifyInstance> {
       if (!origin) return cb(null, true);
       const allowedOrigins = [
         env.FRONTEND_URL,
+        "https://ilestays.ng",
+        "https://www.ilestays.ng",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:4000",

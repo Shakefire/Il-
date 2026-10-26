@@ -61,6 +61,7 @@ export const profiles = pgTable("profiles", {
   bankAccountNumber: varchar("bank_account_number", { length: 20 }),
   bankAccountName: varchar("bank_account_name", { length: 150 }),
   bankAccountVerifiedAt: timestamp("bank_account_verified_at", { withTimezone: true }),
+  paystackRecipientCode: varchar("paystack_recipient_code", { length: 100 }),
   // Preliminary property draft collected in onboarding
   propertyDraftData: text("property_draft_data"),
   // Admin review outcome

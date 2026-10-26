@@ -4,6 +4,7 @@ import { requireRole } from "../../lib/security";
 import { parsePagination } from "../../lib/pagination";
 import { FinanceService } from "../finance/finance.service";
 import { LedgerService } from "../finance/ledger.service";
+import { PaystackTransferService } from "../payments/paystack-transfer.service";
 
 export async function adminRoutes(fastify: FastifyInstance) {
   // GET /api/admin/stats
@@ -363,6 +364,183 @@ export async function adminRoutes(fastify: FastifyInstance) {
       return reply.send({ message: "Booking refund successfully executed.", ...result });
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/settlements/process-due — Automated check-in revenue recognition
+  fastify.post("/finance/settlements/process-due", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    try {
+      const result = await FinanceService.processDueSettlements();
+      return reply.send({
+        success: true,
+        message: `Processed ${result.processedCount} check-in settlements.`,
+        ...result,
+      });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/transfers/balance — Paystack transfer balance query
+  fastify.get("/finance/transfers/balance", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+
+    try {
+      const balance = await PaystackTransferService.checkTransferBalance();
+      return reply.send({ success: true, ...balance });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/refunds/:id/approve
+  fastify.post("/finance/refunds/:id/approve", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    try {
+      const result = await FinanceService.approveRefund(session.userId, id);
+      return reply.send({ success: true, message: "Refund approved.", refund: result });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/refunds/:id/reject
+  fastify.post("/finance/refunds/:id/reject", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { adminNotes?: string };
+    try {
+      const result = await FinanceService.rejectRefund(session.userId, id, body.adminNotes);
+      return reply.send({ success: true, message: "Refund rejected.", refund: result });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/refunds/:id/process
+  fastify.post("/finance/refunds/:id/process", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { paystackRefundId?: string };
+    try {
+      const result = await FinanceService.processApprovedRefund(session.userId, id, { paystackRefundId: body.paystackRefundId });
+      return reply.send({ success: true, message: "Refund processed.", refundId: result.refundId, paystackRefundId: result.paystackRefundId });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/reports/:type — Financial reports (collections, payouts, refunds, settlements) with CSV
+  fastify.get("/finance/reports/:type", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { type } = request.params as { type: string };
+    const q = request.query as Record<string, string>;
+    const from = q.from || undefined;
+    const to = q.to || undefined;
+    const limit = q.limit ? parseInt(q.limit, 10) : 200;
+    const offset = q.offset ? parseInt(q.offset, 10) : 0;
+    const format = q.format;
+    const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+
+    function toCSV(headers: string[], rows: (string | number | null | undefined)[][]): string {
+      const esc = (v: string | number | null | undefined) => {
+        if (v == null) return "";
+        const s = String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      return [[...headers].map(esc).join(","), ...rows.map(r => r.map(esc).join(","))].join("\n");
+    }
+    const naira = (k: number | null | undefined) => ((k ?? 0) / 100).toFixed(2);
+
+    try {
+      switch (type) {
+        case "collections": {
+          const result = await FinanceService.getCollectionsReport({ from, to, limit, offset });
+          if (format === "csv") {
+            const headers = ["Booking Ref","Property","Guest Email","Gross (NGN)","Paystack Fee (NGN)","Net (NGN)","Paid At","Currency"];
+            const rows = result.rows.map((r: any) => [r.bookingRef,r.propertyName,r.guestEmail,naira(r.amount),naira(r.paystackFeeAmount),naira(r.netAmount),r.paidAt?new Date(r.paidAt).toISOString():"",r.currency]);
+            rows.push(["TOTAL","","",naira(result.totals.totalGross),naira(result.totals.totalFees),naira(result.totals.totalNet),"",""]);
+            reply.header("Content-Type","text/csv").header("Content-Disposition",`attachment; filename="ile-collections-${today}.csv"`);
+            return reply.send(toCSV(headers,rows));
+          }
+          return reply.send(result);
+        }
+        case "payouts": {
+          const result = await FinanceService.getPayoutsReport({ from, to, status: q.status, limit, offset });
+          if (format === "csv") {
+            const headers = ["Booking Ref","Property","Host Name","Host Email","Amount (NGN)","Status","Disbursed At","Transfer Ref"];
+            const rows = result.rows.map((r: any) => [r.bookingRef,r.propertyName,r.hostName,r.hostEmail,naira(r.amount),r.status,r.disbursedAt?new Date(r.disbursedAt).toISOString():"",r.paystackTransferRef||""]);
+            rows.push(["TOTAL","","","",naira(result.totals.totalDisbursed),"","",""]);
+            reply.header("Content-Type","text/csv").header("Content-Disposition",`attachment; filename="ile-payouts-${today}.csv"`);
+            return reply.send(toCSV(headers,rows));
+          }
+          return reply.send(result);
+        }
+        case "refunds": {
+          const result = await FinanceService.getRefundsReport({ from, to, limit, offset });
+          if (format === "csv") {
+            const headers = ["Booking Ref","Property","Guest Email","Gross Paid (NGN)","Fee Retained (NGN)","Refunded (NGN)","Status","Processed At","Reason"];
+            const rows = result.rows.map((r: any) => [r.bookingRef,r.propertyName,r.guestEmail,naira(r.grossPaid),naira(r.nonRefundableProcessingFee),naira(r.refundableAmount),r.status,r.processedAt?new Date(r.processedAt).toISOString():"",r.reason||""]);
+            rows.push(["TOTAL","","","",naira(result.totals.totalFeeRetained),naira(result.totals.totalRefunded),"","",""]);
+            reply.header("Content-Type","text/csv").header("Content-Disposition",`attachment; filename="ile-refunds-${today}.csv"`);
+            return reply.send(toCSV(headers,rows));
+          }
+          return reply.send(result);
+        }
+        case "settlements": {
+          const result = await FinanceService.getSettlementsReport({ limit, offset });
+          if (format === "csv") {
+            const headers = ["Booking Ref","Property","Host Name","Host Email","Check-In","Check-Out","Total Amount (NGN)","Accommodation (NGN)","Commission (NGN)","Host Net (NGN)","Payout Status"];
+            const rows = result.settlements.map((r: any) => [r.bookingRef,r.propertyName,r.hostName,r.hostEmail,r.checkInDate||"",r.checkOutDate||"",naira(r.totalAmount),naira(r.accommodationSubtotal),naira(r.hostCommissionAmount),naira(r.hostNetAmount),r.payoutStatus]);
+            reply.header("Content-Type","text/csv").header("Content-Disposition",`attachment; filename="ile-settlements-${today}.csv"`);
+            return reply.send(toCSV(headers,rows));
+          }
+          return reply.send(result);
+        }
+        default:
+          return reply.status(400).send({ error: `Unknown report type: ${type}` });
+      }
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/audit-log — Financial audit trail
+  fastify.get("/finance/audit-log", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const q = request.query as Record<string, string>;
+    try {
+      const result = await FinanceService.getFinancialAuditLog({
+        limit: q.limit ? parseInt(q.limit, 10) : 100,
+        offset: q.offset ? parseInt(q.offset, 10) : 0,
+        entityType: q.entityType,
+        action: q.action,
+      });
+      return reply.send({ success: true, ...result });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/reconciliation — Reconciliation summary
+  fastify.get("/finance/reconciliation", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    try {
+      const result = await FinanceService.getReconciliationSummary();
+      return reply.send({ success: true, ...result });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
     }
   });
 }

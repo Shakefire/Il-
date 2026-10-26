@@ -53,7 +53,7 @@ async function run() {
       payload: passwordResetEmail({
         name: "Test User",
         email: TARGET_EMAIL,
-        resetUrl: "https://ile.ng/reset-password?token=sample_reset_token_12345",
+        resetUrl: "https://ilestays.ng/reset-password?token=sample_reset_token_12345",
       }),
     },
     {
@@ -176,7 +176,7 @@ async function run() {
         checkIn: "2026-11-10",
         checkOut: "2026-11-14",
         totalAmount: 342000,
-        paymentUrl: "https://ile.ng/stay/vi-waterfront-villa",
+        paymentUrl: "https://ilestays.ng/stay/vi-waterfront-villa",
       }),
     },
     {
@@ -224,7 +224,7 @@ async function run() {
         propertyTitle: "The Hibiscus Penthouse",
         referenceCode: "ILE-2026-HIB-789",
         amount: 302000,
-        retryUrl: "https://ile.ng/stay/the-hibiscus-penthouse",
+        retryUrl: "https://ilestays.ng/stay/the-hibiscus-penthouse",
         reason: "Card payment declined by issuing bank (Insufficient funds / transaction limit exceeded).",
       }),
     },

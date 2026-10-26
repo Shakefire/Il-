@@ -1,6 +1,7 @@
 import { env } from "../../config/env";
 import { getDb, schema } from "../../db/client";
 import { eq } from "drizzle-orm";
+import { PaystackTransferService } from "./paystack-transfer.service";
 
 export interface PaystackBank {
   name: string;
@@ -308,11 +309,27 @@ export class BankResolutionService {
       );
     }
 
+    // 3. Register as Paystack Transfer Recipient for automated host payouts
+    let paystackRecipientCode = profile.paystackRecipientCode || null;
+    try {
+      const recipientRes = await PaystackTransferService.createTransferRecipient({
+        name: resolution.accountName,
+        accountNumber: resolution.accountNumber!,
+        bankCode: params.bankCode,
+        description: `Host Payout - ${resolution.accountName || hostUserId}`,
+      });
+      if (recipientRes.success && recipientRes.recipientCode) {
+        paystackRecipientCode = recipientRes.recipientCode;
+      }
+    } catch (recErr: any) {
+      console.warn(`[BankResolution] Transfer recipient registration notice: ${recErr.message}`);
+    }
+
     const previousBank = profile.bankName;
     const previousMasked = maskAccountNumber(profile.bankAccountNumber);
     const verifiedAt = new Date();
 
-    // 3. Atomic database update
+    // 4. Atomic database update
     await db
       .update(schema.profiles)
       .set({
@@ -321,11 +338,12 @@ export class BankResolutionService {
         bankAccountNumber: resolution.accountNumber,
         bankAccountName: resolution.accountName,
         bankAccountVerifiedAt: verifiedAt,
+        paystackRecipientCode,
         updatedAt: verifiedAt,
       })
       .where(eq(schema.profiles.userId, hostUserId));
 
-    // 4. Record audit log
+    // 5. Record audit log
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
       userId: adminActorId || hostUserId,
@@ -338,6 +356,7 @@ export class BankResolutionService {
         newBank: resolution.bankName,
         newAccountMasked: maskAccountNumber(resolution.accountNumber),
         resolvedAccountName: resolution.accountName,
+        paystackRecipientCode,
         verifiedAt: verifiedAt.toISOString(),
         actor: adminActorId ? `ADMIN:${adminActorId}` : `HOST:${hostUserId}`,
       }),

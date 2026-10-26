@@ -354,13 +354,13 @@ export class LedgerService {
       bookingId: string;
       hostId: string;
       amount: number;
-      adminId: string;
+      adminId?: string | null;
       transferRef?: string | null;
       receiptUrl?: string | null;
       notes?: string | null;
     }
   ) {
-    const { payoutId, bookingId, amount, adminId, transferRef = null, receiptUrl = null, notes = null } = params;
+    const { payoutId, bookingId, amount, adminId = null, transferRef = null, receiptUrl = null, notes = null } = params;
 
     const [payout] = await tx
       .select()
@@ -392,8 +392,8 @@ export class LedgerService {
     const result = await this.postJournalEntry(tx, {
       reference: payoutId,
       eventType: "HOST_PAYOUT_DISBURSED",
-      narration: `Admin disbursed host payout for booking #${bookingId} (Ref: ${transferRef || "MANUAL_BANK_TRANSFER"})`,
-      createdById: adminId,
+      narration: `Host payout disbursed for booking #${bookingId} (Ref: ${transferRef || "MANUAL_BANK_TRANSFER"})`,
+      createdById: adminId || null,
       entries,
     });
 
@@ -402,7 +402,7 @@ export class LedgerService {
       .update(schema.payouts)
       .set({
         status: "PAID",
-        approvedBy: adminId,
+        approvedBy: adminId || null,
         approvedAt: new Date(),
         disbursedAt: new Date(),
         paystackTransferRef: transferRef,

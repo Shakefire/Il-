@@ -173,8 +173,8 @@ export default function TermsPage() {
           </h3>
           <p className="text-[14.5px] text-[#6B6B67] leading-relaxed">
             These terms are governed by and construed in accordance with the laws of the Federal Republic of Nigeria. For questions regarding your booking, dispute mediation, or host policies, reach out directly to our concierge team at{" "}
-            <a href="mailto:concierge@ile.ng" className="text-[#0B5D45] font-medium hover:underline">
-              concierge@ile.ng
+            <a href="mailto:hello@ilestays.ng" className="text-[#0B5D45] font-medium hover:underline">
+              hello@ilestays.ng
             </a>.
           </p>
         </section>

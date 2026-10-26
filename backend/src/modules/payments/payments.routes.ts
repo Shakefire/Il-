@@ -11,9 +11,11 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
     const body = request.body as {
       bookingId?: string;
       referenceCode?: string;
+      accessToken?: string;
     };
 
     const targetRef = body?.bookingId || body?.referenceCode;
+    const accessToken = body?.accessToken || (request.headers["x-booking-access-token"] as string) || undefined;
     if (!targetRef) {
       return reply.status(400).send({
         error: "Missing booking identifier (bookingId or referenceCode).",
@@ -21,7 +23,7 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      const result = await initializeBookingPayment(targetRef);
+      const result = await initializeBookingPayment(targetRef, accessToken);
       if (!result.success) {
         return reply.status(400).send({ error: result.error || "Payment initialization failed." });
       }
@@ -42,9 +44,18 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
     try {
       const result = await verifyPayment(params.reference);
       if (!result.verified) {
-        return reply.status(400).send({
+        if (result.status === "failed") {
+          return reply.status(400).send({
+            verified: false,
+            status: "failed",
+            error: result.error || "Payment was declined by financial institution.",
+          });
+        }
+        return reply.status(200).send({
           verified: false,
-          error: result.error || "Payment could not be verified.",
+          status: result.status || "pending",
+          pending: true,
+          error: result.error || "Payment verification is pending or incomplete.",
         });
       }
       return reply.send(result);

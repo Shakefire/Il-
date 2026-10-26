@@ -5,6 +5,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://ilestays.ng"),
   title: "Ilé — Thoughtfully Selected Stays Across Nigeria",
   description:
     "A calm, curated marketplace for premium shortlets, apartments, and residences in Abuja and Lagos. Verified 24/7 power, fiber internet, and gated security.",
@@ -16,6 +17,18 @@ export const metadata: Metadata = {
     "Nigerian hospitality",
     "Victoria Island serviced apartment",
   ],
+  alternates: {
+    canonical: "https://ilestays.ng",
+  },
+  openGraph: {
+    title: "Ilé — Thoughtfully Selected Stays Across Nigeria",
+    description:
+      "A calm, curated marketplace for premium shortlets, apartments, and residences in Abuja and Lagos.",
+    url: "https://ilestays.ng",
+    siteName: "Ilé",
+    locale: "en_NG",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

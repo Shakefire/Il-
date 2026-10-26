@@ -2,8 +2,9 @@ import { z } from "zod";
 import dotenv from "dotenv";
 import path from "path";
 
-// Load .env from project root
+// Load .env from project root or parent directory
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
 
 const envSchema = z.object({
   // ─── Core ───
@@ -24,23 +25,26 @@ const envSchema = z.object({
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
-  R2_BUCKET_NAME: z.string().default("ile-media"),
+  R2_BUCKET_NAME: z.string().default("storageapp"),
   R2_PUBLIC_URL: z.string().url().optional(),
 
-  R2_FOLDER_PREFIX: z.string().default("9jaroommate.com/"),
+  R2_FOLDER_PREFIX: z.string().default("storageapp/ilestays.ng/"),
 
   // ─── Email (Transactional) ───
+  RESEND_API_KEY: z.string().optional(),
   EMAIL_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().email().default("noreply@notifications.9jaroommate.com"),
-  EMAIL_PROVIDER: z.enum(["resend", "sendgrid", "console"]).default("console"),
-  RESEND_DOMAIN: z.string().default("notifications.9jaroommate.com"),
+  EMAIL_FROM: z.string().default("Ilé <hello@notifications.ilestays.ng>"),
+  EMAIL_SUPPORT: z.string().default("support@ilestays.ng"),
+  EMAIL_ENQUIRIES: z.string().default("info@ilestays.ng"),
+  EMAIL_PROVIDER: z.enum(["resend", "sendgrid", "console"]).default("resend"),
+  RESEND_DOMAIN: z.string().default("notifications.ilestays.ng"),
 
   // ─── Payments (Paystack) ───
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),
 
   // ─── Frontend ───
-  FRONTEND_URL: z.string().url().default("http://localhost:3000"),
+  FRONTEND_URL: z.string().url().default("https://ilestays.ng"),
 
   // ─── Geocoding ───
   GEOCODING_API_URL: z.string().url().default("https://nominatim.openstreetmap.org"),
@@ -49,6 +53,13 @@ const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 function validateEnv(): Env {
+  // Support both RESEND_API_KEY and EMAIL_API_KEY aliases
+  const resendKey = process.env.RESEND_API_KEY || process.env.EMAIL_API_KEY;
+  if (resendKey) {
+    if (!process.env.RESEND_API_KEY) process.env.RESEND_API_KEY = resendKey;
+    if (!process.env.EMAIL_API_KEY) process.env.EMAIL_API_KEY = resendKey;
+  }
+
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {

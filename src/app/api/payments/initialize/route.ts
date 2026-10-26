@@ -7,6 +7,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const targetRef = body?.bookingId || body?.referenceCode;
+    const accessToken = body?.accessToken || req.headers.get("x-booking-access-token") || undefined;
     if (!targetRef) {
       return NextResponse.json(
         { error: "Missing booking identifier (bookingId or referenceCode)." },
@@ -14,7 +15,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await initializeBookingPayment(targetRef);
+    const result = await initializeBookingPayment(targetRef, accessToken);
     if (!result.success) {
       return NextResponse.json(
         { error: result.error || "Payment initialization failed." },

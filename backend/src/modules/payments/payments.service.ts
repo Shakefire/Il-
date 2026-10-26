@@ -31,6 +31,7 @@ export interface PaymentInitResult {
 
 export interface PaymentVerifyResult {
   verified: boolean;
+  status?: "success" | "pending" | "failed" | "abandoned" | "unknown";
   reference: string;
   amount: number;
   currency: string;
@@ -46,7 +47,8 @@ export interface PaymentVerifyResult {
 // ─── Initialize Booking Payment ───
 
 export async function initializeBookingPayment(
-  bookingIdOrRef: string
+  bookingIdOrRef: string,
+  accessToken?: string
 ): Promise<PaymentInitResult> {
   const db = getDb();
 
@@ -68,6 +70,16 @@ export async function initializeBookingPayment(
       reference: "",
       gatewayProvider: "PAYSTACK",
       error: "Booking record not found.",
+    };
+  }
+
+  // IDOR & Access Token Authorization Check
+  if (accessToken && booking.accessToken && booking.accessToken !== accessToken) {
+    return {
+      success: false,
+      reference: "",
+      gatewayProvider: "PAYSTACK",
+      error: "Unauthorized: Invalid booking access token.",
     };
   }
 
@@ -248,6 +260,33 @@ export async function processSuccessfulPayment(data: {
       .where(eq(schema.bookings.id, booking.id))
       .returning();
     if (confirmed) confirmedBooking = confirmed;
+
+    // Ensure availability block is active and locked for these confirmed dates
+    const existingBlock = await tx
+      .select({ id: schema.availabilityBlocks.id })
+      .from(schema.availabilityBlocks)
+      .where(
+        and(
+          eq(schema.availabilityBlocks.bookingId, booking.id),
+          eq(schema.availabilityBlocks.propertyId, booking.propertyId)
+        )
+      )
+      .limit(1);
+
+    if (existingBlock.length === 0) {
+      await tx
+        .insert(schema.availabilityBlocks)
+        .values({
+          id: `blk_${crypto.randomUUID()}`,
+          propertyId: booking.propertyId,
+          bookingId: booking.id,
+          startDate: booking.checkInDate,
+          endDate: booking.checkOutDate,
+          type: "RESERVATION",
+          createdAt: new Date(),
+        })
+        .onConflictDoNothing();
+    }
 
     // 7. Calculate Host Earnings (Idempotent check)
     const existingEarnings = await tx
@@ -632,148 +671,421 @@ export function verifyPaystackWebhookSignature(
   rawBody: string,
   signature: string
 ): boolean {
-  if (!env.PAYSTACK_SECRET_KEY) return false;
+  if (!env.PAYSTACK_SECRET_KEY || !signature) return false;
 
   const expectedSignature = crypto
     .createHmac("sha512", env.PAYSTACK_SECRET_KEY)
     .update(rawBody)
     .digest("hex");
 
-  return expectedSignature === signature;
+  const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+  const providedBuffer = Buffer.from(signature, "utf8");
+
+  if (expectedBuffer.length !== providedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expectedBuffer, providedBuffer);
 }
 
 export async function handlePaystackWebhook(
   rawBody: string,
   signature: string
 ): Promise<{ processed: boolean; message: string }> {
-  // 1. Verify HMAC SHA-512 signature
+  // 1. Verify HMAC SHA-512 signature using constant-time comparison
   const isValid = verifyPaystackWebhookSignature(rawBody, signature);
   if (!isValid) {
     throw new Error("Invalid Paystack webhook signature.");
   }
 
   const event = JSON.parse(rawBody);
+  const db = getDb();
 
-  // 2. Handle 'charge.success'
-  if (event.event === "charge.success") {
-    const tx = event.data;
-    const reference = tx.reference;
-    const paidAmountNaira = Math.round(tx.amount / 100); // kobo -> naira
-    const currency = tx.currency;
-    const gatewayReference = String(tx.id);
+  // 2. Extract durable event identifier
+  const rawEventId =
+    event.id != null
+      ? String(event.id)
+      : event.data?.id != null
+      ? String(event.data.id)
+      : event.data?.reference
+      ? `${event.event}_${event.data.reference}`
+      : `${event.event}_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
 
-    await processSuccessfulPayment({
-      reference,
-      gatewayReference,
-      paidAmountNaira,
-      currency,
-      method: tx.channel === "card" ? "CARD" : "TRANSFER",
-      rawPayload: JSON.stringify(event),
-    });
+  const eventType = event.event || "unknown";
 
-    return { processed: true, message: "Webhook charge.success processed successfully." };
+  // 3. Idempotency Check: Guard against duplicate delivery
+  const [existingEvent] = await db
+    .select()
+    .from(schema.webhookEvents)
+    .where(
+      and(
+        eq(schema.webhookEvents.eventId, rawEventId),
+        eq(schema.webhookEvents.gatewayProvider, "PAYSTACK")
+      )
+    )
+    .limit(1);
+
+  if (existingEvent && existingEvent.status === "PROCESSED") {
+    console.info(`[Paystack Webhook] Duplicate event ignored (already PROCESSED): ${rawEventId}`);
+    return {
+      processed: true,
+      message: `Webhook event ${rawEventId} already processed (idempotent).`,
+    };
   }
 
-  // 3. Handle 'charge.failed'
-  if (event.event === "charge.failed") {
-    const tx = event.data;
-    await processFailedPayment({
-      reference: tx.reference,
-      reason: tx.gateway_response || "Payment declined by financial institution.",
+  // 4. Record event receipt in durable webhook audit store
+  const webhookRecordId = existingEvent?.id || `wevt_${crypto.randomUUID()}`;
+  if (!existingEvent) {
+    await db.insert(schema.webhookEvents).values({
+      id: webhookRecordId,
+      eventId: rawEventId,
+      eventType,
+      gatewayProvider: "PAYSTACK",
+      payload: rawBody,
+      signature,
+      status: "RECEIVED",
+      attempts: 1,
+      createdAt: new Date(),
     });
-
-    return { processed: true, message: "Webhook charge.failed processed." };
+  } else {
+    await db
+      .update(schema.webhookEvents)
+      .set({ attempts: (existingEvent.attempts || 1) + 1 })
+      .where(eq(schema.webhookEvents.id, webhookRecordId));
   }
 
-  // 4. Handle 'refund.processed'
-  if (event.event === "refund.processed") {
-    const refundData = event.data;
-    const db = getDb();
+  try {
+    // ─── 5A. Handle 'charge.success' ───
+    if (eventType === "charge.success") {
+      const tx = event.data;
+      const reference = tx.reference;
+      const paidAmountNaira = Math.round(tx.amount / 100); // kobo -> naira
+      const currency = tx.currency;
+      const gatewayReference = String(tx.id);
 
-    // Update refund record status if we can match by Paystack refund ID
-    const paystackRefundId = String(refundData.id || "");
-    if (paystackRefundId) {
+      await processSuccessfulPayment({
+        reference,
+        gatewayReference,
+        paidAmountNaira,
+        currency,
+        method: tx.channel === "card" ? "CARD" : "TRANSFER",
+        rawPayload: JSON.stringify(event),
+      });
+
       await db
-        .update(schema.refunds)
-        .set({
-          status: "PROCESSED",
-          processedAt: new Date(),
-          paystackRefundId: paystackRefundId,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+        .update(schema.webhookEvents)
+        .set({ status: "PROCESSED", processedAt: new Date() })
+        .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+      return { processed: true, message: "Webhook charge.success processed successfully." };
     }
 
-    // Also try to match by transaction reference if refund has it
-    if (refundData.transaction?.reference) {
-      const [payment] = await db
+    // ─── 5B. Handle 'charge.failed' ───
+    if (eventType === "charge.failed") {
+      const tx = event.data;
+      await processFailedPayment({
+        reference: tx.reference,
+        reason: tx.gateway_response || "Payment declined by financial institution.",
+      });
+
+      await db
+        .update(schema.webhookEvents)
+        .set({ status: "PROCESSED", processedAt: new Date() })
+        .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+      return { processed: true, message: "Webhook charge.failed processed." };
+    }
+
+    // ─── 5C. Handle 'transfer.success' ───
+    if (eventType === "transfer.success") {
+      const txData = event.data;
+      const transferRef = txData.reference;
+      const transferCode = txData.transfer_code;
+
+      const [payout] = await db
         .select()
-        .from(schema.payments)
-        .where(eq(schema.payments.reference, refundData.transaction.reference))
+        .from(schema.payouts)
+        .where(
+          or(
+            eq(schema.payouts.paystackTransferRef, transferRef),
+            eq(schema.payouts.paystackTransferCode, transferCode)
+          )
+        )
         .limit(1);
 
-      if (payment) {
-        // Update booking status to REFUNDED
-        await db
-          .update(schema.bookings)
-          .set({ status: "REFUNDED", updatedAt: new Date() })
-          .where(eq(schema.bookings.id, payment.bookingId));
+      if (payout) {
+        if (payout.status !== "PAID") {
+          await db.transaction(async (tx) => {
+            const existingJournal = await tx
+              .select({ id: schema.ledgerJournals.id })
+              .from(schema.ledgerJournals)
+              .where(
+                and(
+                  eq(schema.ledgerJournals.reference, payout.id),
+                  eq(schema.ledgerJournals.eventType, "HOST_PAYOUT_DISBURSED")
+                )
+              )
+              .limit(1);
 
-        // Send refund confirmation email
-        const [booking] = await db
-          .select()
-          .from(schema.bookings)
-          .where(eq(schema.bookings.id, payment.bookingId))
-          .limit(1);
+            if (existingJournal.length === 0) {
+              await LedgerService.recordHostPayout(tx, {
+                payoutId: payout.id,
+                bookingId: payout.bookingId,
+                hostId: payout.hostId,
+                amount: payout.amount,
+                adminId: payout.approvedBy || undefined,
+                transferRef,
+                receiptUrl: payout.receiptUrl,
+                notes: payout.notes,
+              });
+            }
 
-        if (booking) {
-          const [property] = await db
-            .select({ title: schema.properties.title })
-            .from(schema.properties)
-            .where(eq(schema.properties.id, booking.propertyId))
-            .limit(1);
+            await tx
+              .update(schema.payouts)
+              .set({
+                status: "PAID",
+                transferStatus: "SUCCESS",
+                disbursedAt: new Date(txData.transferred_at || Date.now()),
+                paystackTransferCode: transferCode || payout.paystackTransferCode,
+                paystackTransferRef: transferRef || payout.paystackTransferRef,
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.payouts.id, payout.id));
+          });
 
-          const refundAmountNaira = Math.round((refundData.amount || 0) / 100);
-          sendEmail(
-            bookingRefundEmail({
-              guestName: `${booking.guestFirstName} ${booking.guestLastName}`.trim(),
-              guestEmail: booking.guestEmail,
-              propertyTitle: property?.title || "Property",
-              referenceCode: booking.referenceCode,
-              refundAmount: refundAmountNaira,
-              currency: "NGN",
-              status: "PROCESSED",
-            })
-          ).catch((e) => console.warn("[Payments] Failed to send refund confirmation email:", e));
+          // Send host payout notification email
+          import("../notifications/notifications.service").then(async ({ sendEmail, hostPayoutDisbursedEmail }) => {
+            const [host] = await getDb()
+              .select({ email: schema.users.email, firstName: schema.users.firstName, lastName: schema.users.lastName })
+              .from(schema.users)
+              .where(eq(schema.users.id, payout.hostId))
+              .limit(1);
+
+            if (host) {
+              const masked = payout.accountNumber ? `******${payout.accountNumber.slice(-4)}` : undefined;
+              sendEmail(
+                hostPayoutDisbursedEmail({
+                  hostName: `${host.firstName} ${host.lastName}`.trim(),
+                  hostEmail: host.email,
+                  amount: payout.amount,
+                  bankName: payout.bankName || undefined,
+                  accountNumberMasked: masked,
+                  transferRef: transferRef || undefined,
+                  currency: payout.currency || "NGN",
+                })
+              ).catch((e) => console.warn("[Payments] Failed to send host payout email:", e));
+            }
+          });
         }
       }
-    }
 
-    return { processed: true, message: "Webhook refund.processed handled." };
-  }
-
-  // 5. Handle 'refund.failed'
-  if (event.event === "refund.failed") {
-    const refundData = event.data;
-    const db = getDb();
-    const paystackRefundId = String(refundData.id || "");
-
-    if (paystackRefundId) {
       await db
-        .update(schema.refunds)
-        .set({
-          status: "FAILED",
-          adminNotes: `Paystack refund failed: ${refundData.gateway_response || "Unknown reason"}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+        .update(schema.webhookEvents)
+        .set({ status: "PROCESSED", processedAt: new Date() })
+        .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+      return { processed: true, message: "Webhook transfer.success handled successfully." };
     }
 
-    console.error(`[Payments] Paystack refund failed for refund ID: ${paystackRefundId}`);
-    return { processed: true, message: "Webhook refund.failed handled." };
-  }
+    // ─── 5D. Handle 'transfer.failed' ───
+    if (eventType === "transfer.failed") {
+      const txData = event.data;
+      const transferRef = txData.reference;
+      const transferCode = txData.transfer_code;
 
-  return { processed: false, message: `Ignored unhandled event: ${event.event}` };
+      const [payout] = await db
+        .select()
+        .from(schema.payouts)
+        .where(
+          or(
+            eq(schema.payouts.paystackTransferRef, transferRef),
+            eq(schema.payouts.paystackTransferCode, transferCode)
+          )
+        )
+        .limit(1);
+
+      if (payout) {
+        await db
+          .update(schema.payouts)
+          .set({
+            status: "FAILED",
+            transferStatus: "FAILED",
+            transferFailureReason: txData.reason || txData.gateway_response || "Paystack transfer failed",
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.payouts.id, payout.id));
+
+        console.error(`[Payments] Paystack transfer failed for payout ${payout.id}: ${txData.reason}`);
+      }
+
+      await db
+        .update(schema.webhookEvents)
+        .set({ status: "PROCESSED", processedAt: new Date() })
+        .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+      return { processed: true, message: "Webhook transfer.failed handled." };
+    }
+
+    // ─── 5E. Handle 'transfer.reversed' ───
+    if (eventType === "transfer.reversed") {
+      const txData = event.data;
+      const transferRef = txData.reference;
+      const transferCode = txData.transfer_code;
+
+      const [payout] = await db
+        .select()
+        .from(schema.payouts)
+        .where(
+          or(
+            eq(schema.payouts.paystackTransferRef, transferRef),
+            eq(schema.payouts.paystackTransferCode, transferCode)
+          )
+        )
+        .limit(1);
+
+      if (payout) {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(schema.payouts)
+            .set({
+              status: "REVERSED",
+              transferStatus: "REVERSED",
+              transferFailureReason: txData.reason || "Paystack transfer reversed by bank switch",
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.payouts.id, payout.id));
+
+          // Post reversing ledger journal: Dr Operating Bank 1020, Cr Host Settlement Payable 2020
+          await LedgerService.postJournalEntry(tx, {
+            reference: `REV_${payout.id}_${Date.now()}`,
+            eventType: "PAYOUT_REVERSED",
+            narration: `Paystack transfer reversed for payout #${payout.id} (Ref: ${transferRef})`,
+            createdById: null,
+            entries: [
+              { accountCode: "1020", entryType: "DEBIT", amount: payout.amount },
+              { accountCode: "2020", entryType: "CREDIT", amount: payout.amount },
+            ],
+          });
+        });
+
+        console.warn(`[Payments] Payout ${payout.id} transfer reversed. Ledger adjusted.`);
+      }
+
+      await db
+        .update(schema.webhookEvents)
+        .set({ status: "PROCESSED", processedAt: new Date() })
+        .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+      return { processed: true, message: "Webhook transfer.reversed handled and ledger reversed." };
+    }
+
+    // ─── 5F. Handle 'refund.processed' ───
+    if (eventType === "refund.processed") {
+      const refundData = event.data;
+      const paystackRefundId = String(refundData.id || "");
+
+      if (paystackRefundId) {
+        await db
+          .update(schema.refunds)
+          .set({
+            status: "PROCESSED",
+            processedAt: new Date(),
+            paystackRefundId,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+      }
+
+      if (refundData.transaction?.reference) {
+        const [payment] = await db
+          .select()
+          .from(schema.payments)
+          .where(eq(schema.payments.reference, refundData.transaction.reference))
+          .limit(1);
+
+        if (payment) {
+          await db
+            .update(schema.bookings)
+            .set({ status: "REFUNDED", updatedAt: new Date() })
+            .where(eq(schema.bookings.id, payment.bookingId));
+
+          const [booking] = await db
+            .select()
+            .from(schema.bookings)
+            .where(eq(schema.bookings.id, payment.bookingId))
+            .limit(1);
+
+          if (booking) {
+            const [property] = await db
+              .select({ title: schema.properties.title })
+              .from(schema.properties)
+              .where(eq(schema.properties.id, booking.propertyId))
+              .limit(1);
+
+            const refundAmountNaira = Math.round((refundData.amount || 0) / 100);
+            sendEmail(
+              bookingRefundEmail({
+                guestName: `${booking.guestFirstName} ${booking.guestLastName}`.trim(),
+                guestEmail: booking.guestEmail,
+                propertyTitle: property?.title || "Property",
+                referenceCode: booking.referenceCode,
+                refundAmount: refundAmountNaira,
+                currency: "NGN",
+                status: "PROCESSED",
+              })
+            ).catch((e) => console.warn("[Payments] Failed to send refund confirmation email:", e));
+          }
+        }
+      }
+
+      await db
+        .update(schema.webhookEvents)
+        .set({ status: "PROCESSED", processedAt: new Date() })
+        .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+      return { processed: true, message: "Webhook refund.processed handled." };
+    }
+
+    // ─── 5G. Handle 'refund.failed' ───
+    if (eventType === "refund.failed") {
+      const refundData = event.data;
+      const paystackRefundId = String(refundData.id || "");
+
+      if (paystackRefundId) {
+        await db
+          .update(schema.refunds)
+          .set({
+            status: "FAILED",
+            adminNotes: `Paystack refund failed: ${refundData.gateway_response || "Unknown reason"}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+      }
+
+      await db
+        .update(schema.webhookEvents)
+        .set({ status: "PROCESSED", processedAt: new Date() })
+        .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+      return { processed: true, message: "Webhook refund.failed handled." };
+    }
+
+    // Unhandled event
+    await db
+      .update(schema.webhookEvents)
+      .set({ status: "PROCESSED", processedAt: new Date() })
+      .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+    return { processed: false, message: `Ignored unhandled event: ${eventType}` };
+  } catch (err: any) {
+    console.error(`[Paystack Webhook] Processing failed for event ${rawEventId}:`, err.message);
+    await db
+      .update(schema.webhookEvents)
+      .set({ status: "FAILED", processingError: err.message })
+      .where(eq(schema.webhookEvents.id, webhookRecordId));
+
+    throw err;
+  }
 }
 
 // ─── Verify Paystack Transaction via API ───
@@ -783,6 +1095,7 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
     // Development fallback
     return {
       verified: true,
+      status: "success",
       reference,
       amount: 0,
       currency: "NGN",
@@ -803,11 +1116,12 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
       }
     );
 
-    const body = await res.json();
+    const body = await res.json().catch(() => ({}));
 
-    if (!res.ok || !body.status || body.data.status !== "success") {
+    if (!res.ok || !body.status || !body.data) {
       return {
         verified: false,
+        status: "unknown",
         reference,
         amount: 0,
         currency: "NGN",
@@ -815,11 +1129,30 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
         gatewayReference: "",
         gatewayProvider: "PAYSTACK",
         paidAt: new Date(),
-        error: body.message || "Transaction not successful on Paystack.",
+        error: body.message || "Failed to reach Paystack verification gateway.",
       };
     }
 
     const tx = body.data;
+    if (tx.status !== "success") {
+      let mappedStatus: PaymentVerifyResult["status"] = "pending";
+      if (tx.status === "failed") mappedStatus = "failed";
+      else if (tx.status === "abandoned") mappedStatus = "abandoned";
+
+      return {
+        verified: false,
+        status: mappedStatus,
+        reference,
+        amount: Math.round((tx.amount || 0) / 100),
+        currency: tx.currency || "NGN",
+        method: tx.channel === "card" ? "CARD" : "TRANSFER",
+        gatewayReference: String(tx.id || ""),
+        gatewayProvider: "PAYSTACK",
+        paidAt: new Date(),
+        error: tx.gateway_response || `Transaction status on Paystack is ${tx.status}.`,
+      };
+    }
+
     const amountNaira = Math.round(tx.amount / 100);
 
     // Process & confirm in database
@@ -834,6 +1167,7 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
 
     return {
       verified: true,
+      status: "success",
       reference,
       amount: amountNaira,
       currency: tx.currency,
@@ -848,6 +1182,7 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
     console.error("[Paystack] Verify error:", err);
     return {
       verified: false,
+      status: "unknown",
       reference,
       amount: 0,
       currency: "NGN",

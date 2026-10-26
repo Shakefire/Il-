@@ -62,7 +62,7 @@ export const locationsService = {
 
       const res = await fetch(url, {
         headers: {
-          "User-Agent": "IleAccommodationMarketplace/1.0 (contact@ile.ng)",
+          "User-Agent": "IleAccommodationMarketplace/1.0 (contact@ilestays.ng)",
           Accept: "application/json",
         },
         signal: controller.signal,

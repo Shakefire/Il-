@@ -355,6 +355,21 @@ const TABLE_STATEMENTS = [
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `,
+  sql`
+    CREATE TABLE IF NOT EXISTS webhook_events (
+      id VARCHAR(100) PRIMARY KEY,
+      event_id VARCHAR(100),
+      event_type VARCHAR(100) NOT NULL,
+      gateway_provider VARCHAR(50) NOT NULL DEFAULT 'PAYSTACK',
+      payload TEXT NOT NULL,
+      signature VARCHAR(255),
+      status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+      processing_error TEXT,
+      attempts INT NOT NULL DEFAULT 0,
+      processed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `,
 ];
 
 export async function initAndSeedDb() {
@@ -426,6 +441,14 @@ export async function initAndSeedDb() {
     // Phase 1: Default Platform Settings Row
     sql`INSERT INTO platform_settings (id, default_host_commission_pct, payout_hold_hours, updated_at) VALUES ('default', 10, 24, NOW()) ON CONFLICT (id) DO NOTHING;`,
 
+    // Paystack Remediation & Automated Transfers Schema
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS paystack_recipient_code VARCHAR(100);`,
+    sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS paystack_recipient_code VARCHAR(100);`,
+    sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(50) NOT NULL DEFAULT 'UNINITIATED';`,
+    sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS transfer_failure_reason TEXT;`,
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS ledger_journals_reference_event_type_unique ON ledger_journals (reference, event_type);`,
+    sql`CREATE INDEX IF NOT EXISTS webhook_events_event_id_provider_idx ON webhook_events (gateway_provider, event_id);`,
+
     sql`UPDATE properties SET moderation_status = 'SUSPENDED' WHERE status = 'SUSPENDED' AND (moderation_status IS NULL OR moderation_status = 'NONE');`,
     sql`UPDATE properties SET moderation_status = 'REJECTED' WHERE status = 'REJECTED' AND (moderation_status IS NULL OR moderation_status = 'NONE');`,
   ];
@@ -466,7 +489,7 @@ export async function initAndSeedDb() {
 
     await db.insert(schema.users).values({
       id: "usr_admin_default",
-      email: "admin@ile.ng",
+      email: "admin@ilestays.ng",
       passwordHash,
       firstName: "Ilé",
       lastName: "Administrator",
@@ -479,7 +502,7 @@ export async function initAndSeedDb() {
 
     await db.insert(schema.users).values({
       id: hostId,
-      email: "host@ile.ng",
+      email: "host@ilestays.ng",
       passwordHash,
       firstName: "Amina",
       lastName: "Bello",
@@ -507,7 +530,7 @@ export async function initAndSeedDb() {
 
     await db.insert(schema.users).values({
       id: "usr_guest_default",
-      email: "guest@ile.ng",
+      email: "guest@ilestays.ng",
       passwordHash,
       firstName: "Chukwudi",
       lastName: "Nnadi",
@@ -571,7 +594,7 @@ export async function initAndSeedDb() {
         unitNumber: `Unit ${String.fromCharCode(65 + (i % 6))}${i + 1}`,
         contactName: p.host.name,
         contactPhone: "+234 803 555 " + (1000 + i),
-        contactEmail: `${p.slug.split("-")[1] || "host"}@ile.ng`,
+        contactEmail: `${p.slug.split("-")[1] || "host"}@ilestays.ng`,
         checkInInstructions: "Security clearance pass will be activated upon gate arrival. State your name and show your reservation QR code.",
         accessGateCode: `GATE-${8800 + i}`,
         houseRulesPrivate: "No loud parties after 10:00 PM. No unauthorized commercial video equipment without estate clearance.",

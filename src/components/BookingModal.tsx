@@ -158,37 +158,28 @@ export default function BookingModal({
   };
 
   // Step 3 -> Step 4: Pay & unlock quarantined details
-  const handlePay = async (mode: "paystack" | "direct" = "paystack") => {
+  const handlePay = async (_mode: "paystack" | "direct" = "paystack") => {
     if (!serverBooking) return;
     setErrorMessage(null);
     setIsProcessing(true);
 
     try {
-      // 1. Initialize transaction on backend & Paystack
-      const initRes = await api.initializePayment(serverBooking.id);
+      // 1. Initialize transaction on backend & Paystack with access token auth
+      const initRes = await api.initializePayment(serverBooking.id, serverBooking.accessToken);
       if (!initRes || !initRes.success) {
         throw new Error(initRes?.error || "Failed to initialize payment gateway.");
       }
 
       // If user selected Paystack and an authorization URL was returned:
-      if (mode === "paystack" && initRes.authorizationUrl && initRes.authorizationUrl.startsWith("http")) {
+      if (initRes.authorizationUrl && initRes.authorizationUrl.startsWith("http")) {
         window.location.href = initRes.authorizationUrl;
         return;
       }
 
-      // 2. Direct / in-modal settlement for test sandbox verification
-      try {
-        await api.verifyPayment(initRes.reference);
-      } catch {
-        // Fallback to direct booking payment if Paystack webhook is pending
-        await api.payBooking(
-          serverBooking.id,
-          {
-            paymentMethod: paymentMethod === "card" ? "CARD" : "BANK_TRANSFER",
-            paymentReference: initRes.reference,
-          },
-          serverBooking.accessToken
-        );
+      // Authoritative Paystack verification
+      const verifyRes = await api.verifyPayment(initRes.reference);
+      if (!verifyRes || !verifyRes.verified) {
+        throw new Error(verifyRes?.error || "Payment was not verified by Paystack gateway.");
       }
 
       // 3. Fetch confirmed quarantined details (Address, Gate Code, Host Contact)

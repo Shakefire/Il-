@@ -742,11 +742,11 @@ export default function OnboardingStatusPage() {
 
           <div className="flex items-center gap-2.5 shrink-0 pl-1 md:pl-0">
             <a
-              href="mailto:verify@ile.ng"
+              href="mailto:support@ilestays.ng"
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-[#E7E5E0] hover:bg-stone-50 text-xs font-semibold text-[#171717] transition-all shadow-xs"
             >
               <Mail size={13} className="text-[#0B5D45]" />
-              <span>verify@ile.ng</span>
+              <span>support@ilestays.ng</span>
             </a>
             <a
               href="tel:+2348004537829"

@@ -132,8 +132,8 @@ export default function PrivacyPage() {
           </div>
           <p className="text-[15.5px] text-[#555552] leading-relaxed">
             Under the Nigeria Data Protection Act, you maintain the right to access, rectify, or request deletion of your personal account data at any time by contacting our Data Protection Officer at{" "}
-            <a href="mailto:privacy@ile.ng" className="text-[#0B5D45] font-medium hover:underline">
-              privacy@ile.ng
+            <a href="mailto:privacy@ilestays.ng" className="text-[#0B5D45] font-medium hover:underline">
+              privacy@ilestays.ng
             </a>.
           </p>
         </section>

@@ -4,7 +4,7 @@
  * S3-compatible bucket "storageapp" and local filesystem fallback.
  *
  * Folder / Key structure:
- * 9jaroommate.com/properties/{propertyId}/{imageId}.{ext}
+ * ilestays.ng/properties/{propertyId}/{imageId}.{ext}
  */
 
 import { env } from "../../config/env";
@@ -44,10 +44,10 @@ export function getR2Client(): S3Client | null {
 
 /**
  * Clean folder prefix to avoid redundant bucket name in key
- * e.g., "storageapp/9jaroommate.com/" -> "9jaroommate.com"
+ * e.g., "storageapp/ilestays.ng/" -> "ilestays.ng"
  */
 function getNormalizedPrefix(): string {
-  const rawPrefix = env.R2_FOLDER_PREFIX || "9jaroommate.com/";
+  const rawPrefix = env.R2_FOLDER_PREFIX || "ilestays.ng/";
   return rawPrefix
     .replace(/^storageapp\/?/i, "")
     .replace(/^\/+|\/+$/g, "");
@@ -100,7 +100,7 @@ export async function uploadImage(
   const filename = `${crypto.randomUUID()}.${ext}`;
   const prefix = getNormalizedPrefix();
   
-  // Construct property-specific key: 9jaroommate.com/properties/{propertyId}/{imageId}.{ext}
+  // Construct property-specific key: ilestays.ng/properties/{propertyId}/{imageId}.{ext}
   let key: string;
   if (options.propertyId) {
     key = `${prefix}/properties/${options.propertyId}/${filename}`;

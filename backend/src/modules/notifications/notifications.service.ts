@@ -3,7 +3,7 @@
  * Handles transactional emails for booking confirmations, gate access passes,
  * host listing submissions, moderation status, and account onboarding.
  *
- * Configured provider: Resend (domain: notifications.9jaroommate.com)
+ * Configured provider: Resend (domain: ilestays.ng)
  */
 
 import { env } from "../../config/env";
@@ -13,6 +13,7 @@ export interface EmailPayload {
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string;
 }
 
 // ─── Email Template Helpers ───
@@ -44,7 +45,7 @@ function emailShell(title: string, subtitle: string, bodyContent: string): strin
               <tr>
                 <td style="padding: 4px 0; color: #6B6B67; width: 120px; font-weight: 600;">Platform Email:</td>
                 <td style="padding: 4px 0;">
-                  <a href="mailto:support@ile.ng" style="color: #0B5D45; font-weight: 700; text-decoration: underline;">support@ile.ng</a>
+                  <a href="mailto:support@ilestays.ng" style="color: #0B5D45; font-weight: 700; text-decoration: underline;">support@ilestays.ng</a>
                 </td>
               </tr>
               <tr>
@@ -786,7 +787,7 @@ export function bookingConfirmationEmail(data: BookingConfirmationData): EmailPa
                       Open Arrival Guide on My Trips &rarr;
                     </a>
                     <p style="margin: 12px 0 0 0; font-size: 12px; color: #8B8B86; line-height: 1.5;">
-                      Can't find the email? Check your spam folder or visit your trips portal above. You can also contact <a href="mailto:support@ile.ng" style="color: #0B5D45; text-decoration: underline;">support@ile.ng</a>.
+                      Can't find the email? Check your spam folder or visit your trips portal above. You can also contact <a href="mailto:support@ilestays.ng" style="color: #0B5D45; text-decoration: underline;">support@ilestays.ng</a>.
                     </p>
                   </td>
                 </tr>
@@ -853,7 +854,7 @@ export function bookingConfirmationEmail(data: BookingConfirmationData): EmailPa
                   <tr>
                     <td style="padding: 3px 0; color: #6B6B67; font-weight: 600; width: 120px;">Platform Concierge:</td>
                     <td style="padding: 3px 0;">
-                      <a href="mailto:support@ile.ng" style="color: #0B5D45; font-weight: 700; text-decoration: underline;">support@ile.ng</a>
+                      <a href="mailto:support@ilestays.ng" style="color: #0B5D45; font-weight: 700; text-decoration: underline;">support@ilestays.ng</a>
                     </td>
                   </tr>
                   <tr>
@@ -933,7 +934,7 @@ MANAGE RESERVATION:
 ${bookingUrl}
 
 --------------------------------------------------------------------------------
-Ilé Concierge: support@ile.ng | Helpline: +234 800 453 7829 | +234 912 202 9904
+Ilé Concierge: support@ilestays.ng | Helpline: +234 800 453 7829 | +234 912 202 9904
 (c) 2026 Ilé Technologies Ltd. All rights reserved.
   `.trim();
 
@@ -1041,7 +1042,7 @@ export function bookingAccessPassEmail(data: BookingAccessPassData): EmailPayloa
     .toUpperCase() || "IL";
 
   const hostRole = data.hostRole || "Your accommodation host & arrival concierge";
-  const hostEmail = data.hostEmail || "support@ile.ng";
+  const hostEmail = data.hostEmail || "support@ilestays.ng";
 
   const emailSubject = `Arrival Guide & Stay Details: ${data.propertyTitle} (${data.referenceCode})`;
 
@@ -1447,7 +1448,7 @@ export function bookingAccessPassEmail(data: BookingAccessPassData): EmailPayloa
                   <tr>
                     <td style="padding: 3px 0; color: #6B6B67; font-weight: 600; width: 120px;">Platform Concierge:</td>
                     <td style="padding: 3px 0;">
-                      <a href="mailto:support@ile.ng" style="color: #0B5D45; font-weight: 700; text-decoration: underline;">support@ile.ng</a>
+                      <a href="mailto:support@ilestays.ng" style="color: #0B5D45; font-weight: 700; text-decoration: underline;">support@ilestays.ng</a>
                     </td>
                   </tr>
                   <tr>
@@ -1525,7 +1526,7 @@ MANAGE DIGITAL GATE PASS:
 ${bookingUrl}
 
 --------------------------------------------------------------------------------
-Ilé Concierge: support@ile.ng | Helpline: +234 800 453 7829 | +234 912 202 9904
+Ilé Concierge: support@ilestays.ng | Helpline: +234 800 453 7829 | +234 912 202 9904
 (c) 2026 Ilé Technologies Ltd. All rights reserved.
   `.trim();
 
@@ -1765,7 +1766,7 @@ export function hostWelcomeEmail(data: { name: string; email: string }): EmailPa
       <a href="${env.FRONTEND_URL}/host/onboarding/authority" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 13px 26px; border-radius: 8px; text-decoration: none;">Continue Host Verification →</a>
     </div>
 
-    <p style="font-size: 13px; color: #6B6B67;">Questions about hosting or payout structures? Reach our host concierge team at <a href="mailto:support@ile.ng" style="color: #0B5D45;">support@ile.ng</a>.</p>
+    <p style="font-size: 13px; color: #6B6B67;">Questions about hosting or payout structures? Reach our host concierge team at <a href="mailto:support@ilestays.ng" style="color: #0B5D45;">support@ilestays.ng</a>.</p>
   `;
 
   return {
@@ -1811,7 +1812,7 @@ export function passwordResetSuccessEmail(data: { name: string; email: string })
     <p>The password for your Ilé account (<strong>${escapeHtml(data.email)}</strong>) was recently updated.</p>
     <div style="background-color: #FAFAF8; border-left: 4px solid #0B5D45; padding: 14px 18px; margin: 20px 0; border-radius: 4px; font-size: 13.5px; color: #374151;">
       <p style="margin: 0;"><strong>Security Notice:</strong> If you performed this change, no further action is needed.</p>
-      <p style="margin: 6px 0 0 0; color: #B91C1C;">If you did not initiate this change, please contact Ilé Trust &amp; Safety immediately at <a href="mailto:support@ile.ng" style="color: #B91C1C; font-weight: 700;">support@ile.ng</a> or call our 24/7 Helpline.</p>
+      <p style="margin: 6px 0 0 0; color: #B91C1C;">If you did not initiate this change, please contact Ilé Trust &amp; Safety immediately at <a href="mailto:support@ilestays.ng" style="color: #B91C1C; font-weight: 700;">support@ilestays.ng</a> or call our 24/7 Helpline.</p>
     </div>
     <div style="margin: 24px 0;">
       <a href="${env.FRONTEND_URL}/login" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Sign In to Your Account</a>
@@ -1822,7 +1823,7 @@ export function passwordResetSuccessEmail(data: { name: string; email: string })
     to: data.email,
     subject: `Security Alert: Your Ilé Password Has Been Updated`,
     html: emailShell("Password Changed", "Security Alert", content),
-    text: `Hello ${data.name}, your Ilé password has been updated. If you did not make this change, contact support@ile.ng immediately.`,
+    text: `Hello ${data.name}, your Ilé password has been updated. If you did not make this change, contact support@ilestays.ng immediately.`,
   };
 }
 
@@ -1908,7 +1909,7 @@ export function listingSuspendedEmail(data: {
     <p style="font-size: 14px; color: #4B5563;">To appeal this suspension or submit required clarifications, please contact our Trust &amp; Safety team.</p>
 
     <div style="margin: 24px 0;">
-      <a href="mailto:support@ile.ng?subject=Listing%20Suspension%20Appeal%20-%20${encodeURIComponent(data.propertyTitle)}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Contact Moderation Team</a>
+      <a href="mailto:support@ilestays.ng?subject=Listing%20Suspension%20Appeal%20-%20${encodeURIComponent(data.propertyTitle)}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Contact Moderation Team</a>
     </div>
   `;
 
@@ -1916,7 +1917,7 @@ export function listingSuspendedEmail(data: {
     to: data.hostEmail,
     subject: `Notice: Listing suspended by moderation — ${data.propertyTitle}`,
     html: emailShell("Listing Moderation", "Suspension Notice", content),
-    text: `Hello ${data.hostName}, your listing "${data.propertyTitle}" has been suspended by an administrator.\n\nReason: ${data.reason || "Administrative review"}.\n\nContact support@ile.ng to appeal.`,
+    text: `Hello ${data.hostName}, your listing "${data.propertyTitle}" has been suspended by an administrator.\n\nReason: ${data.reason || "Administrative review"}.\n\nContact support@ilestays.ng to appeal.`,
   };
 }
 
@@ -1940,7 +1941,7 @@ export function hostAccountSuspendedEmail(data: {
     <p style="font-size: 14px; color: #4B5563;">All associated active listings have been withdrawn from search. You will receive separate communication regarding any pending guest stays or outstanding payouts.</p>
 
     <div style="margin: 24px 0;">
-      <a href="mailto:support@ile.ng?subject=Host%20Account%20Suspension%20Appeal" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Contact Support Concierge</a>
+      <a href="mailto:support@ilestays.ng?subject=Host%20Account%20Suspension%20Appeal" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Contact Support Concierge</a>
     </div>
   `;
 
@@ -1948,7 +1949,7 @@ export function hostAccountSuspendedEmail(data: {
     to: data.hostEmail,
     subject: `Notice: Ilé Host Account Suspended`,
     html: emailShell("Account Status", "Suspension Notice", content),
-    text: `Hello ${data.hostName}, your host account has been suspended.\n\nReason: ${data.reason || "Administrative review"}.\n\nContact support@ile.ng for inquiries.`,
+    text: `Hello ${data.hostName}, your host account has been suspended.\n\nReason: ${data.reason || "Administrative review"}.\n\nContact support@ilestays.ng for inquiries.`,
   };
 }
 
@@ -2078,7 +2079,7 @@ export function bookingCancelledEmail(data: {
       ${refundText}
     </div>
 
-    <p style="font-size: 13.5px; color: #6B6B67;">If you have any questions or require an adjustment, contact our 24/7 concierge at <a href="mailto:support@ile.ng" style="color: #0B5D45;">support@ile.ng</a>.</p>
+    <p style="font-size: 13.5px; color: #6B6B67;">If you have any questions or require an adjustment, contact our 24/7 concierge at <a href="mailto:support@ilestays.ng" style="color: #0B5D45;">support@ilestays.ng</a>.</p>
   `;
 
   return {
@@ -2375,8 +2376,9 @@ export function hostPayoutDisbursedEmail(data: {
 
 export async function sendEmail(payload: EmailPayload): Promise<boolean> {
   const provider = env.EMAIL_PROVIDER;
+  const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY;
 
-  if (provider === "console" || !env.EMAIL_API_KEY) {
+  if (provider === "console" || !apiKey) {
     console.log(`\n📧 [Email Mock] To: ${payload.to} | Subject: ${payload.subject}`);
     return true;
   }
@@ -2391,18 +2393,21 @@ export async function sendEmail(payload: EmailPayload): Promise<boolean> {
 
 async function sendViaResend(payload: EmailPayload): Promise<boolean> {
   try {
-    const fromAddress = env.EMAIL_FROM || "noreply@notifications.9jaroommate.com";
-    console.log(`[Email] Sending via Resend → To: ${payload.to} | Subject: ${payload.subject} | From: ${fromAddress}`);
+    const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY;
+    const fromAddress = env.EMAIL_FROM || "Ilé <hello@notifications.ilestays.ng>";
+    const replyTo = payload.replyTo || env.EMAIL_SUPPORT || "support@ilestays.ng";
+    console.log(`[Email] Sending via Resend → To: ${payload.to} | Subject: ${payload.subject} | From: ${fromAddress} | Reply-To: ${replyTo}`);
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${env.EMAIL_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         from: fromAddress,
         to: [payload.to],
+        reply_to: replyTo,
         subject: payload.subject,
         html: payload.html,
         text: payload.text,
@@ -2428,14 +2433,15 @@ async function sendViaResend(payload: EmailPayload): Promise<boolean> {
  * Health check connectivity probe for Resend without leaking secrets
  */
 export async function testResendConnectivity(): Promise<{ connected: boolean; domain: string; error?: string }> {
-  const domain = env.RESEND_DOMAIN || "notifications.9jaroommate.com";
-  if (!env.EMAIL_API_KEY) {
-    return { connected: false, domain, error: "EMAIL_API_KEY not configured" };
+  const domain = env.RESEND_DOMAIN || "notifications.ilestays.ng";
+  const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY;
+  if (!apiKey) {
+    return { connected: false, domain, error: "RESEND_API_KEY / EMAIL_API_KEY not configured" };
   }
 
   try {
     const res = await fetch("https://api.resend.com/api-keys", {
-      headers: { Authorization: `Bearer ${env.EMAIL_API_KEY}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
 
     if (res.ok) {

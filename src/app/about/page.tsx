@@ -97,10 +97,10 @@ export default function AboutPage() {
             </p>
           </div>
           <a
-            href="mailto:concierge@ile.ng"
+            href="mailto:hello@ilestays.ng"
             className="inline-flex items-center gap-2 bg-[#24483A] text-white px-6 py-3.5 rounded-xl font-medium text-[15px] hover:bg-[#1B372C] transition-colors shrink-0"
           >
-            <span>concierge@ile.ng</span>
+            <span>hello@ilestays.ng</span>
             <ArrowRight size={16} />
           </a>
         </div>

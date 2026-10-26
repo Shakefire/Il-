@@ -78,7 +78,7 @@ const confirmedData: BookingConfirmationData = {
   checkOutTime: "By 11:00 AM (11:00)",
   hostName: "Amina Bello",
   hostPhone: "+234 912 202 9904",
-  hostEmail: "amina.host@ile.ng",
+  hostEmail: "amina.host@ilestays.ng",
 };
 
 const result1 = bookingConfirmationEmail(confirmedData);
@@ -359,7 +359,7 @@ const arrivalDataFull: BookingAccessPassData = {
   accessInstructions: "Security will clear your vehicle upon mentioning reservation ref ILE-MAITAMA-7701. Proceed to Gate B elevator where host will meet you.",
   hostName: "Amina Bello",
   hostPhone: "+234 912 202 9904",
-  hostEmail: "amina.host@ile.ng",
+  hostEmail: "amina.host@ilestays.ng",
   hostAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80",
   hostRole: "Your accommodation host & arrival concierge",
   parkingDescription: "Dedicated covered parking bay for two vehicles inside the gate.",
@@ -385,7 +385,7 @@ assert(resultArrivalFull.html.includes("https://www.google.com/maps/search/?api=
 assert(resultArrivalFull.html.includes("Amina Bello"), "Host display name included");
 assert(resultArrivalFull.html.includes("Your accommodation host &amp; arrival concierge"), "Host role label included");
 assert(resultArrivalFull.html.includes("+234 912 202 9904"), "Host telephone link included");
-assert(resultArrivalFull.html.includes("amina.host@ile.ng"), "Host clickable mail link included");
+assert(resultArrivalFull.html.includes("amina.host@ilestays.ng"), "Host clickable mail link included");
 assert(resultArrivalFull.html.includes("images.unsplash.com/photo-1534528741775"), "Host avatar image included");
 assert(resultArrivalFull.html.includes("Message Host on WhatsApp"), "WhatsApp chat action present");
 assert(resultArrivalFull.html.includes("IL-MAIT-8842"), "Estate gate pass code displayed in box");

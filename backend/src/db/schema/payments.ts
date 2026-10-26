@@ -34,3 +34,17 @@ export const hostEarnings = pgTable("host_earnings", {
   status: varchar("status", { length: 30 }).notNull().default("PENDING"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const webhookEvents = pgTable("webhook_events", {
+  id: varchar("id", { length: 100 }).primaryKey(),
+  eventId: varchar("event_id", { length: 100 }),
+  eventType: varchar("event_type", { length: 100 }).notNull(),
+  gatewayProvider: varchar("gateway_provider", { length: 50 }).notNull().default("PAYSTACK"),
+  payload: text("payload").notNull(),
+  signature: varchar("signature", { length: 255 }),
+  status: varchar("status", { length: 30 }).notNull().default("PENDING"), // 'PENDING' | 'PROCESSED' | 'FAILED' | 'IGNORED'
+  processingError: text("processing_error"),
+  attempts: integer("attempts").notNull().default(0),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});

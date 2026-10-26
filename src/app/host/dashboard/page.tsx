@@ -170,10 +170,11 @@ interface HostPayout {
   bankName: string;
   accountNumber: string;
   accountName: string;
-  status: "SCHEDULED" | "PROCESSING" | "DISBURSED" | "FAILED" | "CANCELLED";
+  status: "SCHEDULED" | "READY_FOR_PAYOUT" | "PROCESSING" | "DISBURSED" | "PAID" | "HELD" | "FAILED" | "CANCELLED" | "REVERSED" | string;
   scheduledFor: string;
   disbursedAt?: string;
   paystackTransferRef?: string;
+  transferFailureReason?: string;
   notes?: string;
   createdAt: string;
   bookingRef: string;
@@ -282,7 +283,7 @@ export default function HostDashboardPage() {
   const [unitNumber, setUnitNumber] = useState("Suite 3B");
   const [contactName, setContactName] = useState("Emeka Okonkwo");
   const [contactPhone, setContactPhone] = useState("+2348031234567");
-  const [contactEmail, setContactEmail] = useState("host@ile.ng");
+  const [contactEmail, setContactEmail] = useState("host@ilestays.ng");
   const [accessGateCode, setAccessGateCode] = useState("GATE-9912");
 
   const loadProperties = async () => {
@@ -664,31 +665,47 @@ export default function HostDashboardPage() {
   const getPayoutStatusBadge = (status: string) => {
     switch (status) {
       case "DISBURSED":
+      case "PAID":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
             <CheckCircle2 size={13} />
-            Disbursed
+            Paid &amp; Disbursed
           </span>
         );
-      case "SCHEDULED":
+      case "READY_FOR_PAYOUT":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
             <Clock size={13} />
-            Scheduled (Hold)
+            Available for Payout
+          </span>
+        );
+      case "SCHEDULED":
+      case "HELD":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+            <Clock size={13} />
+            Held in Escrow
           </span>
         );
       case "PROCESSING":
         return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
             <Loader2 size={13} className="animate-spin" />
-            Processing
+            Transfer In-Flight
           </span>
         );
       case "FAILED":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
             <XCircle size={13} />
-            Failed
+            Payout Failed
+          </span>
+        );
+      case "REVERSED":
+        return (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+            <AlertCircle size={13} />
+            Reversed by Bank
           </span>
         );
       case "CANCELLED":
@@ -1712,12 +1729,19 @@ export default function HostDashboardPage() {
                           </td>
                           <td className="py-4 px-4 whitespace-nowrap">
                             {getPayoutStatusBadge(p.status)}
+                            {p.status === "FAILED" && p.transferFailureReason && (
+                              <div className="text-[11px] text-rose-600 mt-1 max-w-xs truncate" title={p.transferFailureReason}>
+                                {p.transferFailureReason}
+                              </div>
+                            )}
                           </td>
                           <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
                             {p.paystackTransferRef ? (
                               <span className="font-mono text-[11px] text-[#171717]">{p.paystackTransferRef}</span>
                             ) : p.disbursedAt ? (
                               <span>Paid on {new Date(p.disbursedAt).toLocaleDateString()}</span>
+                            ) : p.status === "FAILED" ? (
+                              <span className="text-rose-500 font-medium">Failed</span>
                             ) : (
                               <span className="text-stone-400 italic">Held in Escrow</span>
                             )}
