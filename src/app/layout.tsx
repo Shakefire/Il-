@@ -53,6 +53,9 @@ export const metadata: Metadata = {
       "Discover verified shortlet apartments and exceptional stays in Abuja and Lagos with Ilé.",
     images: ["https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1200&q=85"],
   },
+  verification: {
+    google: "googled59b53f63f4e67b9",
+  },
   robots: {
     index: true,
     follow: true,

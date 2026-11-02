@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { newsletterService } from "@/../backend/src/modules/newsletter/newsletter.service";
 
 // Simple in-memory rate limiting: max 5 requests per IP per 10 minutes
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
-  const window = 10 * 60 * 1000; // 10 minutes
+  const windowMs = 10 * 60 * 1000;
   const entry = rateLimitMap.get(ip);
-
   if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + window });
+    rateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
     return true;
   }
   if (entry.count >= 5) return false;
@@ -29,7 +27,10 @@ export async function POST(req: NextRequest) {
     "unknown";
 
   if (!checkRateLimit(ip)) {
-    return NextResponse.json({ error: "Too many requests. Please try again later." }, { status: 429 });
+    return NextResponse.json(
+      { error: "Too many requests. Please try again later." },
+      { status: 429 }
+    );
   }
 
   let body: { email?: string };
@@ -42,23 +43,93 @@ export async function POST(req: NextRequest) {
   const email = (body.email || "").trim().toLowerCase();
 
   if (!email || !EMAIL_RE.test(email)) {
-    return NextResponse.json({ error: "Please enter a valid email address." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Please enter a valid email address." },
+      { status: 400 }
+    );
+  }
+
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    console.error("[Newsletter] DATABASE_URL is not set.");
+    return NextResponse.json(
+      { error: "Service temporarily unavailable. Please try again later." },
+      { status: 503 }
+    );
   }
 
   try {
-    const result = await newsletterService.subscribe(email);
-    if (result.status === "already_subscribed") {
+    const { Pool } = await import("pg");
+    const { drizzle } = await import("drizzle-orm/node-postgres");
+    const { newsletterSubscribers } = await import(
+      "@/../backend/src/db/schema/newsletter"
+    );
+    const { eq } = await import("drizzle-orm");
+    const crypto = await import("crypto");
+
+    const pool = new Pool({ connectionString: dbUrl, max: 2 });
+    const db = drizzle(pool, { schema: { newsletterSubscribers } });
+
+    // Check for existing subscriber
+    const existing = await db
+      .select()
+      .from(newsletterSubscribers)
+      .where(eq(newsletterSubscribers.email, email))
+      .limit(1);
+
+    if (existing.length > 0) {
+      const sub = existing[0];
+      if (sub.status === "active") {
+        await pool.end();
+        return NextResponse.json(
+          {
+            success: true,
+            message: "You're already subscribed to Ilé updates.",
+            alreadySubscribed: true,
+          },
+          { status: 200 }
+        );
+      }
+      // Reactivate unsubscribed
+      await db
+        .update(newsletterSubscribers)
+        .set({ status: "active", updatedAt: new Date() })
+        .where(eq(newsletterSubscribers.email, email));
+      await pool.end();
       return NextResponse.json(
-        { success: true, message: "You're already subscribed to Ilé updates.", alreadySubscribed: true },
-        { status: 200 }
+        {
+          success: true,
+          message: "You're on the list! Look out for updates from Ilé.",
+          alreadySubscribed: false,
+        },
+        { status: 201 }
       );
     }
+
+    // New subscriber
+    await db.insert(newsletterSubscribers).values({
+      id: crypto.randomUUID(),
+      email,
+      status: "active",
+      subscribedAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    await pool.end();
     return NextResponse.json(
-      { success: true, message: "You're on the list! Look out for updates from Ilé.", alreadySubscribed: false },
+      {
+        success: true,
+        message: "You're on the list! Look out for updates from Ilé.",
+        alreadySubscribed: false,
+      },
       { status: 201 }
     );
   } catch (err: unknown) {
-    console.error("[Newsletter] Subscribe error:", err);
-    return NextResponse.json({ error: "Something went wrong. Please try again." }, { status: 500 });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[Newsletter] Subscribe error:", msg);
+    return NextResponse.json(
+      { error: "Something went wrong. Please try again." },
+      { status: 500 }
+    );
   }
 }
