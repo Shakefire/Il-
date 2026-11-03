@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -234,6 +234,7 @@ export default function HostDashboardPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingProperty, setEditingProperty] = useState<HostProperty | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [editTagline, setEditTagline] = useState("");
   const [editPropertyType, setEditPropertyType] = useState("Serviced Apartment");
   const [editSpaceType, setEditSpaceType] = useState("Entire place");
   const [editCity, setEditCity] = useState("Abuja");
@@ -245,20 +246,81 @@ export default function HostDashboardPage() {
   const [editBeds, setEditBeds] = useState(2);
   const [editMaxGuests, setEditMaxGuests] = useState(4);
   const [editPowerType, setEditPowerType] = useState("Solar + Inverter");
+  const [editPowerDescription, setEditPowerDescription] = useState("");
+  const [editInternetDescription, setEditInternetDescription] = useState("");
+  const [editSecurityDescription, setEditSecurityDescription] = useState("");
   const [editCoverImage, setEditCoverImage] = useState("");
+  const [editImages, setEditImages] = useState<string[]>([]);
   const [editDescription, setEditDescription] = useState("");
+  const [editAmenities, setEditAmenities] = useState<string[]>([]);
   const [editExactAddress, setEditExactAddress] = useState("");
   const [editUnitNumber, setEditUnitNumber] = useState("");
   const [editContactName, setEditContactName] = useState("");
   const [editContactPhone, setEditContactPhone] = useState("");
   const [editContactEmail, setEditContactEmail] = useState("");
   const [editAccessGateCode, setEditAccessGateCode] = useState("");
+  const [editCheckInInstructions, setEditCheckInInstructions] = useState("");
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+  const [editUploadingField, setEditUploadingField] = useState<string | null>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+  const [editActiveUploadField, setEditActiveUploadField] = useState<string | null>(null);
+
+  const AMENITY_OPTIONS = [
+    "WiFi", "Air Conditioning", "Swimming Pool", "Gym / Fitness Centre", "Parking",
+    "Fully Equipped Kitchen", "Washing Machine", "Dryer", "Dishwasher", "Smart TV",
+    "Work Desk", "Elevator / Lift", "CCTV Security", "24-hr Security", "Intercom",
+    "Backup Generator", "Solar Power", "Inverter Power", "Water Heater", "Bathtub",
+    "Balcony", "Garden / Outdoor Space", "BBQ Grill", "Dining Area", "Pet Friendly",
+  ];
+
+  const toggleAmenity = (amenity: string) => {
+    setEditAmenities((prev) =>
+      prev.includes(amenity) ? prev.filter((a) => a !== amenity) : [...prev, amenity]
+    );
+  };
+
+  const handleEditFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const field = editActiveUploadField;
+    e.target.value = "";
+    if (!file || !field) return;
+
+    if (file.size > 15 * 1024 * 1024) {
+      alert("File too large. Max 15MB.");
+      return;
+    }
+
+    setEditUploadingField(field);
+    try {
+      const { compressFile } = await import("@/lib/imageCompression");
+      const base64 = await compressFile(file);
+      const uploadRes = await api.uploadImage(base64, "listings");
+      if (uploadRes?.url) {
+        if (field === "cover") {
+          setEditCoverImage(uploadRes.url);
+        } else if (field === "gallery") {
+          setEditImages((prev) => [...prev, uploadRes.url]);
+        }
+      }
+    } catch (err: any) {
+      alert(err.message || "Upload failed.");
+    } finally {
+      setEditUploadingField(null);
+    }
+  };
+
+  const triggerEditUpload = (field: string) => {
+    setEditActiveUploadField(field);
+    if (editFileInputRef.current) {
+      editFileInputRef.current.accept = "image/*";
+      editFileInputRef.current.click();
+    }
+  };
 
   const openEditModal = async (prop: HostProperty) => {
-    setEditingProperty(prop);
-    // Pre-fill basic fields from listing card data
+    // Reset all fields to defaults first
     setEditTitle(prop.title);
+    setEditTagline("");
     setEditPropertyType(prop.propertyType || "Serviced Apartment");
     setEditSpaceType(prop.spaceType || "Entire place");
     setEditCity(prop.city || "Abuja");
@@ -266,42 +328,76 @@ export default function HostDashboardPage() {
     setEditState(prop.city === "Lagos" ? "Lagos State" : "FCT");
     setEditPricePerNight(prop.pricePerNight || 85000);
     setEditCoverImage(prop.coverImage || "");
-    // Show modal immediately, then fetch full details (incl. quarantined fields)
+    setEditImages([]);
+    setEditDescription("");
+    setEditAmenities([]);
+    setEditPowerType("Solar + Inverter");
+    setEditPowerDescription("");
+    setEditInternetDescription("");
+    setEditSecurityDescription("");
+    setEditExactAddress("");
+    setEditUnitNumber("");
+    setEditContactName("");
+    setEditContactPhone("");
+    setEditContactEmail("");
+    setEditAccessGateCode("");
+    setEditCheckInInstructions("");
+    setEditingProperty(prop);
     setShowEditModal(true);
+
+    // Fetch full property record in background to populate all fields
     try {
-      const res = await fetch(`/api/host/properties/${prop.id}`, {
-        credentials: "include",
-      });
+      const res = await fetch(`/api/host/properties/${prop.id}`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         const p = data.property || data;
+        setEditTitle(p.title || prop.title);
+        setEditTagline(p.tagline || "");
+        setEditPropertyType(p.propertyType || prop.propertyType || "Serviced Apartment");
+        setEditSpaceType(p.spaceType || prop.spaceType || "Entire place");
+        setEditCity(p.city || prop.city || "Abuja");
+        setEditNeighborhood(p.neighborhood || prop.neighborhood || "");
+        setEditState(p.state || (p.city === "Lagos" ? "Lagos State" : "FCT"));
+        setEditPricePerNight(p.hostBasePrice || p.pricePerNight || prop.pricePerNight || 85000);
         setEditBedrooms(p.bedrooms ?? 2);
         setEditBathrooms(p.bathrooms ?? 2);
         setEditBeds(p.beds ?? 2);
         setEditMaxGuests(p.maxGuests ?? 4);
         setEditPowerType(p.powerType || "Solar + Inverter");
-        setEditDescription(p.description || "");
-        setEditExactAddress(p.exactAddress || p.privateDetails?.exactAddress || "");
-        setEditUnitNumber(p.unitNumber || p.privateDetails?.unitNumber || "");
-        setEditContactName(p.contactName || p.privateDetails?.contactName || "");
-        setEditContactPhone(p.contactPhone || p.privateDetails?.contactPhone || "");
-        setEditContactEmail(p.contactEmail || p.privateDetails?.contactEmail || "");
-        setEditAccessGateCode(p.accessGateCode || p.privateDetails?.accessGateCode || "");
+        setEditPowerDescription(p.powerDescription || "");
+        setEditInternetDescription(p.internetDescription || "");
+        setEditSecurityDescription(p.securityDescription || "");
         setEditCoverImage(p.coverImage || prop.coverImage || "");
-        setEditPricePerNight(p.hostBasePrice || p.pricePerNight || prop.pricePerNight || 85000);
+        setEditImages(p.images?.map((img: any) => img.url || img) || []);
+        setEditDescription(p.description || "");
+        setEditAmenities(p.amenities?.map((a: any) => a.name || a) || []);
+        // Private / quarantined details
+        const pvd = p.privateDetails || p;
+        setEditExactAddress(pvd.exactAddress || "");
+        setEditUnitNumber(pvd.unitNumber || "");
+        setEditContactName(pvd.contactName || "");
+        setEditContactPhone(pvd.contactPhone || "");
+        setEditContactEmail(pvd.contactEmail || "");
+        setEditAccessGateCode(pvd.accessGateCode || "");
+        setEditCheckInInstructions(pvd.checkInInstructions || "");
       }
     } catch {
-      // Fall back to card data — modal is already open with basic fields
+      // Modal already open with basic fields — fine
     }
   };
 
   const handleUpdateProperty = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProperty) return;
+    if (!editPricePerNight || editPricePerNight <= 0) {
+      alert("Please enter a valid nightly rate greater than ₦0.");
+      return;
+    }
     setIsEditSubmitting(true);
     try {
       await api.updateHostProperty(editingProperty.id, {
         title: editTitle,
+        tagline: editTagline,
         propertyType: editPropertyType,
         spaceType: editSpaceType,
         city: editCity,
@@ -314,14 +410,20 @@ export default function HostDashboardPage() {
         beds: Number(editBeds),
         maxGuests: Number(editMaxGuests),
         powerType: editPowerType,
+        powerDescription: editPowerDescription,
+        internetDescription: editInternetDescription,
+        securityDescription: editSecurityDescription,
         coverImage: editCoverImage,
+        images: editImages,
         description: editDescription,
+        amenities: editAmenities,
         exactAddress: editExactAddress,
         unitNumber: editUnitNumber,
         contactName: editContactName,
         contactPhone: editContactPhone,
         contactEmail: editContactEmail,
         accessGateCode: editAccessGateCode,
+        checkInInstructions: editCheckInInstructions,
       });
       setShowEditModal(false);
       setEditingProperty(null);
@@ -1882,190 +1984,324 @@ export default function HostDashboardPage() {
         {/* Modal: Edit Property Listing */}
         {showEditModal && editingProperty && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+            {/* Hidden file input for edit uploads */}
+            <input
+              ref={editFileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleEditFileUpload}
+            />
             <div className="bg-white rounded-2xl max-w-2xl w-full p-6 sm:p-8 overflow-y-auto max-h-[90vh] shadow-2xl border border-[#E7E5E0] space-y-6">
+              {/* Header */}
               <div className="flex items-center justify-between border-b border-[#E7E5E0] pb-4">
                 <div>
                   <span className="text-xs uppercase tracking-wider text-[#0B5D45] font-semibold">
                     Edit Listing
                   </span>
                   <h3 className="font-display text-2xl text-[#171717]">Update Property Details</h3>
-                  <p className="text-xs text-[#8B8B86] mt-0.5">ID: {editingProperty.id.slice(0, 8)}…</p>
+                  <p className="text-xs text-[#8B8B86] mt-0.5">ID: {editingProperty.id.slice(0, 8)}&hellip;</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => { setShowEditModal(false); setEditingProperty(null); }}
                   className="text-gray-400 hover:text-gray-700 text-xl font-bold"
                 >
-                  ✕
+                  &#x2715;
                 </button>
               </div>
 
-              <form onSubmit={handleUpdateProperty} className="space-y-4">
-                {/* Title */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                    Property Title
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    value={editTitle}
-                    onChange={(e) => setEditTitle(e.target.value)}
-                    placeholder="e.g. The Hibiscus Penthouse"
-                    className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
-                  />
-                </div>
+              <form onSubmit={handleUpdateProperty} className="space-y-6">
 
-                {/* Types */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                      Property Type
-                    </label>
-                    <select
-                      value={editPropertyType}
-                      onChange={(e) => setEditPropertyType(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
-                    >
-                      <option value="Serviced Apartment">Serviced Apartment</option>
-                      <option value="Private Residence">Private Residence</option>
-                      <option value="Penthouse">Penthouse</option>
-                      <option value="Garden Villa">Garden Villa</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                      Space Type
-                    </label>
-                    <select
-                      value={editSpaceType}
-                      onChange={(e) => setEditSpaceType(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
-                    >
-                      <option value="Entire place">Entire place</option>
-                      <option value="Private room">Private room</option>
-                      <option value="Shared room">Shared room</option>
-                    </select>
-                  </div>
-                </div>
+                {/* Section 1: Listing Details */}
+                <div className="space-y-4">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#0B5D45]">Listing Details</p>
 
-                {/* Location */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                      City
-                    </label>
-                    <select
-                      value={editCity}
-                      onChange={(e) => {
-                        setEditCity(e.target.value);
-                        setEditState(e.target.value === "Abuja" ? "FCT" : "Lagos State");
-                      }}
-                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
-                    >
-                      <option value="Abuja">Abuja</option>
-                      <option value="Lagos">Lagos</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                      Neighborhood
+                      Property Title
                     </label>
                     <input
                       required
                       type="text"
-                      value={editNeighborhood}
-                      onChange={(e) => setEditNeighborhood(e.target.value)}
-                      placeholder="e.g. Maitama, Ikoyi, Wuse 2"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      placeholder="e.g. The Hibiscus Penthouse"
                       className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                      Tagline <span className="normal-case font-normal text-[#8B8B86]">(catchy one-liner)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editTagline}
+                      onChange={(e) => setEditTagline(e.target.value)}
+                      placeholder="e.g. Unwind above the city with panoramic views"
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                        Property Type
+                      </label>
+                      <select
+                        value={editPropertyType}
+                        onChange={(e) => setEditPropertyType(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                      >
+                        <option value="Serviced Apartment">Serviced Apartment</option>
+                        <option value="Private Residence">Private Residence</option>
+                        <option value="Penthouse">Penthouse</option>
+                        <option value="Garden Villa">Garden Villa</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                        Space Type
+                      </label>
+                      <select
+                        value={editSpaceType}
+                        onChange={(e) => setEditSpaceType(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                      >
+                        <option value="Entire place">Entire place</option>
+                        <option value="Private room">Private room</option>
+                        <option value="Shared room">Shared room</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 2: Location & Pricing */}
+                <div className="space-y-4">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#0B5D45]">Location &amp; Pricing</p>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">City</label>
+                      <select
+                        value={editCity}
+                        onChange={(e) => {
+                          setEditCity(e.target.value);
+                          setEditState(e.target.value === "Abuja" ? "FCT" : "Lagos State");
+                        }}
+                        className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                      >
+                        <option value="Abuja">Abuja</option>
+                        <option value="Lagos">Lagos</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">Neighborhood</label>
+                      <input
+                        required
+                        type="text"
+                        value={editNeighborhood}
+                        onChange={(e) => setEditNeighborhood(e.target.value)}
+                        placeholder="e.g. Maitama, Ikoyi, Wuse 2"
+                        className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">Nightly Rate (&#8358;)</label>
+                      <input
+                        required
+                        type="number"
+                        min={1}
+                        value={editPricePerNight}
+                        onChange={(e) => setEditPricePerNight(Number(e.target.value))}
+                        className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                      />
+                      <div className="text-[11px] text-[#0B5D45] font-semibold mt-1">
+                        You receive: {formatNaira(editPricePerNight)} &middot; Listed at {formatNaira(Math.round(editPricePerNight * 1.10))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section 3: Capacity */}
+                <div className="space-y-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#0B5D45]">Capacity</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { label: "Bedrooms", value: editBedrooms, set: setEditBedrooms, step: 1 },
+                      { label: "Bathrooms", value: editBathrooms, set: setEditBathrooms, step: 0.5 },
+                      { label: "Beds", value: editBeds, set: setEditBeds, step: 1 },
+                      { label: "Max Guests", value: editMaxGuests, set: setEditMaxGuests, step: 1 },
+                    ].map(({ label, value, set, step }) => (
+                      <div key={label}>
+                        <label className="block text-[11px] font-semibold text-[#6B6B67] uppercase mb-1">
+                          {label}
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          step={step}
+                          value={value}
+                          onChange={(e) => set(Number(e.target.value))}
+                          className="w-full px-3 py-2 rounded-lg border border-[#E7E5E0] text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Section 4: Power & Infrastructure */}
+                <div className="space-y-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#0B5D45]">Power &amp; Infrastructure</p>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6B6B67] uppercase mb-1">Power Setup</label>
+                    <select
+                      value={editPowerType}
+                      onChange={(e) => setEditPowerType(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                    >
+                      <option value="Solar + Inverter">Solar + Inverter (Continuous)</option>
+                      <option value="Dual Silent Generator">Dual Silent Generator (Redundant)</option>
+                      <option value="24/7 Dedicated Grid + Inverter">24/7 Dedicated Grid + Inverter</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6B6B67] uppercase mb-1">Power Description</label>
+                    <textarea
+                      rows={2}
+                      value={editPowerDescription}
+                      onChange={(e) => setEditPowerDescription(e.target.value)}
+                      placeholder="e.g. 20kVA solar system with lithium battery backup — zero outages"
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] resize-none"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                      Nightly Rate (NGN)
-                    </label>
-                    <input
-                      required
-                      type="number"
-                      value={editPricePerNight}
-                      onChange={(e) => setEditPricePerNight(Number(e.target.value))}
-                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                    <label className="block text-xs font-semibold text-[#6B6B67] uppercase mb-1">Internet Description</label>
+                    <textarea
+                      rows={2}
+                      value={editInternetDescription}
+                      onChange={(e) => setEditInternetDescription(e.target.value)}
+                      placeholder="e.g. 200Mbps dedicated fiber with router in living room and bedroom"
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] resize-none"
                     />
-                    <div className="text-[11px] text-[#0B5D45] font-semibold mt-1">
-                      You receive: {formatNaira(editPricePerNight)} · Listed at {formatNaira(Math.round(editPricePerNight * 1.10))}
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6B6B67] uppercase mb-1">Security Description</label>
+                    <textarea
+                      rows={2}
+                      value={editSecurityDescription}
+                      onChange={(e) => setEditSecurityDescription(e.target.value)}
+                      placeholder="e.g. 24/7 gated estate with CCTV, security guard and intercom"
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] resize-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Section 5: Photos */}
+                <div className="space-y-3">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-[#0B5D45]">Photos</p>
+                  {/* Cover Image */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#6B6B67] uppercase mb-2">Cover Image</label>
+                    <div className="flex items-center gap-3">
+                      {editCoverImage && (
+                        <img
+                          src={editCoverImage}
+                          alt="Cover preview"
+                          className="w-24 h-16 object-cover rounded-lg border border-[#E7E5E0]"
+                        />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => triggerEditUpload("cover")}
+                        disabled={editUploadingField === "cover"}
+                        className="px-4 py-2 rounded-lg border border-dashed border-[#0B5D45] text-[#0B5D45] text-xs font-semibold hover:bg-[#EDF3F0] transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {editUploadingField === "cover" ? (
+                          <><Loader2 size={13} className="animate-spin" /> Uploading&hellip;</>
+                        ) : (
+                          editCoverImage ? "Replace Cover" : "Upload Cover"
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                  {/* Gallery Images */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-[#6B6B67] uppercase mb-2">Gallery Images</label>
+                    <div className="flex flex-wrap gap-2">
+                      {editImages.map((url, idx) => (
+                        <div key={idx} className="relative group">
+                          <img
+                            src={url}
+                            alt={`Gallery ${idx + 1}`}
+                            className="w-24 h-16 object-cover rounded-lg border border-[#E7E5E0]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setEditImages((prev) => prev.filter((_, i) => i !== idx))}
+                            className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            &#x2715;
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => triggerEditUpload("gallery")}
+                        disabled={editUploadingField === "gallery"}
+                        className="w-24 h-16 rounded-lg border border-dashed border-[#0B5D45] text-[#0B5D45] text-xs font-semibold hover:bg-[#EDF3F0] transition-colors disabled:opacity-50 flex flex-col items-center justify-center gap-0.5"
+                      >
+                        {editUploadingField === "gallery" ? (
+                          <Loader2 size={13} className="animate-spin" />
+                        ) : (
+                          <>
+                            <span className="text-lg leading-none">+</span>
+                            <span className="text-[10px]">Add Photo</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                {/* Capacity */}
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { label: "Bedrooms", value: editBedrooms, set: setEditBedrooms, step: 1 },
-                    { label: "Bathrooms", value: editBathrooms, set: setEditBathrooms, step: 0.5 },
-                    { label: "Beds", value: editBeds, set: setEditBeds, step: 1 },
-                    { label: "Max Guests", value: editMaxGuests, set: setEditMaxGuests, step: 1 },
-                  ].map(({ label, value, set, step }) => (
-                    <div key={label}>
-                      <label className="block text-[11px] font-semibold text-[#6B6B67] uppercase mb-1">
-                        {label}
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        step={step}
-                        value={value}
-                        onChange={(e) => set(Number(e.target.value))}
-                        className="w-full px-3 py-2 rounded-lg border border-[#E7E5E0] text-sm"
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                {/* Power */}
+                {/* Section 6: Description */}
                 <div>
-                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                    Continuous Power Setup
-                  </label>
-                  <select
-                    value={editPowerType}
-                    onChange={(e) => setEditPowerType(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
-                  >
-                    <option value="Solar + Inverter">Solar + Inverter (Continuous)</option>
-                    <option value="Dual Silent Generator">Dual Silent Generator (Redundant)</option>
-                    <option value="24/7 Dedicated Grid + Inverter">24/7 Dedicated Grid + Inverter</option>
-                  </select>
-                </div>
-
-                {/* Cover Image */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                    Cover Image URL
-                  </label>
-                  <input
-                    type="url"
-                    value={editCoverImage}
-                    onChange={(e) => setEditCoverImage(e.target.value)}
-                    placeholder="https://..."
-                    className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
-                  />
-                </div>
-
-                {/* Description */}
-                <div>
-                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
-                    Description
-                  </label>
+                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">Description</label>
                   <textarea
-                    rows={3}
+                    rows={4}
                     value={editDescription}
                     onChange={(e) => setEditDescription(e.target.value)}
-                    placeholder="Describe the property..."
+                    placeholder="Describe the property — what makes it special, nearby landmarks, ideal for&hellip;"
                     className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] resize-none"
                   />
                 </div>
 
-                {/* Quarantined Private Details */}
+                {/* Section 7: Amenities */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-2">Amenities</label>
+                  <div className="flex flex-wrap gap-2">
+                    {AMENITY_OPTIONS.map((amenity) => {
+                      const selected = editAmenities.includes(amenity);
+                      return (
+                        <button
+                          key={amenity}
+                          type="button"
+                          onClick={() => toggleAmenity(amenity)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                            selected
+                              ? "bg-[#0B5D45] text-white border-[#0B5D45]"
+                              : "bg-white text-[#4B4B47] border-[#E7E5E0] hover:border-[#0B5D45]"
+                          }`}
+                        >
+                          {selected ? "&#x2713; " : ""}{amenity}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Section 8: Quarantined Access Details */}
                 <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200/80 space-y-3">
                   <div className="flex items-center gap-2 text-amber-900 font-semibold text-xs uppercase tracking-wider">
                     <Lock size={14} />
@@ -2115,6 +2351,18 @@ export default function HostDashboardPage() {
                     </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                        Contact Name
+                      </label>
+                      <input
+                        type="text"
+                        value={editContactName}
+                        onChange={(e) => setEditContactName(e.target.value)}
+                        placeholder="e.g. Amaka"
+                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
                         Host Phone (WhatsApp)
                       </label>
                       <input
@@ -2125,22 +2373,37 @@ export default function HostDashboardPage() {
                         className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
                       />
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
-                        Host Email
-                      </label>
-                      <input
-                        required
-                        type="email"
-                        value={editContactEmail}
-                        onChange={(e) => setEditContactEmail(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
-                      />
-                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                      Host Email
+                    </label>
+                    <input
+                      required
+                      type="email"
+                      value={editContactEmail}
+                      onChange={(e) => setEditContactEmail(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                      Check-in Instructions
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={editCheckInInstructions}
+                      onChange={(e) => setEditCheckInInstructions(e.target.value)}
+                      placeholder="e.g. Call 30 minutes before arrival. Guard will direct you to Flat 4B on the 3rd floor&hellip;"
+                      className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm resize-none"
+                    />
                   </div>
                 </div>
 
-                <div className="pt-2 flex justify-end gap-3">
+                {/* Footer */}
+                <div className="pt-4 flex justify-end gap-3 border-t border-[#E7E5E0]">
                   <button
                     type="button"
                     onClick={() => { setShowEditModal(false); setEditingProperty(null); }}
@@ -2151,12 +2414,12 @@ export default function HostDashboardPage() {
                   <button
                     type="submit"
                     disabled={isEditSubmitting}
-                    className="px-6 py-2.5 bg-[#0B5D45] text-white rounded-xl text-sm font-medium hover:bg-[#084936] transition-colors flex items-center gap-2"
+                    className="px-6 py-2.5 bg-[#0B5D45] text-white rounded-xl text-sm font-medium hover:bg-[#084936] transition-colors flex items-center gap-2 disabled:opacity-60"
                   >
                     {isEditSubmitting ? (
                       <>
                         <Loader2 size={16} className="animate-spin" />
-                        <span>Saving...</span>
+                        <span>Saving&hellip;</span>
                       </>
                     ) : (
                       <span>Save Changes</span>

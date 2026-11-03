@@ -325,8 +325,8 @@ export const hostsService = {
     if (!privateDetails?.exactAddress || privateDetails.exactAddress.trim().length < 5) {
       missingFields.push("Exact private address (for confirmed guests)");
     }
-    if (!property.pricePerNight || property.pricePerNight < 5000) {
-      missingFields.push("Price per night (minimum ₦5,000)");
+    if (!property.pricePerNight || property.pricePerNight <= 0) {
+      missingFields.push("Price per night (must be greater than ₦0)");
     }
     if (images.length === 0 && (!property.coverImage || property.coverImage === "/images/placeholder-property.jpg")) {
       missingFields.push("At least one property photo");
