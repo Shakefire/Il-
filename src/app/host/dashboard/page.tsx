@@ -230,6 +230,110 @@ export default function HostDashboardPage() {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [onboardingStatus, setOnboardingStatus] = useState<any>(null);
 
+  // Edit Listing Modal States
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<HostProperty | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editPropertyType, setEditPropertyType] = useState("Serviced Apartment");
+  const [editSpaceType, setEditSpaceType] = useState("Entire place");
+  const [editCity, setEditCity] = useState("Abuja");
+  const [editNeighborhood, setEditNeighborhood] = useState("");
+  const [editState, setEditState] = useState("FCT");
+  const [editPricePerNight, setEditPricePerNight] = useState<number>(85000);
+  const [editBedrooms, setEditBedrooms] = useState(2);
+  const [editBathrooms, setEditBathrooms] = useState(2);
+  const [editBeds, setEditBeds] = useState(2);
+  const [editMaxGuests, setEditMaxGuests] = useState(4);
+  const [editPowerType, setEditPowerType] = useState("Solar + Inverter");
+  const [editCoverImage, setEditCoverImage] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editExactAddress, setEditExactAddress] = useState("");
+  const [editUnitNumber, setEditUnitNumber] = useState("");
+  const [editContactName, setEditContactName] = useState("");
+  const [editContactPhone, setEditContactPhone] = useState("");
+  const [editContactEmail, setEditContactEmail] = useState("");
+  const [editAccessGateCode, setEditAccessGateCode] = useState("");
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
+
+  const openEditModal = async (prop: HostProperty) => {
+    setEditingProperty(prop);
+    // Pre-fill basic fields from listing card data
+    setEditTitle(prop.title);
+    setEditPropertyType(prop.propertyType || "Serviced Apartment");
+    setEditSpaceType(prop.spaceType || "Entire place");
+    setEditCity(prop.city || "Abuja");
+    setEditNeighborhood(prop.neighborhood || "");
+    setEditState(prop.city === "Lagos" ? "Lagos State" : "FCT");
+    setEditPricePerNight(prop.pricePerNight || 85000);
+    setEditCoverImage(prop.coverImage || "");
+    // Show modal immediately, then fetch full details (incl. quarantined fields)
+    setShowEditModal(true);
+    try {
+      const res = await fetch(`/api/host/properties/${prop.id}`, {
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const p = data.property || data;
+        setEditBedrooms(p.bedrooms ?? 2);
+        setEditBathrooms(p.bathrooms ?? 2);
+        setEditBeds(p.beds ?? 2);
+        setEditMaxGuests(p.maxGuests ?? 4);
+        setEditPowerType(p.powerType || "Solar + Inverter");
+        setEditDescription(p.description || "");
+        setEditExactAddress(p.exactAddress || p.privateDetails?.exactAddress || "");
+        setEditUnitNumber(p.unitNumber || p.privateDetails?.unitNumber || "");
+        setEditContactName(p.contactName || p.privateDetails?.contactName || "");
+        setEditContactPhone(p.contactPhone || p.privateDetails?.contactPhone || "");
+        setEditContactEmail(p.contactEmail || p.privateDetails?.contactEmail || "");
+        setEditAccessGateCode(p.accessGateCode || p.privateDetails?.accessGateCode || "");
+        setEditCoverImage(p.coverImage || prop.coverImage || "");
+        setEditPricePerNight(p.hostBasePrice || p.pricePerNight || prop.pricePerNight || 85000);
+      }
+    } catch {
+      // Fall back to card data — modal is already open with basic fields
+    }
+  };
+
+  const handleUpdateProperty = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProperty) return;
+    setIsEditSubmitting(true);
+    try {
+      await api.updateHostProperty(editingProperty.id, {
+        title: editTitle,
+        propertyType: editPropertyType,
+        spaceType: editSpaceType,
+        city: editCity,
+        neighborhood: editNeighborhood,
+        state: editState,
+        hostBasePrice: Number(editPricePerNight),
+        pricePerNight: Math.round(Number(editPricePerNight) * 1.10),
+        bedrooms: Number(editBedrooms),
+        bathrooms: Number(editBathrooms),
+        beds: Number(editBeds),
+        maxGuests: Number(editMaxGuests),
+        powerType: editPowerType,
+        coverImage: editCoverImage,
+        description: editDescription,
+        exactAddress: editExactAddress,
+        unitNumber: editUnitNumber,
+        contactName: editContactName,
+        contactPhone: editContactPhone,
+        contactEmail: editContactEmail,
+        accessGateCode: editAccessGateCode,
+      });
+      setShowEditModal(false);
+      setEditingProperty(null);
+      setActionMessage("Listing updated successfully!");
+      loadProperties();
+    } catch (err: any) {
+      alert(err.message || "Failed to update listing.");
+    } finally {
+      setIsEditSubmitting(false);
+    }
+  };
+
   // Host Payout Bank Account Edit Modal States
   const [showEditBankModal, setShowEditBankModal] = useState(false);
   const [bankModalValue, setBankModalValue] = useState<BankAccountValue | null>(null);
@@ -1124,14 +1228,24 @@ export default function HostDashboardPage() {
                           <div className="flex items-center gap-2">
                             {/* Draft actions */}
                             {prop.status === "DRAFT" && (
-                              <button
-                                type="button"
-                                onClick={() => handleSubmitForReview(prop.id)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B5D45] text-white text-xs font-semibold hover:bg-[#084936]"
-                              >
-                                <Send size={12} />
-                                <span>Submit for Review</span>
-                              </button>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(prop)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-100 text-[#171717] text-xs font-semibold hover:bg-stone-200 border border-[#E7E5E0]"
+                                >
+                                  <Edit2 size={12} />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSubmitForReview(prop.id)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0B5D45] text-white text-xs font-semibold hover:bg-[#084936]"
+                                >
+                                  <Send size={12} />
+                                  <span>Submit for Review</span>
+                                </button>
+                              </div>
                             )}
 
                             {/* Pending review info */}
@@ -1177,6 +1291,14 @@ export default function HostDashboardPage() {
                             {/* Rejected actions */}
                             {prop.status === "REJECTED" && (
                               <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(prop)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-stone-100 text-[#171717] text-xs font-semibold hover:bg-stone-200 border border-[#E7E5E0]"
+                                >
+                                  <Edit2 size={12} />
+                                  <span>Edit</span>
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleSubmitForReview(prop.id)}
@@ -1756,6 +1878,295 @@ export default function HostDashboardPage() {
           </div>
         )}
         </motion.div>
+
+        {/* Modal: Edit Property Listing */}
+        {showEditModal && editingProperty && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-2xl w-full p-6 sm:p-8 overflow-y-auto max-h-[90vh] shadow-2xl border border-[#E7E5E0] space-y-6">
+              <div className="flex items-center justify-between border-b border-[#E7E5E0] pb-4">
+                <div>
+                  <span className="text-xs uppercase tracking-wider text-[#0B5D45] font-semibold">
+                    Edit Listing
+                  </span>
+                  <h3 className="font-display text-2xl text-[#171717]">Update Property Details</h3>
+                  <p className="text-xs text-[#8B8B86] mt-0.5">ID: {editingProperty.id.slice(0, 8)}…</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setShowEditModal(false); setEditingProperty(null); }}
+                  className="text-gray-400 hover:text-gray-700 text-xl font-bold"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleUpdateProperty} className="space-y-4">
+                {/* Title */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                    Property Title
+                  </label>
+                  <input
+                    required
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="e.g. The Hibiscus Penthouse"
+                    className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                  />
+                </div>
+
+                {/* Types */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                      Property Type
+                    </label>
+                    <select
+                      value={editPropertyType}
+                      onChange={(e) => setEditPropertyType(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                    >
+                      <option value="Serviced Apartment">Serviced Apartment</option>
+                      <option value="Private Residence">Private Residence</option>
+                      <option value="Penthouse">Penthouse</option>
+                      <option value="Garden Villa">Garden Villa</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                      Space Type
+                    </label>
+                    <select
+                      value={editSpaceType}
+                      onChange={(e) => setEditSpaceType(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                    >
+                      <option value="Entire place">Entire place</option>
+                      <option value="Private room">Private room</option>
+                      <option value="Shared room">Shared room</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Location */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                      City
+                    </label>
+                    <select
+                      value={editCity}
+                      onChange={(e) => {
+                        setEditCity(e.target.value);
+                        setEditState(e.target.value === "Abuja" ? "FCT" : "Lagos State");
+                      }}
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                    >
+                      <option value="Abuja">Abuja</option>
+                      <option value="Lagos">Lagos</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                      Neighborhood
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      value={editNeighborhood}
+                      onChange={(e) => setEditNeighborhood(e.target.value)}
+                      placeholder="e.g. Maitama, Ikoyi, Wuse 2"
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                      Nightly Rate (NGN)
+                    </label>
+                    <input
+                      required
+                      type="number"
+                      value={editPricePerNight}
+                      onChange={(e) => setEditPricePerNight(Number(e.target.value))}
+                      className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                    />
+                    <div className="text-[11px] text-[#0B5D45] font-semibold mt-1">
+                      You receive: {formatNaira(editPricePerNight)} · Listed at {formatNaira(Math.round(editPricePerNight * 1.10))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Capacity */}
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { label: "Bedrooms", value: editBedrooms, set: setEditBedrooms, step: 1 },
+                    { label: "Bathrooms", value: editBathrooms, set: setEditBathrooms, step: 0.5 },
+                    { label: "Beds", value: editBeds, set: setEditBeds, step: 1 },
+                    { label: "Max Guests", value: editMaxGuests, set: setEditMaxGuests, step: 1 },
+                  ].map(({ label, value, set, step }) => (
+                    <div key={label}>
+                      <label className="block text-[11px] font-semibold text-[#6B6B67] uppercase mb-1">
+                        {label}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        step={step}
+                        value={value}
+                        onChange={(e) => set(Number(e.target.value))}
+                        className="w-full px-3 py-2 rounded-lg border border-[#E7E5E0] text-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Power */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                    Continuous Power Setup
+                  </label>
+                  <select
+                    value={editPowerType}
+                    onChange={(e) => setEditPowerType(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] bg-white"
+                  >
+                    <option value="Solar + Inverter">Solar + Inverter (Continuous)</option>
+                    <option value="Dual Silent Generator">Dual Silent Generator (Redundant)</option>
+                    <option value="24/7 Dedicated Grid + Inverter">24/7 Dedicated Grid + Inverter</option>
+                  </select>
+                </div>
+
+                {/* Cover Image */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                    Cover Image URL
+                  </label>
+                  <input
+                    type="url"
+                    value={editCoverImage}
+                    onChange={(e) => setEditCoverImage(e.target.value)}
+                    placeholder="https://..."
+                    className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-xs font-semibold text-[#171717] uppercase mb-1">
+                    Description
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editDescription}
+                    onChange={(e) => setEditDescription(e.target.value)}
+                    placeholder="Describe the property..."
+                    className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45] resize-none"
+                  />
+                </div>
+
+                {/* Quarantined Private Details */}
+                <div className="p-4 rounded-xl bg-amber-50/70 border border-amber-200/80 space-y-3">
+                  <div className="flex items-center gap-2 text-amber-900 font-semibold text-xs uppercase tracking-wider">
+                    <Lock size={14} />
+                    <span>Quarantined Access Details (Guarded until Confirmed Payment)</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                        Exact Street Address
+                      </label>
+                      <input
+                        required
+                        type="text"
+                        value={editExactAddress}
+                        onChange={(e) => setEditExactAddress(e.target.value)}
+                        placeholder="House number, Street name"
+                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                        Unit / Flat Number
+                      </label>
+                      <input
+                        type="text"
+                        value={editUnitNumber}
+                        onChange={(e) => setEditUnitNumber(e.target.value)}
+                        placeholder="e.g. Apt 4B"
+                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                        Gate Pass Code
+                      </label>
+                      <input
+                        type="text"
+                        value={editAccessGateCode}
+                        onChange={(e) => setEditAccessGateCode(e.target.value)}
+                        placeholder="e.g. GATE-771"
+                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                        Host Phone (WhatsApp)
+                      </label>
+                      <input
+                        required
+                        type="tel"
+                        value={editContactPhone}
+                        onChange={(e) => setEditContactPhone(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-amber-900 uppercase mb-1">
+                        Host Email
+                      </label>
+                      <input
+                        required
+                        type="email"
+                        value={editContactEmail}
+                        onChange={(e) => setEditContactEmail(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { setShowEditModal(false); setEditingProperty(null); }}
+                    className="px-5 py-2.5 border border-[#E7E5E0] rounded-xl text-sm font-medium hover:bg-stone-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isEditSubmitting}
+                    className="px-6 py-2.5 bg-[#0B5D45] text-white rounded-xl text-sm font-medium hover:bg-[#084936] transition-colors flex items-center gap-2"
+                  >
+                    {isEditSubmitting ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <span>Save Changes</span>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* Modal: Create Property Listing */}
         {showCreateModal && (
