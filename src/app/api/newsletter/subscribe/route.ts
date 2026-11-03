@@ -1,4 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { eq } from "drizzle-orm";
+import { newsletterSubscribers } from "@/../backend/src/db/schema/newsletter";
+import crypto from "crypto";
 
 // Simple in-memory rate limiting: max 5 requests per IP per 10 minutes
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
@@ -19,6 +24,21 @@ function checkRateLimit(ip: string): boolean {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Strip channel_binding from the connection string.
+ * Neon's PgBouncer pooler doesn't support it; the pg driver
+ * on Vercel also emits a deprecation warning for it.
+ */
+function cleanDbUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.searchParams.delete("channel_binding");
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
 
 export async function POST(req: NextRequest) {
   const ip =
@@ -49,28 +69,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    console.error("[Newsletter] DATABASE_URL is not set.");
+  const rawUrl = process.env.DATABASE_URL;
+  if (!rawUrl) {
+    console.error("[Newsletter] DATABASE_URL is not configured.");
     return NextResponse.json(
       { error: "Service temporarily unavailable. Please try again later." },
       { status: 503 }
     );
   }
 
-  try {
-    const { Pool } = await import("pg");
-    const { drizzle } = await import("drizzle-orm/node-postgres");
-    const { newsletterSubscribers } = await import(
-      "@/../backend/src/db/schema/newsletter"
-    );
-    const { eq } = await import("drizzle-orm");
-    const crypto = await import("crypto");
+  const pool = new Pool({
+    connectionString: cleanDbUrl(rawUrl),
+    max: 2,
+    ssl: { rejectUnauthorized: false },
+  });
 
-    const pool = new Pool({ connectionString: dbUrl, max: 2 });
+  try {
     const db = drizzle(pool, { schema: { newsletterSubscribers } });
 
-    // Check for existing subscriber
     const existing = await db
       .select()
       .from(newsletterSubscribers)
@@ -80,7 +96,6 @@ export async function POST(req: NextRequest) {
     if (existing.length > 0) {
       const sub = existing[0];
       if (sub.status === "active") {
-        await pool.end();
         return NextResponse.json(
           {
             success: true,
@@ -90,12 +105,11 @@ export async function POST(req: NextRequest) {
           { status: 200 }
         );
       }
-      // Reactivate unsubscribed
+      // Reactivate
       await db
         .update(newsletterSubscribers)
         .set({ status: "active", updatedAt: new Date() })
         .where(eq(newsletterSubscribers.email, email));
-      await pool.end();
       return NextResponse.json(
         {
           success: true,
@@ -106,7 +120,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // New subscriber
     await db.insert(newsletterSubscribers).values({
       id: crypto.randomUUID(),
       email,
@@ -115,7 +128,6 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date(),
     });
 
-    await pool.end();
     return NextResponse.json(
       {
         success: true,
@@ -131,5 +143,7 @@ export async function POST(req: NextRequest) {
       { error: "Something went wrong. Please try again." },
       { status: 500 }
     );
+  } finally {
+    await pool.end().catch(() => {});
   }
 }

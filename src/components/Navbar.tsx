@@ -25,6 +25,9 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [favCount, setFavCount] = useState(0);
+  // Prevent hydration mismatch: auth state is only known after mount
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -55,8 +58,8 @@ export default function Navbar() {
 
   if (isAuthPage) return null;
 
-  const isAdmin = user?.role === "admin";
-  const isHost = user?.role === "host";
+  const isAdmin = mounted && user?.role === "admin";
+  const isHost = mounted && user?.role === "host";
 
   const handleLogout = async () => {
     setProfileDropdownOpen(false);
@@ -186,7 +189,7 @@ export default function Navbar() {
           </div>
 
           {/* Dynamic Auth Actions / User Menu */}
-          {isAuthenticated && user ? (
+          {mounted && isAuthenticated && user ? (
             <div className="relative" ref={dropdownRef}>
               <button
                 type="button"
@@ -358,7 +361,7 @@ export default function Navbar() {
           )}
 
           <div className="pt-4 border-t border-[#2E2E2E] flex flex-col gap-3">
-            {isAuthenticated ? (
+            {mounted && isAuthenticated ? (
               <button
                 type="button"
                 onClick={handleLogout}
