@@ -370,7 +370,7 @@ export async function processSuccessfulPayment(data: {
     const hostFullName = host
       ? `${host.firstName} ${host.lastName}`.trim()
       : privateDetails?.contactName || "Designated Ilé Stay Guide";
-    const hostPhone = privateDetails?.contactPhone || host?.phone || "+234 912 202 9904";
+    const hostPhone = privateDetails?.contactPhone || host?.phone || "+234 912 202 904";
     const exactAddress = privateDetails?.exactAddress || `${property?.neighborhood || "Maitama"}, ${property?.city || "Abuja"}`;
     const unitNumber = privateDetails?.unitNumber || undefined;
     const gateCode = privateDetails?.accessGateCode || "GATE-CLEARED";
