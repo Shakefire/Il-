@@ -78,12 +78,43 @@ export const PROPERTY_STATUS = {
 
 // ─── Booking Statuses ───
 export const BOOKING_STATUS = {
-  PENDING: "PENDING",
+  PENDING: "PENDING", // legacy
+  PENDING_HOST: "PENDING_HOST",
   PAYMENT_PENDING: "PAYMENT_PENDING",
   CONFIRMED: "CONFIRMED",
   CANCELLED: "CANCELLED",
   COMPLETED: "COMPLETED",
 } as const;
+
+/** Statuses that hold inventory / block overlapping dates */
+export const ACTIVE_HOLD_STATUSES = [
+  BOOKING_STATUS.PENDING_HOST,
+  BOOKING_STATUS.PAYMENT_PENDING,
+  BOOKING_STATUS.CONFIRMED,
+] as const;
+
+/** Host response values recorded on bookings.host_response */
+export const HOST_RESPONSE = {
+  ACCEPTED: "ACCEPTED",
+  DECLINED: "DECLINED",
+  EXPIRED: "EXPIRED",
+} as const;
+
+export const CANCELLATION_REASON = {
+  HOST_DECLINED: "HOST_DECLINED",
+  HOST_WINDOW_EXPIRED: "HOST_WINDOW_EXPIRED",
+  PAYMENT_WINDOW_EXPIRED: "PAYMENT_WINDOW_EXPIRED",
+  GUEST_CANCELLED_BEFORE_PAYMENT: "GUEST_CANCELLED_BEFORE_PAYMENT",
+  SUPERSEDED: "SUPERSEDED_BY_NEW_BOOKING_ATTEMPT",
+  LATE_PAYMENT_RECONCILIATION: "LATE_PAYMENT_RECONCILIATION",
+} as const;
+
+/** Host must accept/decline within this absolute window from create */
+export const HOST_RESPONSE_WINDOW_SECONDS = 120;
+/** Guest must pay within this absolute window from host accept */
+export const PAYMENT_WINDOW_MINUTES = 10;
+/** Default host payout share of classic host earnings (1–100) */
+export const DEFAULT_HOST_PAYOUT_PCT = 100;
 
 // ─── Payment Statuses ───
 export const PAYMENT_STATUS = {

@@ -31,8 +31,17 @@ export const bookings = pgTable("bookings", {
   hostCommissionAmount: integer("host_commission_amount").default(0),
   paystackFeeAmount: integer("paystack_fee_amount").default(0),
   hostNetAmount: integer("host_net_amount").default(0),
+  /** Snapshot: share of classic host earnings owed to host (1–100). Phase 3 */
+  hostPayoutPct: integer("host_payout_pct").default(100),
 
   status: varchar("status", { length: 30 }).notNull().default("PENDING"),
+  /** Absolute deadline for host accept/decline (create + 120s) */
+  hostResponseDeadlineAt: timestamp("host_response_deadline_at", { withTimezone: true }),
+  hostRespondedAt: timestamp("host_responded_at", { withTimezone: true }),
+  /** ACCEPTED | DECLINED | EXPIRED | null */
+  hostResponse: varchar("host_response", { length: 30 }),
+  /** Absolute deadline for guest payment (accept + 10m) */
+  paymentDeadlineAt: timestamp("payment_deadline_at", { withTimezone: true }),
   hostArrivalReminderSentAt: timestamp("host_arrival_reminder_sent_at", { withTimezone: true }),
   cancellationReason: varchar("cancellation_reason", { length: 255 }),
   cancelledAt: timestamp("cancelled_at", { withTimezone: true }),

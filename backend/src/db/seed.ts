@@ -435,11 +435,23 @@ export async function initAndSeedDb() {
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS paystack_fee_amount INT DEFAULT 0;`,
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_net_amount INT DEFAULT 0;`,
 
+    // Phase 3: Host-confirm-before-pay lifecycle columns
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_payout_pct INT DEFAULT 100;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_response_deadline_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_responded_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_response VARCHAR(30);`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_deadline_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS default_host_payout_pct INT NOT NULL DEFAULT 100;`,
+
     // Phase 1: Concurrency Guard - Unique Booking ID on Host Earnings
     sql`CREATE UNIQUE INDEX IF NOT EXISTS host_earnings_booking_id_unique ON host_earnings (booking_id);`,
 
     // Phase 1: Default Platform Settings Row
-    sql`INSERT INTO platform_settings (id, default_host_commission_pct, payout_hold_hours, updated_at) VALUES ('default', 10, 24, NOW()) ON CONFLICT (id) DO NOTHING;`,
+    sql`INSERT INTO platform_settings (id, default_host_commission_pct, default_host_payout_pct, payout_hold_hours, updated_at) VALUES ('default', 10, 100, 24, NOW()) ON CONFLICT (id) DO NOTHING;`,
+    // Safe backfill: active PAYMENT_PENDING get payment_deadline from created_at+10m (may already be past → expire job)
+    sql`UPDATE bookings SET payment_deadline_at = created_at + INTERVAL '10 minutes', host_payout_pct = COALESCE(host_payout_pct, 100) WHERE status = 'PAYMENT_PENDING' AND payment_deadline_at IS NULL;`,
+    sql`UPDATE bookings SET host_payout_pct = COALESCE(host_payout_pct, 100) WHERE host_payout_pct IS NULL;`,
+    sql`UPDATE platform_settings SET default_host_payout_pct = COALESCE(default_host_payout_pct, 100) WHERE id = 'default';`,
 
     // Paystack Remediation & Automated Transfers Schema
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS paystack_recipient_code VARCHAR(100);`,
