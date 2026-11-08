@@ -223,7 +223,11 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
     try {
       const settings = await adminService.updateSettings(
-        request.body as { defaultHostCommissionPct?: number; payoutHoldHours?: number },
+        request.body as {
+          defaultHostCommissionPct?: number;
+          defaultHostPayoutPct?: number;
+          payoutHoldHours?: number;
+        },
         session.userId,
         request.ip
       );

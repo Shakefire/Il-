@@ -92,7 +92,48 @@ export async function initializeBookingPayment(
     };
   }
 
-  // 2. Generate unique reference for this payment transaction
+  // Phase 3: payment only after host accept, before absolute payment deadline
+  if (booking.status === "PENDING_HOST") {
+    return {
+      success: false,
+      reference: "",
+      gatewayProvider: "PAYSTACK",
+      error: "Payment is not available until the host accepts this reservation.",
+    };
+  }
+
+  if (booking.status !== "PAYMENT_PENDING") {
+    return {
+      success: false,
+      reference: "",
+      gatewayProvider: "PAYSTACK",
+      error: `Payment cannot be initialized for booking status ${booking.status}.`,
+    };
+  }
+
+  if (
+    booking.paymentDeadlineAt &&
+    new Date(booking.paymentDeadlineAt).getTime() <= Date.now()
+  ) {
+    return {
+      success: false,
+      reference: "",
+      gatewayProvider: "PAYSTACK",
+      error: "Payment window has expired for this booking.",
+    };
+  }
+
+  // Access token required for payment init (guest ownership)
+  if (!accessToken || !booking.accessToken || booking.accessToken !== accessToken) {
+    return {
+      success: false,
+      reference: "",
+      gatewayProvider: "PAYSTACK",
+      error: "Unauthorized: Valid booking access token is required to initialize payment.",
+    };
+  }
+
+  // 2. Generate unique reference for this payment transaction — amount from server snapshot only
   const paymentRef = `ile_${booking.referenceCode}_${Date.now()}`;
   const amountKobo = booking.totalAmount * 100;
 
@@ -217,6 +258,27 @@ export async function processSuccessfulPayment(data: {
     };
   }
 
+  // Late Paystack success after cancel/expire: record payment, flag recon/refund, no confirm/earnings
+  if (
+    booking.status === "CANCELLED" ||
+    booking.status === "COMPLETED" ||
+    (booking.status === "PAYMENT_PENDING" &&
+      booking.paymentDeadlineAt &&
+      new Date(booking.paymentDeadlineAt).getTime() <= Date.now())
+  ) {
+    return await recordLatePaymentForReconciliation({
+      payment,
+      booking,
+      data,
+    });
+  }
+
+  if (booking.status !== "PAYMENT_PENDING") {
+    throw new Error(
+      `Cannot confirm payment for booking in status ${booking.status}. Expected PAYMENT_PENDING.`
+    );
+  }
+
   // 4. Validate Amount and Currency
   if (data.currency.toUpperCase() !== "NGN") {
     throw new Error(`Unexpected transaction currency: ${data.currency}. Expected NGN.`);
@@ -229,6 +291,7 @@ export async function processSuccessfulPayment(data: {
   }
 
   let confirmedBooking = booking;
+  let latePaymentRace = false;
 
   const [property] = await db
     .select()
@@ -250,16 +313,50 @@ export async function processSuccessfulPayment(data: {
       })
       .where(eq(schema.payments.id, payment.id));
 
-    // 6. Confirm Booking
+    // 6. Confirm Booking only from PAYMENT_PENDING (conditional — no silent revive)
     const [confirmed] = await tx
       .update(schema.bookings)
       .set({
         status: "CONFIRMED",
         updatedAt: new Date(),
       })
-      .where(eq(schema.bookings.id, booking.id))
+      .where(and(eq(schema.bookings.id, booking.id), eq(schema.bookings.status, "PAYMENT_PENDING")))
       .returning();
-    if (confirmed) confirmedBooking = confirmed;
+
+    if (!confirmed) {
+      // Race lost to cancel/expire: keep payment SUCCESS recorded above, flag recon, no earnings
+      const [existingRefund] = await tx
+        .select({ id: schema.refunds.id })
+        .from(schema.refunds)
+        .where(eq(schema.refunds.bookingId, booking.id))
+        .limit(1);
+
+      if (!existingRefund) {
+        const fee =
+          booking.paystackFeeAmount && booking.paystackFeeAmount > 0
+            ? booking.paystackFeeAmount
+            : 0;
+        const refundable = Math.max(0, data.paidAmountNaira - fee);
+        await tx.insert(schema.refunds).values({
+          id: `ref_late_${crypto.randomUUID()}`,
+          bookingId: booking.id,
+          guestId: booking.guestId,
+          grossPaid: data.paidAmountNaira,
+          nonRefundableProcessingFee: fee,
+          refundableAmount: refundable,
+          currency: "NGN",
+          status: "REQUESTED",
+          reason: "LATE_PAYMENT_AFTER_CANCEL_OR_EXPIRE",
+          adminNotes:
+            "Paystack reported success after booking left PAYMENT_PENDING. Do not confirm or create host earnings. Admin must reconcile/refund.",
+        });
+      }
+
+      latePaymentRace = true;
+      confirmedBooking = booking;
+      return;
+    }
+    confirmedBooking = confirmed;
 
     // Ensure availability block is active and locked for these confirmed dates
     const existingBlock = await tx
@@ -342,6 +439,16 @@ export async function processSuccessfulPayment(data: {
       });
     }
   });
+
+  if (latePaymentRace) {
+    return {
+      success: true,
+      message:
+        "Payment recorded but booking was no longer payable. Flagged for admin reconciliation/refund. Booking was NOT confirmed and no host earnings were created.",
+      booking: confirmedBooking,
+      reconciliationRequired: true,
+    } as any;
+  }
 
   // 8. Fetch Quarantined Details & Send Emails via Resend
   let privateDetails: any = null;
@@ -610,59 +717,134 @@ export async function processFailedPayment(data: {
   return { processed: true, message: "Payment marked failed, booking cancelled, and dates released." };
 }
 
-// ─── Expire Stale Pending Bookings ───
+// ─── Expire Due Host/Payment Windows (absolute deadlines) ───
 
-export async function expireStalePendingBookings(maxAgeMinutes = 10): Promise<{
+export async function expireStalePendingBookings(_maxAgeMinutes = 10): Promise<{
   expired: number;
   bookingIds: string[];
+  hostExpired?: number;
+  paymentExpired?: number;
 }> {
+  // Phase 3: absolute host_response_deadline_at / payment_deadline_at (ignores legacy age minutes)
+  const { bookingsService } = await import("../bookings/bookings.service");
+  const result = await bookingsService.expireDueBookings(200);
+  console.log(
+    `[Payments] Expired due bookings: host=${result.hostExpired} payment=${result.paymentExpired}`
+  );
+  return result;
+}
+
+/**
+ * Late Paystack success after cancel/expire:
+ * record payment, create REQUESTED refund for admin recon, no booking revive, no host earnings.
+ */
+async function recordLatePaymentForReconciliation(params: {
+  payment: any;
+  booking: any;
+  data: {
+    reference: string;
+    gatewayReference?: string;
+    paidAmountNaira: number;
+    currency: string;
+    method?: string;
+    rawPayload?: string;
+  };
+}): Promise<{ success: boolean; message: string; booking?: any; reconciliationRequired?: boolean }> {
+  const { payment, booking, data } = params;
   const db = getDb();
-  const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
 
-  // Find all PAYMENT_PENDING bookings older than the cutoff
-  const staleBookings = await db
-    .select({ id: schema.bookings.id, referenceCode: schema.bookings.referenceCode })
-    .from(schema.bookings)
-    .where(
-      and(
-        eq(schema.bookings.status, "PAYMENT_PENDING"),
-        sql`${schema.bookings.createdAt} < ${cutoff.toISOString()}`
-      )
-    );
+  if (payment.status === "SUCCESS") {
+    const [existingRefund] = await db
+      .select()
+      .from(schema.refunds)
+      .where(eq(schema.refunds.bookingId, booking.id))
+      .limit(1);
+    return {
+      success: true,
+      message: existingRefund
+        ? "Late payment already recorded and queued for reconciliation (idempotent)."
+        : "Late payment already recorded; ensure refund reconciliation exists.",
+      booking,
+      reconciliationRequired: true,
+    };
+  }
 
-  const expiredIds: string[] = [];
-
-  for (const booking of staleBookings) {
-    await db
-      .update(schema.bookings)
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.payments)
       .set({
-        status: "CANCELLED",
-        cancellationReason: "Payment not completed within the time limit.",
-        cancelledAt: new Date(),
-        updatedAt: new Date(),
+        status: "SUCCESS",
+        gatewayReference: data.gatewayReference || data.reference,
+        method: data.method || "CARD",
+        paidAt: new Date(),
+        rawPayload:
+          (data.rawPayload || "") +
+          "\n[ILE_LATE_PAYMENT_RECONCILIATION] Booking was cancelled/expired; not confirmed.",
       })
-      .where(eq(schema.bookings.id, booking.id));
+      .where(eq(schema.payments.id, payment.id));
 
-    await db
+    // Ensure booking stays cancelled (do not revive)
+    if (booking.status === "PAYMENT_PENDING") {
+      await tx
+        .update(schema.bookings)
+        .set({
+          status: "CANCELLED",
+          cancellationReason: "PAYMENT_WINDOW_EXPIRED",
+          cancelledAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(schema.bookings.id, booking.id), eq(schema.bookings.status, "PAYMENT_PENDING")));
+    }
+
+    await tx
       .delete(schema.availabilityBlocks)
       .where(eq(schema.availabilityBlocks.bookingId, booking.id));
 
-    // Mark related payments as expired
-    await db
-      .update(schema.payments)
-      .set({ status: "FAILED" })
-      .where(
-        and(
-          eq(schema.payments.bookingId, booking.id),
-          eq(schema.payments.status, "INITIALIZED")
-        )
-      );
+    // Never create host earnings / payouts for late payments
+    await tx
+      .update(schema.hostEarnings)
+      .set({ status: "CANCELLED" })
+      .where(eq(schema.hostEarnings.bookingId, booking.id));
+    await tx
+      .update(schema.payouts)
+      .set({ status: "CANCELLED", updatedAt: new Date() })
+      .where(eq(schema.payouts.bookingId, booking.id));
 
-    expiredIds.push(booking.id);
-    console.log(`[Payments] Expired stale booking: ${booking.referenceCode}`);
-  }
+    const [existingRefund] = await tx
+      .select({ id: schema.refunds.id })
+      .from(schema.refunds)
+      .where(eq(schema.refunds.bookingId, booking.id))
+      .limit(1);
 
-  return { expired: expiredIds.length, bookingIds: expiredIds };
+    if (!existingRefund) {
+      const fee =
+        booking.paystackFeeAmount && booking.paystackFeeAmount > 0
+          ? booking.paystackFeeAmount
+          : 0;
+      const refundable = Math.max(0, data.paidAmountNaira - fee);
+      await tx.insert(schema.refunds).values({
+        id: `ref_late_${crypto.randomUUID()}`,
+        bookingId: booking.id,
+        guestId: booking.guestId,
+        grossPaid: data.paidAmountNaira,
+        nonRefundableProcessingFee: fee,
+        refundableAmount: refundable,
+        currency: data.currency?.toUpperCase() || "NGN",
+        status: "REQUESTED",
+        reason: "LATE_PAYMENT_AFTER_CANCEL_OR_EXPIRE",
+        adminNotes:
+          "Paystack success arrived after cancel/expire. Auto-refund not executed here for safety. Admin finance must reconcile and refund. No host earnings/payout eligibility.",
+      });
+    }
+  });
+
+  return {
+    success: true,
+    message:
+      "Late payment recorded and flagged for admin reconciliation/refund. Booking was NOT confirmed.",
+    booking,
+    reconciliationRequired: true,
+  };
 }
 
 // ─── Paystack Webhook Handler ───

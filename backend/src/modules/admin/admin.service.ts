@@ -1037,6 +1037,7 @@ export const adminService = {
       return {
         id: "default",
         defaultHostCommissionPct: 10,
+        defaultHostPayoutPct: 100,
         payoutHoldHours: 24,
         updatedAt: new Date(),
       };
@@ -1046,7 +1047,11 @@ export const adminService = {
   },
 
   async updateSettings(
-    data: { defaultHostCommissionPct?: number; payoutHoldHours?: number },
+    data: {
+      defaultHostCommissionPct?: number;
+      defaultHostPayoutPct?: number;
+      payoutHoldHours?: number;
+    },
     adminId: string,
     ipAddress?: string
   ) {
@@ -1055,6 +1060,16 @@ export const adminService = {
     if (data.defaultHostCommissionPct !== undefined) {
       if (data.defaultHostCommissionPct < 0 || data.defaultHostCommissionPct > 50) {
         throw new Error("Commission rate must be between 0% and 50%.");
+      }
+    }
+
+    if (data.defaultHostPayoutPct !== undefined) {
+      if (
+        !Number.isInteger(data.defaultHostPayoutPct) ||
+        data.defaultHostPayoutPct < 1 ||
+        data.defaultHostPayoutPct > 100
+      ) {
+        throw new Error("Host payout percentage must be a whole number between 1 and 100.");
       }
     }
 
@@ -1077,6 +1092,7 @@ export const adminService = {
         .values({
           id: "default",
           defaultHostCommissionPct: data.defaultHostCommissionPct ?? 10,
+          defaultHostPayoutPct: data.defaultHostPayoutPct ?? 100,
           payoutHoldHours: data.payoutHoldHours ?? 24,
           updatedBy: adminId,
           updatedAt: new Date(),
@@ -1087,7 +1103,12 @@ export const adminService = {
       const [up] = await db
         .update(schema.platformSettings)
         .set({
-          ...(data.defaultHostCommissionPct !== undefined ? { defaultHostCommissionPct: data.defaultHostCommissionPct } : {}),
+          ...(data.defaultHostCommissionPct !== undefined
+            ? { defaultHostCommissionPct: data.defaultHostCommissionPct }
+            : {}),
+          ...(data.defaultHostPayoutPct !== undefined
+            ? { defaultHostPayoutPct: data.defaultHostPayoutPct }
+            : {}),
           ...(data.payoutHoldHours !== undefined ? { payoutHoldHours: data.payoutHoldHours } : {}),
           updatedBy: adminId,
           updatedAt: new Date(),
@@ -1097,14 +1118,13 @@ export const adminService = {
       updated = up;
     }
 
-    // Audit log
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
       userId: adminId,
       action: "SETTINGS_UPDATED",
       entityType: "platform_settings",
       entityId: "default",
-      details: `Updated platform settings: commission=${updated.defaultHostCommissionPct}%, payoutHold=${updated.payoutHoldHours}h`,
+      details: `Updated platform settings: commission=${updated.defaultHostCommissionPct}%, hostPayout=${updated.defaultHostPayoutPct}%, payoutHold=${updated.payoutHoldHours}h`,
       ipAddress: ipAddress || null,
     });
 

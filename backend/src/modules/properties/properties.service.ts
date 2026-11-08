@@ -28,6 +28,7 @@ export function enrichProperty(
     beds: prop.beds,
     maxGuests: prop.maxGuests,
     pricePerNight: prop.pricePerNight,
+    minimumNights: prop.minimumNights ?? 1,
     currency: prop.currency,
     city: prop.city,
     neighborhood: prop.neighborhood,
@@ -134,8 +135,7 @@ export async function getPublishedProperties(pagination: { limit: number; offset
   const reservedIds = new Set<string>();
 
   try {
-    // Clean up stale or cancelled availability blocks
-    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    // Clean up cancelled/failed blocks only (absolute deadline expiry handled by expire job / booking create)
     const staleBlocks = await db
       .select({ id: schema.availabilityBlocks.id, bookingId: schema.availabilityBlocks.bookingId, status: schema.bookings.status })
       .from(schema.availabilityBlocks)
@@ -145,22 +145,15 @@ export async function getPublishedProperties(pagination: { limit: number; offset
           inArray(schema.availabilityBlocks.propertyId, propertyIds),
           or(
             eq(schema.bookings.status, "CANCELLED"),
-            eq(schema.bookings.status, "FAILED"),
-            and(
-              eq(schema.bookings.status, "PAYMENT_PENDING"),
-              lt(schema.bookings.createdAt, fiveMinAgo)
-            )
+            eq(schema.bookings.status, "FAILED")
           )
         )
       );
     for (const stale of staleBlocks) {
       await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, stale.id));
-      if (stale.bookingId && stale.status === "PAYMENT_PENDING") {
-        await db.update(schema.bookings).set({ status: "CANCELLED", updatedAt: new Date() }).where(eq(schema.bookings.id, stale.bookingId));
-      }
     }
 
-    // Only count blocks where booking is CONFIRMED or block is a manual host block (no bookingId)
+    // Count PENDING_HOST + PAYMENT_PENDING + CONFIRMED + manual blocks
     const activeBlocks = await db
       .select({ propertyId: schema.availabilityBlocks.propertyId })
       .from(schema.availabilityBlocks)
@@ -172,7 +165,9 @@ export async function getPublishedProperties(pagination: { limit: number; offset
           gte(schema.availabilityBlocks.endDate, today),
           or(
             isNull(schema.availabilityBlocks.bookingId),
-            eq(schema.bookings.status, "CONFIRMED")
+            eq(schema.bookings.status, "CONFIRMED"),
+            eq(schema.bookings.status, "PAYMENT_PENDING"),
+            eq(schema.bookings.status, "PENDING_HOST")
           )
         )
       );
@@ -268,8 +263,6 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
   try {
     const today = new Date().toISOString().split("T")[0];
 
-    // Clean up stale or cancelled availability blocks
-    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
     const staleBlocks = await db
       .select({ id: schema.availabilityBlocks.id, bookingId: schema.availabilityBlocks.bookingId, status: schema.bookings.status })
       .from(schema.availabilityBlocks)
@@ -279,22 +272,14 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
           eq(schema.availabilityBlocks.propertyId, prop.id),
           or(
             eq(schema.bookings.status, "CANCELLED"),
-            eq(schema.bookings.status, "FAILED"),
-            and(
-              eq(schema.bookings.status, "PAYMENT_PENDING"),
-              lt(schema.bookings.createdAt, fiveMinAgo)
-            )
+            eq(schema.bookings.status, "FAILED")
           )
         )
       );
     for (const stale of staleBlocks) {
       await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, stale.id));
-      if (stale.bookingId && stale.status === "PAYMENT_PENDING") {
-        await db.update(schema.bookings).set({ status: "CANCELLED", updatedAt: new Date() }).where(eq(schema.bookings.id, stale.bookingId));
-      }
     }
 
-    // Only count blocks where booking is CONFIRMED or block is a manual host block (no bookingId)
     const [activeBlock] = await db
       .select({ id: schema.availabilityBlocks.id })
       .from(schema.availabilityBlocks)
@@ -306,7 +291,9 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
           gte(schema.availabilityBlocks.endDate, today),
           or(
             isNull(schema.availabilityBlocks.bookingId),
-            eq(schema.bookings.status, "CONFIRMED")
+            eq(schema.bookings.status, "CONFIRMED"),
+            eq(schema.bookings.status, "PAYMENT_PENDING"),
+            eq(schema.bookings.status, "PENDING_HOST")
           )
         )
       )
