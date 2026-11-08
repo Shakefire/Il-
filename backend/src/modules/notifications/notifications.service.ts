@@ -1970,10 +1970,10 @@ export function bookingInitiatedEmail(data: {
   const safeTitle = escapeHtml(data.propertyTitle);
   const formattedTotal = formatCurrency(data.totalAmount, data.currency || "NGN");
   const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`;
-  const payUrl = safeUrl(data.paymentUrl) || `${env.FRONTEND_URL}/booking/status/${data.referenceCode}`;
+  const statusUrl = `${env.FRONTEND_URL}/booking/status/${data.referenceCode}`;
 
   const content = `
-    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Booking Reservation Initiated</h2>
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Reservation Request Submitted</h2>
     <p>Hello ${safeName},</p>
     <p>We received your reservation request for <strong>${safeTitle}</strong>. Your reservation reference is <strong>#${escapeHtml(data.referenceCode)}</strong>.</p>
     
@@ -1989,23 +1989,120 @@ export function bookingInitiatedEmail(data: {
         </tr>
         <tr>
           <td style="padding: 6px 0; color: #6B6B67; font-weight: 600;">Status:</td>
-          <td style="padding: 6px 0;"><span style="display: inline-block; background-color: #FEF3C7; color: #92400E; padding: 3px 10px; border-radius: 6px; font-weight: 700; font-size: 12px;">PAYMENT PENDING</span></td>
+          <td style="padding: 6px 0;"><span style="display: inline-block; background-color: #FEF3C7; color: #92400E; padding: 3px 10px; border-radius: 6px; font-weight: 700; font-size: 12px;">AWAITING HOST</span></td>
         </tr>
       </table>
     </div>
 
-    <p style="font-size: 14px; color: #374151;">To secure your stay and receive full gate access details, please complete your payment before the reservation window expires.</p>
+    <p style="font-size: 14px; color: #374151;">The host has a short window to accept your request. You will only be asked to pay after the host accepts.</p>
 
     <div style="margin: 28px 0;">
-      <a href="${payUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Complete Payment →</a>
+      <a href="${statusUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">View Request Status →</a>
     </div>
   `;
 
   return {
     to: data.guestEmail,
-    subject: `Reservation Initiated: ${data.propertyTitle} (#${data.referenceCode})`,
-    html: emailShell("Booking Initiated", "Payment Pending", content),
-    text: `Hello ${data.guestName}, your reservation #${data.referenceCode} for ${data.propertyTitle} (${dates}) is awaiting payment (${formattedTotal}). Complete payment: ${payUrl}`,
+    subject: `Request Submitted: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Booking Request", "Awaiting Host", content),
+    text: `Hello ${data.guestName}, your reservation #${data.referenceCode} for ${data.propertyTitle} (${dates}) is awaiting host approval (${formattedTotal}). Status: ${statusUrl}`,
+  };
+}
+
+export function hostBookingRequestEmail(data: {
+  hostName: string;
+  hostEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  guestName: string;
+  guestCount: number;
+  checkIn: string;
+  checkOut: string;
+  hostResponseDeadlineAt: string;
+  totalAmount: number;
+  currency?: string;
+}): EmailPayload {
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`;
+  const formattedTotal = formatCurrency(data.totalAmount, data.currency || "NGN");
+  const hostUrl = `${env.FRONTEND_URL}/host/bookings`;
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">New Booking Request</h2>
+    <p>Hello ${escapeHtml(data.hostName)},</p>
+    <p>A guest requested <strong>${escapeHtml(data.propertyTitle)}</strong> (Ref #${escapeHtml(data.referenceCode)}).</p>
+    <p style="font-size: 14px; color: #374151;"><strong>Guest:</strong> ${escapeHtml(data.guestName)} · ${data.guestCount} guest(s)<br/>
+    <strong>Dates:</strong> ${dates}<br/>
+    <strong>Guest total:</strong> ${formattedTotal}<br/>
+    <strong>Respond by:</strong> ${escapeHtml(data.hostResponseDeadlineAt)}</p>
+    <div style="margin: 28px 0;">
+      <a href="${hostUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Review Request →</a>
+    </div>
+  `;
+  return {
+    to: data.hostEmail,
+    subject: `New request: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Host Request", "Action Required", content),
+    text: `New booking request #${data.referenceCode} for ${data.propertyTitle}. Guest ${data.guestName}, ${dates}. Respond by ${data.hostResponseDeadlineAt}. ${hostUrl}`,
+  };
+}
+
+export function guestHostAcceptedEmail(data: {
+  guestName: string;
+  guestEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  checkIn: string;
+  checkOut: string;
+  totalAmount: number;
+  currency?: string;
+  paymentDeadlineAt: string;
+  accessToken?: string;
+}): EmailPayload {
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`;
+  const formattedTotal = formatCurrency(data.totalAmount, data.currency || "NGN");
+  const payUrl = `${env.FRONTEND_URL}/booking/status/${data.referenceCode}${data.accessToken ? `?accessToken=${encodeURIComponent(data.accessToken)}` : ""}`;
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Host Accepted — Complete Payment</h2>
+    <p>Hello ${escapeHtml(data.guestName)},</p>
+    <p>Your host accepted the request for <strong>${escapeHtml(data.propertyTitle)}</strong> (#${escapeHtml(data.referenceCode)}).</p>
+    <p style="font-size: 14px; color: #374151;">Stay: ${dates}. Amount due: <strong>${formattedTotal}</strong>. Pay before ${escapeHtml(data.paymentDeadlineAt)}.</p>
+    <div style="margin: 28px 0;">
+      <a href="${payUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Complete Payment →</a>
+    </div>
+  `;
+  return {
+    to: data.guestEmail,
+    subject: `Payment due: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Payment Due", "Host Accepted", content),
+    text: `Host accepted #${data.referenceCode}. Pay ${formattedTotal} before ${data.paymentDeadlineAt}: ${payUrl}`,
+  };
+}
+
+export function guestHostDeclinedEmail(data: {
+  guestName: string;
+  guestEmail: string;
+  propertyTitle: string;
+  referenceCode: string;
+  checkIn: string;
+  checkOut: string;
+  reason?: string;
+}): EmailPayload {
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`;
+  const exploreUrl = `${env.FRONTEND_URL}/`;
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Request Declined</h2>
+    <p>Hello ${escapeHtml(data.guestName)},</p>
+    <p>The host declined your request for <strong>${escapeHtml(data.propertyTitle)}</strong> (#${escapeHtml(data.referenceCode)}) for ${dates}.</p>
+    ${data.reason ? `<p style="font-size: 14px; color: #374151;">Note: ${escapeHtml(data.reason)}</p>` : ""}
+    <p style="font-size: 14px; color: #374151;">No payment was taken. You can browse similar stays and submit a new request.</p>
+    <div style="margin: 28px 0;">
+      <a href="${exploreUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Explore Stays →</a>
+    </div>
+  `;
+  return {
+    to: data.guestEmail,
+    subject: `Request declined: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Request Declined", "No Charge", content),
+    text: `Host declined #${data.referenceCode} for ${data.propertyTitle} (${dates}). No payment was taken. ${exploreUrl}`,
   };
 }
 

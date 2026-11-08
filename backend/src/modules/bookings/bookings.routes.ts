@@ -2,8 +2,30 @@ import { FastifyInstance } from "fastify";
 import { bookingsService } from "./bookings.service";
 import { authenticateRequest, extractSession } from "../../lib/security";
 
+const assertCronOrAdmin = async (request: any, reply: any): Promise<boolean> => {
+  const cronSecret = process.env.CRON_SECRET || process.env.INTERNAL_JOB_SECRET;
+  const provided =
+    (request.headers["x-cron-secret"] as string | undefined) ||
+    (request.headers["x-internal-job-secret"] as string | undefined) ||
+    (request.headers.authorization?.startsWith("Bearer ")
+      ? request.headers.authorization.slice(7)
+      : undefined);
+
+  if (cronSecret && provided && provided === cronSecret) {
+    return true;
+  }
+
+  const session = extractSession(request);
+  if (session?.role === "admin") {
+    return true;
+  }
+
+  reply.status(401).send({ error: "Unauthorized: admin session or CRON_SECRET required." });
+  return false;
+};
+
 export async function bookingsRoutes(fastify: FastifyInstance) {
-  // POST /api/bookings — Create booking (guest checkout supported)
+  // POST /api/bookings — Create reservation request (PENDING_HOST; no Paystack)
   fastify.post("/", async (request, reply) => {
     try {
       const session = extractSession(request);
@@ -19,6 +41,54 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
         : 400
       );
       return reply.status(status).send({ error: error.message, code: error.code });
+    }
+  });
+
+  // POST /api/bookings/:id/accept — Host accept → PAYMENT_PENDING
+  fastify.post("/:id/accept", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+
+    try {
+      const result = await bookingsService.acceptBooking(id, session.userId);
+      return reply.send({
+        success: true,
+        booking: result.booking,
+        paymentDeadlineAt: result.paymentDeadlineAt,
+        idempotent: result.idempotent,
+      });
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({ error: error.message, code: error.code });
+    }
+  });
+
+  // POST /api/bookings/:id/decline — Host decline → CANCELLED
+  fastify.post("/:id/decline", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    const { reason } = (request.body || {}) as { reason?: string };
+
+    try {
+      const result = await bookingsService.declineBooking(id, session.userId, reason);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({ error: error.message, code: error.code });
+    }
+  });
+
+  // POST /api/bookings/expire-due — Secured cron/admin expiration
+  fastify.post("/expire-due", async (request, reply) => {
+    const ok = await assertCronOrAdmin(request, reply);
+    if (!ok) return;
+
+    try {
+      const { limit } = (request.body || {}) as { limit?: number };
+      const result = await bookingsService.expireDueBookings(limit || 100);
+      return reply.send({ success: true, ...result });
+    } catch (error: any) {
+      return reply.status(500).send({ error: error.message });
     }
   });
 

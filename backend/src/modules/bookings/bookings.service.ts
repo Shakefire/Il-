@@ -2,18 +2,29 @@ import { z } from "zod";
 import { eq, and, or, like, gt, lt, lte, desc, sql, inArray, isNull } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
-import { BOOKING_STATUS } from "../../config/constants";
+import {
+  BOOKING_STATUS,
+  ACTIVE_HOLD_STATUSES,
+  HOST_RESPONSE,
+  CANCELLATION_REASON,
+  HOST_RESPONSE_WINDOW_SECONDS,
+  PAYMENT_WINDOW_MINUTES,
+  DEFAULT_HOST_PAYOUT_PCT,
+} from "../../config/constants";
 import { parsePagination, paginatedResponse } from "../../lib/pagination";
 import { calculateFromGuestPrice } from "../pricing/pricing.service";
 import {
   sendEmail,
-  bookingConfirmationEmail,
-  bookingAccessPassEmail,
   bookingInitiatedEmail,
   bookingCancelledEmail,
   hostUpcomingArrivalEmail,
-  hostBookingConfirmedEmail,
+  hostBookingRequestEmail,
+  guestHostAcceptedEmail,
+  guestHostDeclinedEmail,
 } from "../notifications/notifications.service";
+
+const isActiveHoldStatus = (status: string | null | undefined): boolean =>
+  !!status && (ACTIVE_HOLD_STATUSES as readonly string[]).includes(status);
 
 const CreateBookingSchema = z.object({
   propertyId: z.string().min(1, "Property ID is required"),
@@ -118,7 +129,7 @@ export const bookingsService = {
         throw err;
       }
 
-      // D. Double-booking concurrency check (Half-open interval [start, end))
+      // D. Double-booking concurrency (Option A): count PENDING_HOST + PAYMENT_PENDING + CONFIRMED + manual blocks
       const potentialConflicts = await tx
         .select()
         .from(schema.availabilityBlocks)
@@ -132,9 +143,7 @@ export const bookingsService = {
           )
         );
 
-      // Filter out stale blocks from abandoned PAYMENT_PENDING bookings older than 5 mins
-      // or from the same guest re-attempting / refreshing
-      const now = Date.now();
+      const nowDate = new Date();
       const activeConflicts: typeof potentialConflicts = [];
 
       for (const block of potentialConflicts) {
@@ -149,58 +158,86 @@ export const bookingsService = {
             createdAt: schema.bookings.createdAt,
             guestEmail: schema.bookings.guestEmail,
             guestId: schema.bookings.guestId,
+            hostResponseDeadlineAt: schema.bookings.hostResponseDeadlineAt,
+            paymentDeadlineAt: schema.bookings.paymentDeadlineAt,
           })
           .from(schema.bookings)
           .where(eq(schema.bookings.id, block.bookingId))
           .limit(1);
 
         if (!linkedBooking) {
-          // Orphaned block without booking — clean up immediately
-          await tx
-            .delete(schema.availabilityBlocks)
-            .where(eq(schema.availabilityBlocks.id, block.id));
+          await tx.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, block.id));
           continue;
         }
 
-        // Cancelled or Failed bookings do not block
         if (linkedBooking.status === "CANCELLED" || linkedBooking.status === "FAILED") {
-          await tx
-            .delete(schema.availabilityBlocks)
-            .where(eq(schema.availabilityBlocks.id, block.id));
+          await tx.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, block.id));
           continue;
         }
 
-        // Check if this pending booking belongs to the SAME guest attempting a re-booking / refresh
         const isSameGuest =
-          (linkedBooking.guestEmail && linkedBooking.guestEmail.toLowerCase() === parsed.guestEmail.toLowerCase().trim()) ||
+          (linkedBooking.guestEmail &&
+            linkedBooking.guestEmail.toLowerCase() === parsed.guestEmail.toLowerCase().trim()) ||
           (session?.userId && linkedBooking.guestId === session.userId);
 
-        if (linkedBooking.status === "PAYMENT_PENDING" && isSameGuest) {
-          // Supersede the guest's previous abandoned pending booking and release its block
+        // Same guest may supersede their own unpaid request / payment hold
+        if (
+          isSameGuest &&
+          (linkedBooking.status === BOOKING_STATUS.PENDING_HOST ||
+            linkedBooking.status === BOOKING_STATUS.PAYMENT_PENDING)
+        ) {
           await tx
             .update(schema.bookings)
-            .set({ status: "CANCELLED", cancellationReason: "Superseded by new booking attempt.", updatedAt: new Date() })
+            .set({
+              status: BOOKING_STATUS.CANCELLED,
+              cancellationReason: CANCELLATION_REASON.SUPERSEDED,
+              cancelledAt: nowDate,
+              updatedAt: nowDate,
+            })
             .where(eq(schema.bookings.id, block.bookingId));
-          await tx
-            .delete(schema.availabilityBlocks)
-            .where(eq(schema.availabilityBlocks.id, block.id));
+          await tx.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, block.id));
           continue;
         }
 
-        // Unpaid bookings older than 5 minutes expire
-        const ageMs = now - new Date(linkedBooking.createdAt).getTime();
-        if (linkedBooking.status === "PAYMENT_PENDING" && ageMs > 5 * 60 * 1000) {
+        // Absolute-deadline expiry of soft holds (do not wait for cron)
+        const hostDeadlinePassed =
+          linkedBooking.status === BOOKING_STATUS.PENDING_HOST &&
+          linkedBooking.hostResponseDeadlineAt &&
+          new Date(linkedBooking.hostResponseDeadlineAt).getTime() <= nowDate.getTime();
+
+        const paymentDeadlinePassed =
+          linkedBooking.status === BOOKING_STATUS.PAYMENT_PENDING &&
+          linkedBooking.paymentDeadlineAt &&
+          new Date(linkedBooking.paymentDeadlineAt).getTime() <= nowDate.getTime();
+
+        if (hostDeadlinePassed || paymentDeadlinePassed) {
           await tx
             .update(schema.bookings)
-            .set({ status: "CANCELLED", cancellationReason: "Expired unpaid booking hold.", updatedAt: new Date() })
-            .where(eq(schema.bookings.id, block.bookingId));
-          await tx
-            .delete(schema.availabilityBlocks)
-            .where(eq(schema.availabilityBlocks.id, block.id));
+            .set({
+              status: BOOKING_STATUS.CANCELLED,
+              cancellationReason: hostDeadlinePassed
+                ? CANCELLATION_REASON.HOST_WINDOW_EXPIRED
+                : CANCELLATION_REASON.PAYMENT_WINDOW_EXPIRED,
+              ...(hostDeadlinePassed ? { hostResponse: HOST_RESPONSE.EXPIRED } : {}),
+              cancelledAt: nowDate,
+              updatedAt: nowDate,
+            })
+            .where(
+              and(
+                eq(schema.bookings.id, block.bookingId),
+                eq(
+                  schema.bookings.status,
+                  hostDeadlinePassed ? BOOKING_STATUS.PENDING_HOST : BOOKING_STATUS.PAYMENT_PENDING
+                )
+              )
+            );
+          await tx.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, block.id));
           continue;
         }
 
-        activeConflicts.push(block);
+        if (isActiveHoldStatus(linkedBooking.status)) {
+          activeConflicts.push(block);
+        }
       }
 
       if (activeConflicts.length > 0) {
@@ -210,16 +247,23 @@ export const bookingsService = {
         throw conflictErr;
       }
 
-      // E. Authoritative Server-side Price Calculation (Phase 4 Centralized Pricing)
+      // E. Authoritative server-side pricing + host payout % snapshot
       let commissionPct = 10;
+      let hostPayoutPct = DEFAULT_HOST_PAYOUT_PCT;
       try {
         const [settings] = await tx
-          .select({ pct: schema.platformSettings.defaultHostCommissionPct })
+          .select({
+            pct: schema.platformSettings.defaultHostCommissionPct,
+            payoutPct: schema.platformSettings.defaultHostPayoutPct,
+          })
           .from(schema.platformSettings)
           .where(eq(schema.platformSettings.id, "default"))
           .limit(1);
         if (settings?.pct !== undefined && settings.pct !== null) {
           commissionPct = settings.pct;
+        }
+        if (settings?.payoutPct !== undefined && settings.payoutPct !== null) {
+          hostPayoutPct = Math.min(100, Math.max(1, settings.payoutPct));
         }
       } catch {}
 
@@ -233,15 +277,18 @@ export const bookingsService = {
       const pricePerNight = pricing.guestNightlyAccommodationPrice;
       const accommodationSubtotal = pricing.accommodationSubtotal;
       const paystackFee = pricing.paystackFee;
-      const hostCommissionAmount = pricing.platformCommission;
-      const hostNetAmount = pricing.hostEarnings;
+      const classicHostEarnings = pricing.hostEarnings;
+      // Host payout % applies to classic host earnings only — guest price unchanged; no double commission
+      const hostNetAmount = Math.round((classicHostEarnings * hostPayoutPct) / 100);
+      const hostCommissionAmount = accommodationSubtotal - hostNetAmount;
       const totalAmount = pricing.totalGuestPayment;
+      const hostResponseDeadlineAt = new Date(nowDate.getTime() + HOST_RESPONSE_WINDOW_SECONDS * 1000);
 
       const bookingId = `book_${crypto.randomUUID()}`;
       const referenceCode = `ILE-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
       const accessToken = crypto.randomBytes(32).toString("hex");
 
-      // F. Insert Booking Record with Financial Snapshots
+      // F. Insert booking as PENDING_HOST — no Paystack init
       const [booking] = await tx
         .insert(schema.bookings)
         .values({
@@ -258,8 +305,8 @@ export const bookingsService = {
           checkOutDate: outDateStr,
           numberOfNights: nights,
           nightlyPrice: pricePerNight,
-          cleaningFee: 0, // No cleaning fee in business model
-          serviceFee: paystackFee, // Paystack fee passed to guest
+          cleaningFee: 0,
+          serviceFee: paystackFee,
           totalAmount,
           currency: "NGN",
           accommodationSubtotal,
@@ -267,33 +314,21 @@ export const bookingsService = {
           hostCommissionAmount,
           paystackFeeAmount: paystackFee,
           hostNetAmount,
-          status: BOOKING_STATUS.PAYMENT_PENDING,
+          hostPayoutPct,
+          status: BOOKING_STATUS.PENDING_HOST,
+          hostResponseDeadlineAt,
           accessToken,
         })
         .returning();
 
-      // G. Insert Availability Block Lock
+      // G. Soft inventory hold
       await tx.insert(schema.availabilityBlocks).values({
         id: `block_${crypto.randomUUID()}`,
         propertyId: property.id,
         bookingId: booking.id,
         startDate: inDateStr,
         endDate: outDateStr,
-        type: "RESERVATION",
-      });
-
-      // H. Initialize Internal Payment Record
-      const paymentRef = `ile_${referenceCode}_${Date.now()}`;
-      await tx.insert(schema.payments).values({
-        id: `pay_${crypto.randomUUID()}`,
-        bookingId: booking.id,
-        reference: paymentRef,
-        amount: totalAmount,
-        currency: "NGN",
-        method: "CARD",
-        status: "INITIALIZED",
-        gatewayProvider: "PAYSTACK",
-        createdAt: new Date(),
+        type: "REQUEST_HOLD",
       });
 
       const enrichedBooking = {
@@ -305,7 +340,7 @@ export const bookingsService = {
         totalNights: booking.numberOfNights,
       };
 
-      // Dispatch transactional reservation initiated email
+      // Guest + host emails — failures must not roll back booking
       sendEmail(
         bookingInitiatedEmail({
           guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
@@ -319,6 +354,34 @@ export const bookingsService = {
         })
       ).catch((e) => console.warn("[Bookings] Failed to dispatch booking initiated email:", e));
 
+      // Notify host (best-effort)
+      tx.select({
+        email: schema.users.email,
+        firstName: schema.users.firstName,
+      })
+        .from(schema.users)
+        .where(eq(schema.users.id, property.hostId))
+        .limit(1)
+        .then(([host]) => {
+          if (!host?.email) return;
+          return sendEmail(
+            hostBookingRequestEmail({
+              hostName: host.firstName || "Host",
+              hostEmail: host.email,
+              propertyTitle: property.title,
+              referenceCode: booking.referenceCode,
+              guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+              guestCount: booking.guestCount,
+              checkIn: booking.checkInDate,
+              checkOut: booking.checkOutDate,
+              hostResponseDeadlineAt: hostResponseDeadlineAt.toISOString(),
+              totalAmount: booking.totalAmount,
+              currency: booking.currency,
+            })
+          );
+        })
+        .catch((e) => console.warn("[Bookings] Failed to dispatch host request email:", e));
+
       return {
         booking: enrichedBooking,
         pricing: {
@@ -331,17 +394,380 @@ export const bookingsService = {
           paystackFee,
           hostCommissionPct: commissionPct,
           hostCommissionAmount,
+          classicHostEarnings,
+          hostPayoutPct,
           hostNetAmount,
           totalAmount,
         },
         accessToken,
-        paymentReference: paymentRef,
+        timers: {
+          hostResponseDeadlineAt: hostResponseDeadlineAt.toISOString(),
+          hostResponseSecondsRemaining: HOST_RESPONSE_WINDOW_SECONDS,
+        },
       };
     });
   },
 
   /**
-   * Cancel an unconfirmed or pending booking and release its availability blocks.
+   * Host accepts a PENDING_HOST booking → PAYMENT_PENDING with 10-minute payment window.
+   * Absolute deadline enforced in-transaction even if expire job is late.
+   */
+  async acceptBooking(bookingId: string, hostUserId: string) {
+    const db = getDb();
+    const now = new Date();
+
+    return await db.transaction(async (tx) => {
+      const [booking] = await tx
+        .select()
+        .from(schema.bookings)
+        .where(eq(schema.bookings.id, bookingId))
+        .limit(1);
+
+      if (!booking) {
+        const err: any = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const [property] = await tx
+        .select()
+        .from(schema.properties)
+        .where(eq(schema.properties.id, booking.propertyId))
+        .limit(1);
+
+      if (!property || property.hostId !== hostUserId) {
+        const err: any = new Error("Unauthorized: only the property host may accept this booking.");
+        err.statusCode = 403;
+        throw err;
+      }
+
+      // Idempotent re-accept
+      if (
+        booking.status === BOOKING_STATUS.PAYMENT_PENDING &&
+        booking.hostResponse === HOST_RESPONSE.ACCEPTED
+      ) {
+        return {
+          booking,
+          paymentDeadlineAt: booking.paymentDeadlineAt,
+          idempotent: true,
+        };
+      }
+
+      if (booking.status !== BOOKING_STATUS.PENDING_HOST) {
+        const err: any = new Error(
+          `Booking cannot be accepted in status ${booking.status}.`
+        );
+        err.statusCode = 409;
+        err.code = "ALREADY_RESOLVED";
+        throw err;
+      }
+
+      if (
+        booking.hostResponseDeadlineAt &&
+        new Date(booking.hostResponseDeadlineAt).getTime() <= now.getTime()
+      ) {
+        await tx
+          .update(schema.bookings)
+          .set({
+            status: BOOKING_STATUS.CANCELLED,
+            cancellationReason: CANCELLATION_REASON.HOST_WINDOW_EXPIRED,
+            hostResponse: HOST_RESPONSE.EXPIRED,
+            cancelledAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(schema.bookings.id, bookingId),
+              eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST)
+            )
+          );
+        await tx
+          .delete(schema.availabilityBlocks)
+          .where(eq(schema.availabilityBlocks.bookingId, bookingId));
+        const err: any = new Error("Host response window has expired.");
+        err.statusCode = 409;
+        err.code = "HOST_WINDOW_EXPIRED";
+        throw err;
+      }
+
+      const paymentDeadlineAt = new Date(now.getTime() + PAYMENT_WINDOW_MINUTES * 60 * 1000);
+
+      const [updated] = await tx
+        .update(schema.bookings)
+        .set({
+          status: BOOKING_STATUS.PAYMENT_PENDING,
+          hostResponse: HOST_RESPONSE.ACCEPTED,
+          hostRespondedAt: now,
+          paymentDeadlineAt,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(schema.bookings.id, bookingId),
+            eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST),
+            sql`${schema.bookings.hostResponseDeadlineAt} > ${now.toISOString()}`
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        const err: any = new Error("Booking could not be accepted (already resolved or expired).");
+        err.statusCode = 409;
+        err.code = "ALREADY_RESOLVED";
+        throw err;
+      }
+
+      // Keep hold; upgrade block type for clarity
+      await tx
+        .update(schema.availabilityBlocks)
+        .set({ type: "RESERVATION" })
+        .where(eq(schema.availabilityBlocks.bookingId, bookingId));
+
+      sendEmail(
+        guestHostAcceptedEmail({
+          guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+          guestEmail: booking.guestEmail,
+          propertyTitle: property.title,
+          referenceCode: booking.referenceCode,
+          checkIn: booking.checkInDate,
+          checkOut: booking.checkOutDate,
+          totalAmount: booking.totalAmount,
+          currency: booking.currency,
+          paymentDeadlineAt: paymentDeadlineAt.toISOString(),
+          accessToken: booking.accessToken,
+        })
+      ).catch((e) => console.warn("[Bookings] Failed to notify guest of host accept:", e));
+
+      return {
+        booking: updated,
+        paymentDeadlineAt,
+        idempotent: false,
+      };
+    });
+  },
+
+  /**
+   * Host declines a PENDING_HOST booking → CANCELLED, release hold, no refund.
+   */
+  async declineBooking(bookingId: string, hostUserId: string, reason?: string) {
+    const db = getDb();
+    const now = new Date();
+
+    return await db.transaction(async (tx) => {
+      const [booking] = await tx
+        .select()
+        .from(schema.bookings)
+        .where(eq(schema.bookings.id, bookingId))
+        .limit(1);
+
+      if (!booking) {
+        const err: any = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const [property] = await tx
+        .select()
+        .from(schema.properties)
+        .where(eq(schema.properties.id, booking.propertyId))
+        .limit(1);
+
+      if (!property || property.hostId !== hostUserId) {
+        const err: any = new Error("Unauthorized: only the property host may decline this booking.");
+        err.statusCode = 403;
+        throw err;
+      }
+
+      if (booking.status !== BOOKING_STATUS.PENDING_HOST) {
+        const err: any = new Error(
+          `Booking cannot be declined in status ${booking.status}.`
+        );
+        err.statusCode = 409;
+        err.code = "ALREADY_RESOLVED";
+        throw err;
+      }
+
+      const [updated] = await tx
+        .update(schema.bookings)
+        .set({
+          status: BOOKING_STATUS.CANCELLED,
+          cancellationReason: reason
+            ? `${CANCELLATION_REASON.HOST_DECLINED}: ${reason}`.slice(0, 255)
+            : CANCELLATION_REASON.HOST_DECLINED,
+          hostResponse: HOST_RESPONSE.DECLINED,
+          hostRespondedAt: now,
+          cancelledAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(schema.bookings.id, bookingId),
+            eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST)
+          )
+        )
+        .returning();
+
+      if (!updated) {
+        const err: any = new Error("Booking could not be declined (already resolved).");
+        err.statusCode = 409;
+        err.code = "ALREADY_RESOLVED";
+        throw err;
+      }
+
+      await tx
+        .delete(schema.availabilityBlocks)
+        .where(eq(schema.availabilityBlocks.bookingId, bookingId));
+
+      sendEmail(
+        guestHostDeclinedEmail({
+          guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+          guestEmail: booking.guestEmail,
+          propertyTitle: property.title,
+          referenceCode: booking.referenceCode,
+          checkIn: booking.checkInDate,
+          checkOut: booking.checkOutDate,
+          reason: reason || undefined,
+        })
+      ).catch((e) => console.warn("[Bookings] Failed to notify guest of host decline:", e));
+
+      return {
+        success: true,
+        message: "Booking declined and dates released.",
+        booking: updated,
+      };
+    });
+  },
+
+  /**
+   * Expire PENDING_HOST past host deadline and PAYMENT_PENDING past payment deadline.
+   * Conditional updates; safe under concurrent cron runners.
+   */
+  async expireDueBookings(limit = 100): Promise<{
+    expired: number;
+    bookingIds: string[];
+    hostExpired: number;
+    paymentExpired: number;
+  }> {
+    const db = getDb();
+    const now = new Date();
+    const expiredIds: string[] = [];
+    let hostExpired = 0;
+    let paymentExpired = 0;
+
+    const dueHost = await db
+      .select({ id: schema.bookings.id })
+      .from(schema.bookings)
+      .where(
+        and(
+          eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST),
+          lte(schema.bookings.hostResponseDeadlineAt, now)
+        )
+      )
+      .limit(limit);
+
+    for (const row of dueHost) {
+      const result = await db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(schema.bookings)
+          .set({
+            status: BOOKING_STATUS.CANCELLED,
+            cancellationReason: CANCELLATION_REASON.HOST_WINDOW_EXPIRED,
+            hostResponse: HOST_RESPONSE.EXPIRED,
+            cancelledAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(schema.bookings.id, row.id),
+              eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST),
+              lte(schema.bookings.hostResponseDeadlineAt, now)
+            )
+          )
+          .returning({ id: schema.bookings.id });
+
+        if (!updated) return null;
+
+        await tx
+          .delete(schema.availabilityBlocks)
+          .where(eq(schema.availabilityBlocks.bookingId, row.id));
+
+        return updated.id;
+      });
+
+      if (result) {
+        expiredIds.push(result);
+        hostExpired += 1;
+      }
+    }
+
+    const remaining = Math.max(0, limit - expiredIds.length);
+    if (remaining > 0) {
+      const duePay = await db
+        .select({ id: schema.bookings.id })
+        .from(schema.bookings)
+        .where(
+          and(
+            eq(schema.bookings.status, BOOKING_STATUS.PAYMENT_PENDING),
+            lte(schema.bookings.paymentDeadlineAt, now)
+          )
+        )
+        .limit(remaining);
+
+      for (const row of duePay) {
+        const result = await db.transaction(async (tx) => {
+          const [updated] = await tx
+            .update(schema.bookings)
+            .set({
+              status: BOOKING_STATUS.CANCELLED,
+              cancellationReason: CANCELLATION_REASON.PAYMENT_WINDOW_EXPIRED,
+              cancelledAt: now,
+              updatedAt: now,
+            })
+            .where(
+              and(
+                eq(schema.bookings.id, row.id),
+                eq(schema.bookings.status, BOOKING_STATUS.PAYMENT_PENDING),
+                lte(schema.bookings.paymentDeadlineAt, now)
+              )
+            )
+            .returning({ id: schema.bookings.id });
+
+          if (!updated) return null;
+
+          await tx
+            .delete(schema.availabilityBlocks)
+            .where(eq(schema.availabilityBlocks.bookingId, row.id));
+
+          await tx
+            .update(schema.payments)
+            .set({ status: "EXPIRED" })
+            .where(
+              and(
+                eq(schema.payments.bookingId, row.id),
+                inArray(schema.payments.status, ["INITIALIZED", "PENDING"])
+              )
+            );
+
+          return updated.id;
+        });
+
+        if (result) {
+          expiredIds.push(result);
+          paymentExpired += 1;
+        }
+      }
+    }
+
+    return {
+      expired: expiredIds.length,
+      bookingIds: expiredIds,
+      hostExpired,
+      paymentExpired,
+    };
+  },
+
+  /**
+   * Cancel unpaid bookings freely. Paid (CONFIRMED) bookings must use refund workflow.
    */
   async cancelBooking(bookingId: string, authorizedUserIdOrToken: string, reason?: string) {
     const db = getDb();
@@ -358,7 +784,6 @@ export const bookingsService = {
       throw err;
     }
 
-    // Ownership check
     const isOwner =
       booking.accessToken === authorizedUserIdOrToken ||
       booking.guestId === authorizedUserIdOrToken;
@@ -369,47 +794,82 @@ export const bookingsService = {
       throw err;
     }
 
+    if (booking.status === BOOKING_STATUS.CONFIRMED || booking.status === BOOKING_STATUS.COMPLETED) {
+      const err: any = new Error(
+        "Paid bookings cannot be cancelled directly. Request a refund through support/admin finance."
+      );
+      err.statusCode = 409;
+      err.code = "REFUND_REQUIRED";
+      throw err;
+    }
+
+    if (
+      booking.status !== BOOKING_STATUS.PENDING_HOST &&
+      booking.status !== BOOKING_STATUS.PAYMENT_PENDING &&
+      booking.status !== BOOKING_STATUS.PENDING
+    ) {
+      const err: any = new Error(`Booking cannot be cancelled in status ${booking.status}.`);
+      err.statusCode = 409;
+      throw err;
+    }
+
     const [prop] = await db
-      .select({ title: schema.properties.title })
+      .select({ title: schema.properties.title, hostId: schema.properties.hostId })
       .from(schema.properties)
       .where(eq(schema.properties.id, booking.propertyId))
       .limit(1);
 
     return await db.transaction(async (tx) => {
-      // 1. Update booking status
       const [updated] = await tx
         .update(schema.bookings)
         .set({
-          status: "CANCELLED",
-          cancellationReason: reason || "Cancelled by user request.",
+          status: BOOKING_STATUS.CANCELLED,
+          cancellationReason: reason || CANCELLATION_REASON.GUEST_CANCELLED_BEFORE_PAYMENT,
           cancelledAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(eq(schema.bookings.id, bookingId))
+        .where(
+          and(
+            eq(schema.bookings.id, bookingId),
+            inArray(schema.bookings.status, [
+              BOOKING_STATUS.PENDING_HOST,
+              BOOKING_STATUS.PAYMENT_PENDING,
+              BOOKING_STATUS.PENDING,
+            ])
+          )
+        )
         .returning();
 
-      // 1B. Neutralize any pending host earnings & scheduled payouts to prevent unauthorized disbursements
+      if (!updated) {
+        const err: any = new Error("Booking could not be cancelled (status changed).");
+        err.statusCode = 409;
+        throw err;
+      }
+
       await tx
         .update(schema.hostEarnings)
-        .set({
-          status: "CANCELLED",
-        })
+        .set({ status: "CANCELLED" })
         .where(eq(schema.hostEarnings.bookingId, bookingId));
 
       await tx
         .update(schema.payouts)
-        .set({
-          status: "CANCELLED",
-          updatedAt: new Date(),
-        })
+        .set({ status: "CANCELLED", updatedAt: new Date() })
         .where(eq(schema.payouts.bookingId, bookingId));
 
-      // 2. Release availability blocks immediately
       await tx
         .delete(schema.availabilityBlocks)
         .where(eq(schema.availabilityBlocks.bookingId, bookingId));
 
-      // 3. Dispatch cancellation email to guest
+      await tx
+        .update(schema.payments)
+        .set({ status: "EXPIRED" })
+        .where(
+          and(
+            eq(schema.payments.bookingId, bookingId),
+            inArray(schema.payments.status, ["INITIALIZED", "PENDING"])
+          )
+        );
+
       sendEmail(
         bookingCancelledEmail({
           guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
@@ -418,7 +878,7 @@ export const bookingsService = {
           referenceCode: booking.referenceCode,
           checkIn: booking.checkInDate,
           checkOut: booking.checkOutDate,
-          cancellationReason: reason || "Cancelled by user request.",
+          cancellationReason: reason || CANCELLATION_REASON.GUEST_CANCELLED_BEFORE_PAYMENT,
         })
       ).catch((e) => console.warn("[Bookings] Failed to dispatch cancellation email:", e));
 
@@ -449,14 +909,14 @@ export const bookingsService = {
 
     const canonicalPropertyId = prop ? prop.id : propertyId;
 
-    // Only count blocks where booking is CONFIRMED or block is a manual host block (no bookingId)
-    // Clean up any orphaned, cancelled, or expired holds along the way
+    // Count PENDING_HOST + PAYMENT_PENDING + CONFIRMED + manual blocks
     const blocks = await db
       .select({
         id: schema.availabilityBlocks.id,
         bookingId: schema.availabilityBlocks.bookingId,
         bookingStatus: schema.bookings.status,
-        bookingCreatedAt: schema.bookings.createdAt,
+        hostResponseDeadlineAt: schema.bookings.hostResponseDeadlineAt,
+        paymentDeadlineAt: schema.bookings.paymentDeadlineAt,
       })
       .from(schema.availabilityBlocks)
       .leftJoin(schema.bookings, eq(schema.availabilityBlocks.bookingId, schema.bookings.id))
@@ -468,30 +928,55 @@ export const bookingsService = {
         )
       );
 
-    const now = Date.now();
+    const now = new Date();
     const activeConflicts = [];
 
     for (const b of blocks) {
       if (!b.bookingId) {
-        // Manual host block
         activeConflicts.push(b);
         continue;
       }
       if (!b.bookingStatus || b.bookingStatus === "CANCELLED" || b.bookingStatus === "FAILED") {
-        // Clean up orphaned or cancelled block
         await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, b.id));
         continue;
       }
-      if (b.bookingStatus === "PAYMENT_PENDING") {
-        const ageMs = now - (b.bookingCreatedAt ? new Date(b.bookingCreatedAt).getTime() : 0);
-        if (ageMs > 5 * 60 * 1000) {
-          // Expired pending booking hold
-          await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, b.id));
-          await db.update(schema.bookings).set({ status: "CANCELLED", updatedAt: new Date() }).where(eq(schema.bookings.id, b.bookingId));
-          continue;
-        }
+
+      const hostExpired =
+        b.bookingStatus === BOOKING_STATUS.PENDING_HOST &&
+        b.hostResponseDeadlineAt &&
+        new Date(b.hostResponseDeadlineAt).getTime() <= now.getTime();
+
+      const paymentExpired =
+        b.bookingStatus === BOOKING_STATUS.PAYMENT_PENDING &&
+        b.paymentDeadlineAt &&
+        new Date(b.paymentDeadlineAt).getTime() <= now.getTime();
+
+      if (hostExpired || paymentExpired) {
+        await db
+          .update(schema.bookings)
+          .set({
+            status: BOOKING_STATUS.CANCELLED,
+            cancellationReason: hostExpired
+              ? CANCELLATION_REASON.HOST_WINDOW_EXPIRED
+              : CANCELLATION_REASON.PAYMENT_WINDOW_EXPIRED,
+            ...(hostExpired ? { hostResponse: HOST_RESPONSE.EXPIRED } : {}),
+            cancelledAt: now,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(schema.bookings.id, b.bookingId),
+              eq(
+                schema.bookings.status,
+                hostExpired ? BOOKING_STATUS.PENDING_HOST : BOOKING_STATUS.PAYMENT_PENDING
+              )
+            )
+          );
+        await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.id, b.id));
+        continue;
       }
-      if (b.bookingStatus === "CONFIRMED") {
+
+      if (isActiveHoldStatus(b.bookingStatus)) {
         activeConflicts.push(b);
       }
     }
