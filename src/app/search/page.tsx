@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation";
 import PropertyCard from "@/components/PropertyCard";
 import MapPanel from "@/components/MapPanel";
 import SearchBar from "@/components/SearchBar";
-import { PROPERTIES } from "@/data/properties";
 import { api } from "@/lib/api";
 import { Property } from "@/types";
 import { SlidersHorizontal, Sun, RotateCcw, Map, List, Loader2 } from "lucide-react";
@@ -30,16 +29,18 @@ function SearchContent() {
   const [hoveredPropertyId, setHoveredPropertyId] = useState<string | null>(null);
   const [showMobileMap, setShowMobileMap] = useState<boolean>(false);
 
-  const [properties, setProperties] = useState<Property[]>(PROPERTIES);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [resolvedGeo, setResolvedGeo] = useState<any>(null);
 
-  // Fetch from Fastify Search API
+  // Fetch from Fastify Search API — never fill with static demo apartments
   useEffect(() => {
     let active = true;
 
     async function doSearch() {
       setLoading(true);
+      setSearchError(null);
       try {
         const dest = selectedCity !== "All Nigeria" ? selectedCity : initialDestination;
         const res = await api.search({
@@ -58,9 +59,15 @@ function SearchContent() {
         if (active && res && Array.isArray(res.properties)) {
           setProperties(res.properties);
           setResolvedGeo(res.query?.resolvedLocation || res.query?.resolvedGeo || null);
+        } else if (active) {
+          setProperties([]);
         }
       } catch (err) {
-        console.warn("Backend search fetch failed, using fallback:", err);
+        console.warn("Backend search fetch failed:", err);
+        if (active) {
+          setProperties([]);
+          setSearchError("Search is temporarily unavailable. Please try again.");
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -310,13 +317,14 @@ function SearchContent() {
                 ))}
               </div>
             ) : (
-              /* Calm Empty State */
+              /* Calm Empty / Error State — never filled with demo apartments */
               <div className="text-center py-20 px-4 space-y-4 max-w-md mx-auto">
                 <h3 className="font-display text-2xl text-[#171717]">
-                  No stays match your criteria
+                  {searchError ? "Search unavailable" : "No stays match your criteria"}
                 </h3>
                 <p className="text-[15px] text-[#6B6B67] leading-relaxed">
-                  Try adjusting your dates, expanding your bedroom requirements, or resetting your filters.
+                  {searchError ||
+                    "Try adjusting your dates, expanding your bedroom requirements, or resetting your filters."}
                 </p>
                 <div className="pt-2">
                   <button

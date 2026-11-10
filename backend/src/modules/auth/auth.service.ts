@@ -408,7 +408,23 @@ export const authService = {
     const db = getDb();
     const cleanPhone = phone.trim();
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const [user] = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    if (!user) throw new Error("User not found");
+
+    if (user.phoneVerificationSentAt) {
+      const elapsedMs = Date.now() - new Date(user.phoneVerificationSentAt).getTime();
+      const cooldownMs = 60 * 1000;
+      if (elapsedMs < cooldownMs) {
+        const remainingSec = Math.ceil((cooldownMs - elapsedMs) / 1000);
+        throw new Error(`Please wait ${remainingSec} seconds before requesting a new SMS code.`);
+      }
+    }
+
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
     const otpExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     await db
@@ -417,13 +433,27 @@ export const authService = {
         phone: cleanPhone,
         phoneVerificationCode: otpCode,
         phoneVerificationExpiresAt: otpExpiresAt,
+        phoneVerificationAttempts: 0,
+        phoneVerificationSentAt: new Date(),
+        phoneVerified: false,
         updatedAt: new Date(),
       })
       .where(eq(schema.users.id, userId));
 
-    console.log(`📱 [SMS Mock] Phone verification code for ${cleanPhone}: ${otpCode}`);
+    const { sendSms } = await import("../notifications/termii.service");
+    const sms = await sendSms({
+      to: cleanPhone,
+      message: `Your Ilé verification code is ${otpCode}. It expires in 15 minutes. Do not share this code.`,
+    });
+    if (!sms.ok) {
+      console.warn("[Auth] Phone OTP SMS failed (non-fatal for stored code):", sms.error);
+    }
 
-    return { success: true, message: "SMS verification code sent to your mobile device." };
+    return {
+      success: true,
+      message: "SMS verification code sent to your mobile device.",
+      mock: sms.mock,
+    };
   },
 
   async verifyPhoneOtp(userId: string, code: string) {
@@ -438,12 +468,26 @@ export const authService = {
     if (!user) throw new Error("User not found");
 
     const trimmedCode = code.trim();
-    const isMatch = trimmedCode === "123456" || (user.phoneVerificationCode && user.phoneVerificationCode === trimmedCode);
+    if (user.phoneVerificationExpiresAt && new Date() > user.phoneVerificationExpiresAt) {
+      throw new Error("SMS code has expired. Please request a new code.");
+    }
+
+    const attempts = user.phoneVerificationAttempts ?? 0;
+    if (attempts >= 5) {
+      throw new Error("Too many invalid attempts. Please request a new SMS code.");
+    }
+
+    const isMatch =
+      !!user.phoneVerificationCode && user.phoneVerificationCode === trimmedCode;
 
     if (!isMatch) {
-      if (user.phoneVerificationExpiresAt && new Date() > user.phoneVerificationExpiresAt) {
-        throw new Error("SMS code has expired. Please request a new code.");
-      }
+      await db
+        .update(schema.users)
+        .set({
+          phoneVerificationAttempts: attempts + 1,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.users.id, userId));
       throw new Error("Invalid phone verification code.");
     }
 
@@ -453,6 +497,7 @@ export const authService = {
         phoneVerified: true,
         phoneVerificationCode: null,
         phoneVerificationExpiresAt: null,
+        phoneVerificationAttempts: 0,
         updatedAt: new Date(),
       })
       .where(eq(schema.users.id, userId))
@@ -576,16 +621,59 @@ export const authService = {
 
     const { env } = await import("../../config/env");
     const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(cleanEmail)}`;
+    const emailPayload = passwordResetEmail({
+      name: user.firstName,
+      email: cleanEmail,
+      resetUrl,
+    });
 
-    await sendEmail(
-      passwordResetEmail({
-        name: user.firstName,
-        email: cleanEmail,
-        resetUrl,
-      })
-    );
+    const { notifyUserEvent } = await import("../notifications/orchestrator");
+    notifyUserEvent({
+      userId: user.id,
+      event: "PASSWORD_RESET_REQUESTED",
+      category: "security",
+      channels: {
+        category: "security",
+        email: emailPayload,
+        inbox: {
+          userId: user.id,
+          title: "Password reset requested",
+          body: "If you did not request this, you can ignore the email. Your account stays secure.",
+          deepLink: "/forgot-password",
+        },
+        push: true,
+      },
+    });
 
     return true;
+  },
+
+  async updateGuestProfile(
+    userId: string,
+    data: { firstName?: string; lastName?: string; phone?: string }
+  ) {
+    const db = getDb();
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    if (typeof data.firstName === "string" && data.firstName.trim()) {
+      patch.firstName = data.firstName.trim();
+    }
+    if (typeof data.lastName === "string" && data.lastName.trim()) {
+      patch.lastName = data.lastName.trim();
+    }
+    if (typeof data.phone === "string") {
+      patch.phone = data.phone.trim() || null;
+      patch.phoneVerified = false;
+    }
+    if (Object.keys(patch).length <= 1) {
+      throw new Error("No profile fields to update.");
+    }
+    const [updated] = await db
+      .update(schema.users)
+      .set(patch as any)
+      .where(eq(schema.users.id, userId))
+      .returning();
+    if (!updated) throw new Error("User not found");
+    return this.getCurrentUser(userId);
   },
 
   async resetPassword(token: string, password: string) {

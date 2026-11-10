@@ -17,6 +17,11 @@
 .env.test.local
 .env.production.local
 
+# Mobile release binaries (rebuild locally / CI — do not commit)
+*.apk
+*.aab
+apps/mobile/build/
+
 # Vercel deployment
 .vercel
 

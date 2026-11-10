@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import WebPushRegistrar from "@/components/WebPushRegistrar";
 import { AuthProvider } from "@/context/AuthContext";
 import "./globals.css";
 
@@ -80,6 +81,7 @@ export default function RootLayout({
           <Navbar />
           <main className="flex-1">{children}</main>
           <Footer />
+          <WebPushRegistrar />
         </AuthProvider>
         <script
           type="application/ld+json"

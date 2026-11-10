@@ -149,6 +149,8 @@ export class LedgerService {
       hostId: string;
       checkInDate: string;
       payoutHoldHours?: number;
+      /** Immutable stamp of platform mode at payment time. */
+      payoutMode?: "AUTOMATIC" | "MANUAL";
       createdById?: string | null;
     }
   ) {
@@ -162,6 +164,7 @@ export class LedgerService {
       hostId,
       checkInDate,
       payoutHoldHours = 24,
+      payoutMode = "MANUAL",
       createdById = null,
     } = params;
 
@@ -233,6 +236,7 @@ export class LedgerService {
       .where(eq(schema.profiles.userId, hostId))
       .limit(1);
 
+    const resolvedMode = payoutMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL";
     const payoutId = `pay_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
     await tx
       .insert(schema.payouts)
@@ -246,6 +250,7 @@ export class LedgerService {
         accountNumber: hostProfile?.bankAccountNumber || null,
         accountName: hostProfile?.bankAccountName || null,
         status: "HELD",
+        payoutMode: resolvedMode,
         scheduledFor: scheduledDate,
       })
       .onConflictDoNothing();
@@ -442,6 +447,8 @@ export class LedgerService {
       reason?: string | null;
       adminNotes?: string | null;
       paystackRefundId?: string | null;
+      /** When set (Phase 9 approve→process), update this row instead of inserting a duplicate PROCESSED refund. */
+      existingRefundId?: string | null;
     }
   ) {
     const {
@@ -454,6 +461,7 @@ export class LedgerService {
       reason = "Guest requested refund",
       adminNotes = null,
       paystackRefundId = null,
+      existingRefundId = null,
     } = params;
 
     const entries: JournalEntryInput[] = [
@@ -477,22 +485,40 @@ export class LedgerService {
       entries,
     });
 
-    const refundId = `ref_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
-    await tx.insert(schema.refunds).values({
-      id: refundId,
-      bookingId,
-      guestId,
-      grossPaid,
-      nonRefundableProcessingFee,
-      refundableAmount,
-      status: "PROCESSED",
-      approvedBy: adminId,
-      approvedAt: new Date(),
-      processedAt: new Date(),
-      paystackRefundId,
-      reason,
-      adminNotes,
-    });
+    let refundId = existingRefundId;
+    if (existingRefundId) {
+      await tx
+        .update(schema.refunds)
+        .set({
+          status: "PROCESSED",
+          processedAt: new Date(),
+          paystackRefundId: paystackRefundId || undefined,
+          grossPaid,
+          nonRefundableProcessingFee,
+          refundableAmount,
+          reason: reason || undefined,
+          adminNotes: adminNotes || undefined,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.refunds.id, existingRefundId));
+    } else {
+      refundId = `ref_${Date.now()}_${crypto.randomBytes(3).toString("hex")}`;
+      await tx.insert(schema.refunds).values({
+        id: refundId,
+        bookingId,
+        guestId,
+        grossPaid,
+        nonRefundableProcessingFee,
+        refundableAmount,
+        status: "PROCESSED",
+        approvedBy: adminId,
+        approvedAt: new Date(),
+        processedAt: new Date(),
+        paystackRefundId,
+        reason,
+        adminNotes,
+      });
+    }
 
     // Neutralize payout & host earnings
     await tx

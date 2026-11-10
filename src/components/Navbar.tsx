@@ -25,11 +25,43 @@ export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [favCount, setFavCount] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   // Prevent hydration mismatch: auth state is only known after mount
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!mounted || !isAuthenticated) {
+      setUnreadCount(0);
+      return;
+    }
+    let cancelled = false;
+    const loadUnread = async () => {
+      try {
+        const token =
+          typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
+        const headers: Record<string, string> = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+        const res = await fetch("/api/notifications?limit=1", {
+          credentials: "include",
+          headers,
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setUnreadCount(Number(data.unreadCount) || 0);
+      } catch {
+        // Badge is best-effort.
+      }
+    };
+    void loadUnread();
+    const timer = window.setInterval(loadUnread, 60000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [mounted, isAuthenticated]);
 
   // Close profile dropdown when clicking outside
   useEffect(() => {
@@ -166,14 +198,22 @@ export default function Navbar() {
         <div className="hidden lg:flex items-center space-x-5 text-[14px]">
           {/* Marketplace Utility Icons (Notifications & Saved Favorites) */}
           <div className="flex items-center space-x-2 text-white/85 border-r border-[#333333] pr-4">
-            <button
-              type="button"
-              className="p-2 rounded-lg hover:text-white hover:bg-white/10 transition-colors relative"
-              aria-label="Notifications"
+            <Link
+              href="/notifications"
+              className="p-2 rounded-lg hover:text-white hover:bg-white/10 transition-colors relative inline-flex"
+              aria-label={
+                unreadCount > 0
+                  ? `Notifications, ${unreadCount} unread`
+                  : "Notifications"
+              }
             >
               <Bell size={18} className="text-white/90 hover:text-white" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-[#0B5D45]" />
-            </button>
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 rounded-full bg-[#0B5D45] text-[10px] font-semibold text-white flex items-center justify-center">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </Link>
 
             <button
               type="button"

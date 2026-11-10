@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, or, like, gt, lt, lte, desc, sql, inArray, isNull } from "drizzle-orm";
+import { eq, and, or, like, gt, lt, lte, gte, desc, sql, inArray, isNull } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
 import {
@@ -14,14 +14,20 @@ import {
 import { parsePagination, paginatedResponse } from "../../lib/pagination";
 import { calculateFromGuestPrice } from "../pricing/pricing.service";
 import {
-  sendEmail,
   bookingInitiatedEmail,
   bookingCancelledEmail,
   hostUpcomingArrivalEmail,
+  guestHostWindowExpiredEmail,
+  guestPaymentWindowExpiredEmail,
   hostBookingRequestEmail,
   guestHostAcceptedEmail,
   guestHostDeclinedEmail,
 } from "../notifications/notifications.service";
+import {
+  dispatchLifecycleEmail,
+  LIFECYCLE_EMAIL_EVENT,
+} from "../notifications/lifecycle-notify";
+import { recordBookingAudit } from "../../lib/booking-audit";
 
 const isActiveHoldStatus = (status: string | null | undefined): boolean =>
   !!status && (ACTIVE_HOLD_STATUSES as readonly string[]).includes(status);
@@ -83,7 +89,9 @@ export const bookingsService = {
 
     // 2. Execute within an atomic PostgreSQL transaction
     return await db.transaction(async (tx) => {
-      // A. Verify property is bookable & published
+      // A. Verify property is bookable & published.
+      // Row-lock the property so overlapping concurrent creates serialize
+      // before availability conflict checks (Phase 8 concurrency integrity).
       const normalizedPropId = parsed.propertyId.replace("prop-", "prop_");
       const [property] = await tx
         .select()
@@ -101,7 +109,8 @@ export const bookingsService = {
             sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`
           )
         )
-        .limit(1);
+        .limit(1)
+        .for("update");
 
       if (!property) {
         const err: any = new Error("Property not found or not published.");
@@ -340,8 +349,11 @@ export const bookingsService = {
         totalNights: booking.numberOfNights,
       };
 
-      // Guest + host emails — failures must not roll back booking
-      sendEmail(
+      // Guest + host notifications — failures must not roll back booking
+      dispatchLifecycleEmail(
+        booking.id,
+        LIFECYCLE_EMAIL_EVENT.GUEST_REQUEST_SUBMITTED,
+        "guest",
         bookingInitiatedEmail({
           guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
           guestEmail: booking.guestEmail,
@@ -351,8 +363,30 @@ export const bookingsService = {
           checkOut: booking.checkOutDate,
           totalAmount: booking.totalAmount,
           currency: booking.currency,
-        })
-      ).catch((e) => console.warn("[Bookings] Failed to dispatch booking initiated email:", e));
+        }),
+        {
+          userId: booking.guestId || session?.userId || null,
+          phone: booking.guestPhone || null,
+          inboxTitle: "Booking request sent",
+          inboxBody: `Your request for ${property.title} was sent to the host. Reference ${booking.referenceCode}.`,
+          deepLink: `/bookings/${booking.id}`,
+          smsMessage: booking.guestPhone
+            ? `Ilé: Your booking request ${booking.referenceCode} was sent to the host. We'll update you when they respond.`
+            : undefined,
+        }
+      )
+
+      recordBookingAudit({
+        action: "BOOKING_REQUEST_CREATED",
+        bookingId: booking.id,
+        userId: session?.userId || null,
+        details: {
+          status: BOOKING_STATUS.PENDING_HOST,
+          referenceCode: booking.referenceCode,
+          propertyId: property.id,
+          hostResponseDeadlineAt: hostResponseDeadlineAt.toISOString(),
+        },
+      })
 
       // Notify host (best-effort)
       tx.select({
@@ -363,8 +397,11 @@ export const bookingsService = {
         .where(eq(schema.users.id, property.hostId))
         .limit(1)
         .then(([host]) => {
-          if (!host?.email) return;
-          return sendEmail(
+          if (!host?.email) return
+          dispatchLifecycleEmail(
+            booking.id,
+            LIFECYCLE_EMAIL_EVENT.HOST_REQUEST_RECEIVED,
+            "host",
             hostBookingRequestEmail({
               hostName: host.firstName || "Host",
               hostEmail: host.email,
@@ -377,10 +414,16 @@ export const bookingsService = {
               hostResponseDeadlineAt: hostResponseDeadlineAt.toISOString(),
               totalAmount: booking.totalAmount,
               currency: booking.currency,
-            })
-          );
+            }),
+            {
+              userId: property.hostId,
+              inboxTitle: "New booking request",
+              inboxBody: `${booking.guestFirstName} requested ${property.title} (${booking.referenceCode}). Respond within your confirmation window.`,
+              deepLink: `/host/dashboard`,
+            }
+          )
         })
-        .catch((e) => console.warn("[Bookings] Failed to dispatch host request email:", e));
+        .catch((e) => console.warn("[Bookings] Failed to dispatch host request email:", e))
 
       return {
         booking: enrichedBooking,
@@ -523,7 +566,10 @@ export const bookingsService = {
         .set({ type: "RESERVATION" })
         .where(eq(schema.availabilityBlocks.bookingId, bookingId));
 
-      sendEmail(
+      dispatchLifecycleEmail(
+        booking.id,
+        LIFECYCLE_EMAIL_EVENT.GUEST_HOST_ACCEPTED,
+        "guest",
         guestHostAcceptedEmail({
           guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
           guestEmail: booking.guestEmail,
@@ -535,8 +581,26 @@ export const bookingsService = {
           currency: booking.currency,
           paymentDeadlineAt: paymentDeadlineAt.toISOString(),
           accessToken: booking.accessToken,
-        })
-      ).catch((e) => console.warn("[Bookings] Failed to notify guest of host accept:", e));
+        }),
+        {
+          userId: booking.guestId,
+          phone: booking.guestPhone,
+          inboxTitle: "Host confirmed your stay",
+          inboxBody: `Complete payment for ${property.title} (${booking.referenceCode}) before the deadline.`,
+          deepLink: `/bookings/${booking.id}`,
+          smsMessage: `Ilé: Host accepted ${booking.referenceCode}. Complete payment to confirm your stay.`,
+        }
+      )
+
+      recordBookingAudit({
+        action: "HOST_ACCEPTED",
+        bookingId: booking.id,
+        userId: hostUserId,
+        details: {
+          status: BOOKING_STATUS.PAYMENT_PENDING,
+          paymentDeadlineAt: paymentDeadlineAt.toISOString(),
+        },
+      })
 
       return {
         booking: updated,
@@ -618,7 +682,10 @@ export const bookingsService = {
         .delete(schema.availabilityBlocks)
         .where(eq(schema.availabilityBlocks.bookingId, bookingId));
 
-      sendEmail(
+      dispatchLifecycleEmail(
+        booking.id,
+        LIFECYCLE_EMAIL_EVENT.GUEST_HOST_DECLINED,
+        "guest",
         guestHostDeclinedEmail({
           guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
           guestEmail: booking.guestEmail,
@@ -627,8 +694,23 @@ export const bookingsService = {
           checkIn: booking.checkInDate,
           checkOut: booking.checkOutDate,
           reason: reason || undefined,
-        })
-      ).catch((e) => console.warn("[Bookings] Failed to notify guest of host decline:", e));
+        }),
+        {
+          userId: booking.guestId,
+          phone: booking.guestPhone,
+          inboxTitle: "Host declined your request",
+          inboxBody: `Your request for ${property.title} (${booking.referenceCode}) was declined. Browse similar stays.`,
+          deepLink: `/bookings/${booking.id}`,
+          smsMessage: `Ilé: Host declined ${booking.referenceCode}. Open the app to see similar stays.`,
+        }
+      )
+
+      recordBookingAudit({
+        action: "HOST_DECLINED",
+        bookingId: booking.id,
+        userId: hostUserId,
+        details: { reason: reason || null },
+      })
 
       return {
         success: true,
@@ -683,7 +765,7 @@ export const bookingsService = {
               lte(schema.bookings.hostResponseDeadlineAt, now)
             )
           )
-          .returning({ id: schema.bookings.id });
+          .returning();
 
         if (!updated) return null;
 
@@ -691,12 +773,35 @@ export const bookingsService = {
           .delete(schema.availabilityBlocks)
           .where(eq(schema.availabilityBlocks.bookingId, row.id));
 
-        return updated.id;
+        return updated;
       });
 
       if (result) {
-        expiredIds.push(result);
+        expiredIds.push(result.id);
         hostExpired += 1;
+        const [prop] = await db
+          .select({ title: schema.properties.title })
+          .from(schema.properties)
+          .where(eq(schema.properties.id, result.propertyId))
+          .limit(1);
+        dispatchLifecycleEmail(
+          result.id,
+          LIFECYCLE_EMAIL_EVENT.GUEST_HOST_WINDOW_EXPIRED,
+          "guest",
+          guestHostWindowExpiredEmail({
+            guestName: `${result.guestFirstName} ${result.guestLastName}`,
+            guestEmail: result.guestEmail,
+            propertyTitle: prop?.title || "Ilé Property",
+            referenceCode: result.referenceCode,
+            checkIn: result.checkInDate,
+            checkOut: result.checkOutDate,
+          })
+        );
+        recordBookingAudit({
+          action: "HOST_WINDOW_EXPIRED",
+          bookingId: result.id,
+          details: { referenceCode: result.referenceCode },
+        });
       }
     }
 
@@ -730,7 +835,7 @@ export const bookingsService = {
                 lte(schema.bookings.paymentDeadlineAt, now)
               )
             )
-            .returning({ id: schema.bookings.id });
+            .returning();
 
           if (!updated) return null;
 
@@ -748,12 +853,35 @@ export const bookingsService = {
               )
             );
 
-          return updated.id;
+          return updated;
         });
 
         if (result) {
-          expiredIds.push(result);
+          expiredIds.push(result.id);
           paymentExpired += 1;
+          const [prop] = await db
+            .select({ title: schema.properties.title })
+            .from(schema.properties)
+            .where(eq(schema.properties.id, result.propertyId))
+            .limit(1);
+          dispatchLifecycleEmail(
+            result.id,
+            LIFECYCLE_EMAIL_EVENT.GUEST_PAYMENT_WINDOW_EXPIRED,
+            "guest",
+            guestPaymentWindowExpiredEmail({
+              guestName: `${result.guestFirstName} ${result.guestLastName}`,
+              guestEmail: result.guestEmail,
+              propertyTitle: prop?.title || "Ilé Property",
+              referenceCode: result.referenceCode,
+              checkIn: result.checkInDate,
+              checkOut: result.checkOutDate,
+            })
+          );
+          recordBookingAudit({
+            action: "PAYMENT_WINDOW_EXPIRED",
+            bookingId: result.id,
+            details: { referenceCode: result.referenceCode },
+          });
         }
       }
     }
@@ -795,11 +923,92 @@ export const bookingsService = {
     }
 
     if (booking.status === BOOKING_STATUS.CONFIRMED || booking.status === BOOKING_STATUS.COMPLETED) {
+      // Phase 9: do NOT bare-cancel. Open/keep admin refund workflow (REQUESTED).
+      // Guest never executes Paystack refund. Amount = paid − actual recorded Paystack fee.
+      const [existingOpen] = await db
+        .select()
+        .from(schema.refunds)
+        .where(
+          and(
+            eq(schema.refunds.bookingId, bookingId),
+            inArray(schema.refunds.status, ["REQUESTED", "APPROVED"])
+          )
+        )
+        .orderBy(desc(schema.refunds.createdAt))
+        .limit(1);
+
+      const [processed] = await db
+        .select({ id: schema.refunds.id })
+        .from(schema.refunds)
+        .where(
+          and(eq(schema.refunds.bookingId, bookingId), eq(schema.refunds.status, "PROCESSED"))
+        )
+        .limit(1);
+
+      if (processed) {
+        const err: any = new Error(
+          "This paid stay already has a processed refund. Contact Ilé support if you need help."
+        );
+        err.statusCode = 409;
+        err.code = "REFUND_ALREADY_PROCESSED";
+        throw err;
+      }
+
+      let refund = existingOpen;
+      if (!refund) {
+        const grossPaid = booking.totalAmount || 0;
+        const recordedFee =
+          typeof booking.paystackFeeAmount === "number" && booking.paystackFeeAmount > 0
+            ? booking.paystackFeeAmount
+            : 0;
+        const refundableAmount = Math.max(0, grossPaid - recordedFee);
+        const refundId = `ref_guest_${crypto.randomUUID()}`;
+        const [inserted] = await db
+          .insert(schema.refunds)
+          .values({
+            id: refundId,
+            bookingId: booking.id,
+            guestId: booking.guestId,
+            grossPaid,
+            nonRefundableProcessingFee: recordedFee,
+            refundableAmount,
+            currency: booking.currency || "NGN",
+            status: "REQUESTED",
+            reason: reason || CANCELLATION_REASON.GUEST_REFUND_REQUESTED_AFTER_PAYMENT,
+            adminNotes:
+              "Guest requested cancellation after payment. Booking remains CONFIRMED until admin processes refund. Guest cannot execute Paystack refund.",
+          })
+          .returning();
+        refund = inserted;
+
+        recordBookingAudit({
+          action: "REFUND_REQUESTED",
+          bookingId: booking.id,
+          userId: booking.guestId || null,
+          details: {
+            refundId,
+            grossPaid,
+            recordedPaystackFee: recordedFee,
+            refundableAmount,
+            bookingStatusKept: booking.status,
+            source: "GUEST_CANCEL_AFTER_PAYMENT",
+          },
+        });
+      }
+
       const err: any = new Error(
-        "Paid bookings cannot be cancelled directly. Request a refund through support/admin finance."
+        "Paid stays cannot be cancelled directly. A refund request is pending admin review — only Ilé admin executes Paystack refunds."
       );
       err.statusCode = 409;
       err.code = "REFUND_REQUIRED";
+      err.refund = {
+        id: refund.id,
+        status: refund.status,
+        refundableAmount: refund.refundableAmount,
+        nonRefundableProcessingFee: refund.nonRefundableProcessingFee,
+        reason: refund.reason,
+      };
+      err.bookingStatus = booking.status;
       throw err;
     }
 
@@ -870,7 +1079,10 @@ export const bookingsService = {
           )
         );
 
-      sendEmail(
+      dispatchLifecycleEmail(
+        booking.id,
+        LIFECYCLE_EMAIL_EVENT.GUEST_CANCELLED_BEFORE_PAYMENT,
+        "guest",
         bookingCancelledEmail({
           guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
           guestEmail: booking.guestEmail,
@@ -879,8 +1091,18 @@ export const bookingsService = {
           checkIn: booking.checkInDate,
           checkOut: booking.checkOutDate,
           cancellationReason: reason || CANCELLATION_REASON.GUEST_CANCELLED_BEFORE_PAYMENT,
+          refundNote: "No payment was collected — no refund is required.",
         })
-      ).catch((e) => console.warn("[Bookings] Failed to dispatch cancellation email:", e));
+      );
+
+      recordBookingAudit({
+        action: "GUEST_CANCELLED_BEFORE_PAYMENT",
+        bookingId: booking.id,
+        userId: booking.guestId || null,
+        details: {
+          reason: reason || CANCELLATION_REASON.GUEST_CANCELLED_BEFORE_PAYMENT,
+        },
+      });
 
       return { success: true, message: "Booking cancelled and dates released.", booking: updated };
     });
@@ -1007,6 +1229,139 @@ export const bookingsService = {
     );
   },
 
+  /**
+   * Phase 7: Guest confirms arrival. Booking-owner only. Idempotent.
+   * Does not release earnings by itself — settlement still needs calendar/hold.
+   */
+  async confirmGuestCheckIn(
+    bookingId: string,
+    actor: { userId?: string | null; accessToken?: string | null },
+    options: { ipAddress?: string | null } = {}
+  ) {
+    const db = getDb();
+    const [booking] = await db
+      .select()
+      .from(schema.bookings)
+      .where(eq(schema.bookings.id, bookingId))
+      .limit(1);
+
+    if (!booking) {
+      const err: any = new Error("Booking not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const isOwner =
+      (!!actor.userId && booking.guestId === actor.userId) ||
+      (!!actor.accessToken && booking.accessToken === actor.accessToken);
+
+    if (!isOwner) {
+      const err: any = new Error("Only the guest on this booking can confirm check-in.");
+      err.statusCode = 403;
+      err.code = "CHECKIN_FORBIDDEN";
+      throw err;
+    }
+
+    if (
+      booking.status === BOOKING_STATUS.CANCELLED ||
+      booking.status === "FAILED"
+    ) {
+      const err: any = new Error("Cannot confirm check-in for a cancelled or invalid booking.");
+      err.statusCode = 409;
+      err.code = "CHECKIN_INVALID_STATUS";
+      throw err;
+    }
+
+    if (
+      booking.status !== BOOKING_STATUS.CONFIRMED &&
+      booking.status !== BOOKING_STATUS.COMPLETED
+    ) {
+      const err: any = new Error(
+        `Check-in is only available after payment confirmation (status=${booking.status}).`
+      );
+      err.statusCode = 409;
+      err.code = "CHECKIN_NOT_ELIGIBLE";
+      throw err;
+    }
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    if (booking.checkInDate > todayStr) {
+      const err: any = new Error(
+        `Check-in opens on ${booking.checkInDate}. Too early to confirm arrival.`
+      );
+      err.statusCode = 409;
+      err.code = "CHECKIN_TOO_EARLY";
+      throw err;
+    }
+
+    if (booking.guestCheckInConfirmedAt) {
+      return {
+        success: true,
+        idempotent: true,
+        booking,
+        guestCheckInConfirmedAt: booking.guestCheckInConfirmedAt,
+        message: "Check-in was already confirmed.",
+      };
+    }
+
+    const confirmedAt = new Date();
+    const actorId = actor.userId || booking.guestId || "guest_token";
+
+    const [updated] = await db
+      .update(schema.bookings)
+      .set({
+        guestCheckInConfirmedAt: confirmedAt,
+        guestCheckInConfirmedBy: actorId,
+        updatedAt: confirmedAt,
+      })
+      .where(
+        and(
+          eq(schema.bookings.id, bookingId),
+          isNull(schema.bookings.guestCheckInConfirmedAt)
+        )
+      )
+      .returning();
+
+    const finalBooking = updated || booking;
+    await recordBookingAudit({
+      action: "GUEST_CHECK_IN_CONFIRMED",
+      bookingId,
+      userId: actor.userId || null,
+      ipAddress: options.ipAddress || null,
+      details: {
+        confirmedAt: confirmedAt.toISOString(),
+        actorId,
+        idempotent: !updated,
+      },
+    });
+
+    // Attempt settlement if calendar + hold already satisfied
+    let settlement: { released: boolean; reason?: string } | null = null;
+    try {
+      const { FinanceService } = await import("../finance/finance.service");
+      settlement = await FinanceService.tryReleaseSettlementForBooking(bookingId, {
+        triggeredBy: "GUEST_CHECK_IN",
+        actorId: actor.userId || null,
+      });
+    } catch (settleErr: any) {
+      console.warn(
+        `[Bookings] Check-in saved but settlement not released: ${settleErr.message}`
+      );
+      settlement = { released: false, reason: settleErr.message };
+    }
+
+    return {
+      success: true,
+      idempotent: !updated,
+      booking: finalBooking,
+      guestCheckInConfirmedAt: finalBooking.guestCheckInConfirmedAt || confirmedAt,
+      settlement,
+      message: updated
+        ? "Check-in confirmed. Host earnings release when hold rules are met."
+        : "Check-in was already confirmed.",
+    };
+  },
+
   async getBooking(bookingIdOrRef: string) {
     const db = getDb();
     const [booking] = await db
@@ -1027,6 +1382,73 @@ export const bookingsService = {
       .where(eq(schema.properties.id, booking.propertyId))
       .limit(1);
 
+    const [latestPayment] = await db
+      .select({
+        id: schema.payments.id,
+        status: schema.payments.status,
+        reference: schema.payments.reference,
+        amount: schema.payments.amount,
+        paidAt: schema.payments.paidAt,
+      })
+      .from(schema.payments)
+      .where(eq(schema.payments.bookingId, booking.id))
+      .orderBy(desc(schema.payments.createdAt))
+      .limit(1);
+
+    const [openRefund] = await db
+      .select({
+        id: schema.refunds.id,
+        status: schema.refunds.status,
+        reason: schema.refunds.reason,
+        refundableAmount: schema.refunds.refundableAmount,
+      })
+      .from(schema.refunds)
+      .where(eq(schema.refunds.bookingId, booking.id))
+      .orderBy(desc(schema.refunds.createdAt))
+      .limit(1);
+
+    const now = new Date();
+    const reconciliationRequired =
+      !!openRefund &&
+      (openRefund.status === "REQUESTED" || openRefund.status === "APPROVED") &&
+      (openRefund.reason === "LATE_PAYMENT_AFTER_CANCEL_OR_EXPIRE" ||
+        booking.cancellationReason === CANCELLATION_REASON.LATE_PAYMENT_RECONCILIATION ||
+        booking.cancellationReason === CANCELLATION_REASON.PAYMENT_WINDOW_EXPIRED);
+
+    const guestRefundPending =
+      !!openRefund &&
+      (openRefund.status === "REQUESTED" || openRefund.status === "APPROVED") &&
+      (openRefund.reason === CANCELLATION_REASON.GUEST_REFUND_REQUESTED_AFTER_PAYMENT ||
+        (typeof openRefund.reason === "string" &&
+          openRefund.reason.includes("GUEST_REFUND_REQUESTED")));
+
+    const refundResolutionPending =
+      !!openRefund &&
+      (openRefund.status === "REQUESTED" || openRefund.status === "APPROVED");
+
+    const canPay =
+      booking.status === BOOKING_STATUS.PAYMENT_PENDING &&
+      !!booking.paymentDeadlineAt &&
+      new Date(booking.paymentDeadlineAt).getTime() > now.getTime();
+
+    const canCancelUnpaid =
+      booking.status === BOOKING_STATUS.PENDING_HOST ||
+      booking.status === BOOKING_STATUS.PAYMENT_PENDING ||
+      booking.status === BOOKING_STATUS.PENDING;
+
+    const canRequestPaidRefund =
+      (booking.status === BOOKING_STATUS.CONFIRMED ||
+        booking.status === BOOKING_STATUS.COMPLETED) &&
+      !guestRefundPending &&
+      !(openRefund && openRefund.status === "PROCESSED");
+
+    const todayStr = now.toISOString().split("T")[0];
+    const canConfirmCheckIn =
+      !booking.guestCheckInConfirmedAt &&
+      (booking.status === BOOKING_STATUS.CONFIRMED ||
+        booking.status === BOOKING_STATUS.COMPLETED) &&
+      booking.checkInDate <= todayStr;
+
     const enriched = {
       ...booking,
       bookingStatus: booking.status,
@@ -1034,9 +1456,198 @@ export const bookingsService = {
       startDate: booking.checkInDate,
       endDate: booking.checkOutDate,
       totalNights: booking.numberOfNights,
+      guestCheckInConfirmed: !!booking.guestCheckInConfirmedAt,
+      guestCheckInConfirmedAt: booking.guestCheckInConfirmedAt,
     };
 
-    return { booking: enriched, property };
+    // Public property slice — never include private address here
+    const publicProperty = property
+      ? {
+          id: property.id,
+          slug: property.slug,
+          title: property.title,
+          city: property.city,
+          neighborhood: property.neighborhood,
+          state: property.state,
+          coverImage: property.coverImage,
+          maxGuests: property.maxGuests,
+          minimumNights: property.minimumNights,
+          pricePerNight: property.pricePerNight,
+          currency: property.currency,
+        }
+      : null;
+
+    return {
+      booking: enriched,
+      property: publicProperty,
+      recovery: {
+        sourceOfTruth: "backend",
+        canRefreshWithoutRecreate: true,
+        canPay,
+        canCancelUnpaid,
+        canRequestPaidRefund,
+        canInitPayment: canPay,
+        canConfirmCheckIn,
+        guestCheckInConfirmed: !!booking.guestCheckInConfirmedAt,
+        guestCheckInConfirmedAt: booking.guestCheckInConfirmedAt,
+        reconciliationRequired,
+        guestRefundPending,
+        resolutionPending: reconciliationRequired || refundResolutionPending,
+        awaitingHost:
+          booking.status === BOOKING_STATUS.PENDING_HOST &&
+          !!booking.hostResponseDeadlineAt &&
+          new Date(booking.hostResponseDeadlineAt).getTime() > now.getTime(),
+        payment: latestPayment || null,
+        refund: openRefund || null,
+        timers: {
+          hostResponseDeadlineAt: booking.hostResponseDeadlineAt,
+          paymentDeadlineAt: booking.paymentDeadlineAt,
+        },
+        similarSearchHint:
+          booking.status === BOOKING_STATUS.CANCELLED
+            ? {
+                endpoint: `/api/bookings/${booking.id}/similar`,
+                preserves: ["city", "neighborhood", "checkIn", "checkOut", "guestCount"],
+                autoBook: false,
+              }
+            : null,
+      },
+    };
+  },
+
+  /**
+   * Similar published properties for decline/expire/unavailable recovery.
+   * Preserves destination/dates/guests. Backend prices only.
+   * NEVER creates a booking, charge, or transfer.
+   */
+  async findSimilarProperties(bookingIdOrRef: string, limit = 8) {
+    const db = getDb();
+    const [booking] = await db
+      .select()
+      .from(schema.bookings)
+      .where(
+        or(
+          eq(schema.bookings.id, bookingIdOrRef),
+          eq(schema.bookings.referenceCode, bookingIdOrRef)
+        )
+      )
+      .limit(1);
+
+    if (!booking) {
+      const err: any = new Error("Booking not found");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const [source] = await db
+      .select()
+      .from(schema.properties)
+      .where(eq(schema.properties.id, booking.propertyId))
+      .limit(1);
+
+    if (!source) {
+      return {
+        bookingId: booking.id,
+        criteria: null,
+        properties: [],
+        autoBook: false,
+        message: "Source property unavailable; no similar results.",
+      };
+    }
+
+    const nights = Math.max(
+      1,
+      booking.numberOfNights ||
+        Math.round(
+          (new Date(booking.checkOutDate + "T00:00:00Z").getTime() -
+            new Date(booking.checkInDate + "T00:00:00Z").getTime()) /
+            86400000
+        )
+    );
+
+    const candidates = await db
+      .select()
+      .from(schema.properties)
+      .where(
+        and(
+          eq(schema.properties.status, "PUBLISHED"),
+          sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
+          sql`LOWER(${schema.properties.city}) = LOWER(${source.city})`,
+          gte(schema.properties.maxGuests, booking.guestCount),
+          lte(schema.properties.minimumNights, nights),
+          sql`${schema.properties.id} != ${booking.propertyId}`
+        )
+      )
+      .orderBy(desc(schema.properties.featured), desc(schema.properties.rating))
+      .limit(Math.min(40, Math.max(limit * 4, 12)));
+
+    const available: Array<Record<string, unknown>> = [];
+    for (const prop of candidates) {
+      if (available.length >= limit) break;
+      const availability = await this.checkAvailability(
+        prop.id,
+        booking.checkInDate,
+        booking.checkOutDate
+      );
+      if (!availability.available) continue;
+
+      const pricing = calculateFromGuestPrice(
+        prop.pricePerNight,
+        nights,
+        undefined,
+        prop.hostBasePrice || undefined
+      );
+
+      available.push({
+        id: prop.id,
+        slug: prop.slug,
+        title: prop.title,
+        city: prop.city,
+        neighborhood: prop.neighborhood,
+        state: prop.state,
+        coverImage: prop.coverImage,
+        maxGuests: prop.maxGuests,
+        minimumNights: prop.minimumNights,
+        bedrooms: prop.bedrooms,
+        bathrooms: prop.bathrooms,
+        pricePerNight: prop.pricePerNight,
+        currency: prop.currency,
+        rating: prop.rating,
+        pricing: {
+          nights,
+          accommodationSubtotal: pricing.accommodationSubtotal,
+          paystackFee: pricing.paystackFee,
+          totalGuestPayment: pricing.totalGuestPayment,
+        },
+        preservedSearch: {
+          checkInDate: booking.checkInDate,
+          checkOutDate: booking.checkOutDate,
+          guestCount: booking.guestCount,
+          city: source.city,
+          neighborhood: source.neighborhood,
+        },
+      });
+    }
+
+    return {
+      bookingId: booking.id,
+      referenceCode: booking.referenceCode,
+      criteria: {
+        city: source.city,
+        neighborhood: source.neighborhood,
+        checkInDate: booking.checkInDate,
+        checkOutDate: booking.checkOutDate,
+        guestCount: booking.guestCount,
+        nights,
+        excludePropertyId: booking.propertyId,
+      },
+      properties: available,
+      count: available.length,
+      autoBook: false,
+      autoCharge: false,
+      message:
+        "Similar stays matching destination, dates, capacity, and min nights. Guest must manually start a new request — never auto-booked.",
+    };
   },
 
   async getUserBookings(userId: string, paginationQuery: any) {
@@ -1190,8 +1801,11 @@ export const bookingsService = {
 
       if (!host?.email) continue;
 
-      // Dispatch reminder email
-      await sendEmail(
+      // Dispatch reminder email (idempotent per booking)
+      dispatchLifecycleEmail(
+        b.id,
+        LIFECYCLE_EMAIL_EVENT.HOST_ARRIVAL_REMINDER,
+        "host",
         hostUpcomingArrivalEmail({
           hostName: host.firstName,
           hostEmail: host.email,

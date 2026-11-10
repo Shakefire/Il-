@@ -49,6 +49,8 @@ export interface Property {
   bedrooms: number;
   bathrooms: number;
   maxGuests: number;
+  /** Host-configured minimum stay; backend enforces on create. */
+  minimumNights?: number;
   images: string[];
   coverImage: string;
   propertyType: "Serviced Apartment" | "Private Residence" | "Penthouse" | "Garden Villa";

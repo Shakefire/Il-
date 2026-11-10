@@ -307,7 +307,7 @@ test("Suite: Ilé Paystack Remediation & Financial Integrity", async (t) => {
     const result = await handlePaystackWebhook(failPayload, sig);
     assert.equal(result.processed, true);
 
-    // Verify payout updated to FAILED with reason
+    // Phase 7: verified fail restores READY_FOR_PAYOUT (do not invent FAILED wallet status)
     const [updatedPayout] = await db
       .select()
       .from(schema.payouts)
@@ -315,7 +315,7 @@ test("Suite: Ilé Paystack Remediation & Financial Integrity", async (t) => {
       .limit(1);
 
     assert.ok(updatedPayout);
-    assert.equal(updatedPayout.status, "FAILED");
+    assert.equal(updatedPayout.status, "READY_FOR_PAYOUT");
     assert.equal(updatedPayout.transferStatus, "FAILED");
     assert.match(updatedPayout.transferFailureReason || "", /suspended/i);
   });

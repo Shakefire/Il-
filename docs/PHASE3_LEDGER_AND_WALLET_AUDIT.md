@@ -5,7 +5,7 @@
 
 ---
 
-## 1. What the money system is today
+## 1. What the money systaem is today
 
 Think of three layers that all talk about the same booking money:
 
@@ -41,8 +41,8 @@ Classic host earnings ₦90,000; host payout % = 100% → host net ₦90,000; pl
 
 ### When Paystack says “success”
 
-1. `payments` → SUCCESS; booking → CONFIRMED.  
-2. `host_earnings` created (PENDING) for ₦90,000.  
+1. `payments` → SUCCESS; booking → CONFIRMED.
+2. `host_earnings` created (PENDING) for ₦90,000.
 3. Ledger journal **BOOKING_PAYMENT_RECEIVED**:
    - Debit 1010 Paystack Clearing **₦100,000**
    - Credit 2010 Guest Deposits **₦98,000**
@@ -55,7 +55,7 @@ Journal **CHECKIN_RECOGNITION**:
 
 - Debit 2010 Guest Deposits ₦98,000  
 - Credit 2020 Host Payable ₦90,000  
-- Credit 4010 Commission ₦8,000  
+- Credit 4010 Commission ₦8,000
 
 Payout moves HELD → READY_FOR_PAYOUT; earnings → READY.
 
@@ -64,7 +64,7 @@ Payout moves HELD → READY_FOR_PAYOUT; earnings → READY.
 Journal **HOST_PAYOUT_DISBURSED** (and fee expense if any):
 
 - Debit 2020 Host Payable ₦90,000  
-- Credit 1020 Operating Bank ₦90,000 (simplified)  
+- Credit 1020 Operating Bank ₦90,000 (simplified)
 
 Payout → PAID; transfer codes stored for reconciliation.
 
@@ -86,11 +86,11 @@ Existing `FinanceService.processRefund`:
 
 ## 5. Problems with the current design (plain English)
 
-1. **Three places say “host is owed money”** — booking snapshot, host_earnings, payouts, plus ledger 2020. Easy to confuse which to trust for a wallet UI.  
-2. **Guest deposit (2010) vs host payable (2020)** is correct accounting but hard for non-accountants.  
-3. **Settlement still calendar-based** — check-in confirm is not the gate yet (deferred past Phase 3).  
-4. **Fee escrow (2030) vs expense (5010)** timing can confuse “where did the ₦2,000 fee go?”  
-5. **Late payments** now correctly flag `refunds.status=REQUESTED` instead of silent confirm — good — but admin must act.  
+1. **Three places say “host is owed money”** — booking snapshot, host_earnings, payouts, plus ledger 2020. Easy to confuse which to trust for a wallet UI.
+2. **Guest deposit (2010) vs host payable (2020)** is correct accounting but hard for non-accountants.
+3. **Settlement still calendar-based** — check-in confirm is not the gate yet (deferred past Phase 3).
+4. **Fee escrow (2030) vs expense (5010)** timing can confuse “where did the ₦2,000 fee go?”
+5. **Late payments** now correctly flag `refunds.status=REQUESTED` instead of silent confirm — good — but admin must act.
 6. Naming drift: payment status `SUCCESS` in code vs `VERIFIED` in constants.
 
 ---
@@ -170,7 +170,7 @@ Host withdraw API, wallet UI, balance cache table, SMS/push for wallet events.
 
 ## 9. PO approvals still useful before financial phases
 
-1. Auto-refund late Paystack successes vs admin-only REQUESTED (Phase 3 uses admin-visible REQUESTED).  
-2. Whether wallet available = READY_FOR_PAYOUT only, or also include some HELD after check-in.  
-3. Settlement gate: guest check-in required vs calendar-only (Phase 2 open item; deferred).  
+1. Auto-refund late Paystack successes vs admin-only REQUESTED (Phase 3 uses admin-visible REQUESTED).
+2. Whether wallet available = READY_FOR_PAYOUT only, or also include some HELD after check-in.
+3. Settlement gate: guest check-in required vs calendar-only (Phase 2 open item; deferred).
 4. Whether Option B wallet ledger is needed in Phase 5+.

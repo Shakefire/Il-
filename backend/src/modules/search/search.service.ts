@@ -4,6 +4,7 @@ import { calculateDistanceKm, offsetCoordinates } from "../../lib/geocoding";
 import { locationsService, NormalizedLocation } from "../locations/locations.service";
 import { PROPERTY_STATUS, DEFAULT_SEARCH_RADIUS_KM } from "../../config/constants";
 import { enrichProperty } from "../properties/properties.service";
+import { excludeMarketplaceFixtureHosts } from "../../lib/marketplace-fixture-sql";
 
 /**
  * Find property IDs that are unavailable for the given date range.
@@ -126,7 +127,8 @@ export async function searchProperties(params: SearchParams) {
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
         sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
-        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
+        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`,
+        excludeMarketplaceFixtureHosts()
       )
     );
 

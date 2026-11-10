@@ -36,7 +36,14 @@ import {
   AlertCircle,
 } from "lucide-react";
 import BankAccountInput, { BankAccountValue } from "@/components/bank/BankAccountInput";
+import HostDashboardTabs from "@/components/host-dashboard/HostDashboardTabs";
+import OverviewPanel from "@/components/host-dashboard/OverviewPanel";
+import NotificationsPanel from "@/components/host-dashboard/NotificationsPanel";
+import SettingsPanel from "@/components/host-dashboard/SettingsPanel";
+import HostCountdown from "@/components/host-dashboard/HostCountdown";
+import type { HostDashboardTab, HostDashboardStats } from "@/components/host-dashboard/types";
 import { api } from "@/lib/api";
+import { validateHostWithdrawRequest } from "@/lib/phase7-guest-host-ui";
 import { formatNaira } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import { motion, AnimatePresence, useSpring, useTransform, type Variants } from "framer-motion";
@@ -157,6 +164,9 @@ interface HostBooking {
   hostNetAmount?: number;
   bookingStatus?: string;
   status?: string;
+  hostResponse?: string | null;
+  hostResponseDeadlineAt?: string | null;
+  paymentDeadlineAt?: string | null;
   paymentStatus?: string;
   paymentReference?: string;
   createdAt: string;
@@ -188,12 +198,22 @@ export default function HostDashboardPage() {
   const { user, isAuthenticated, isLoading } = useAuth();
   const [properties, setProperties] = useState<HostProperty[]>([]);
   const [bookings, setBookings] = useState<HostBooking[]>([]);
-  const [activeTab, setActiveTab] = useState<"properties" | "bookings" | "calendar" | "financials">("properties");
+  const [activeTab, setActiveTab] = useState<HostDashboardTab>("overview");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
   const [loadingBookings, setLoadingBookings] = useState(false);
+  const [bookingActionId, setBookingActionId] = useState<string | null>(null);
+  const [bookingActionError, setBookingActionError] = useState<string | null>(null);
+  const [hostCountdownTick, setHostCountdownTick] = useState(0);
   const [payouts, setPayouts] = useState<HostPayout[]>([]);
   const [loadingPayouts, setLoadingPayouts] = useState(false);
+  const [wallet, setWallet] = useState<{
+    balances: { pending: number; available: number; processing: number; paid: number };
+    bank?: { verified?: boolean; accountNumberMasked?: string; bankName?: string | null };
+    feePolicy?: { note?: string };
+  } | null>(null);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [withdrawNotice, setWithdrawNotice] = useState<string | null>(null);
   const [calendarSelectedPropId, setCalendarSelectedPropId] = useState<string>("");
   const [calendarBlocks, setCalendarBlocks] = useState<any[]>([]);
   const [loadingCalendar, setLoadingCalendar] = useState(false);
@@ -201,14 +221,7 @@ export default function HostDashboardPage() {
   const [calBlockEnd, setCalBlockEnd] = useState("");
   const [isCalBlocking, setIsCalBlocking] = useState(false);
   const [calMessage, setCalMessage] = useState<string | null>(null);
-  const [stats, setStats] = useState<{
-    totalProperties: number;
-    published: number;
-    pending: number;
-    drafts: number;
-    rejected: number;
-    earnings: { totalGross: number; totalNet: number };
-  } | null>(null);
+  const [stats, setStats] = useState<HostDashboardStats | null>(null);
 
   // Availability modal states
   const [showAvailabilityModal, setShowAvailabilityModal] = useState(false);
@@ -589,26 +602,57 @@ export default function HostDashboardPage() {
   };
 
   const handleDeleteProperty = async (propId: string) => {
-    if (!confirm("Are you sure you want to permanently delete this listing?")) return;
+    const prop = properties.find((p) => p.id === propId);
+    const archiveFirst = confirm(
+      `Archive "${prop?.title || "this listing"}"?\n\nArchive hides it from the marketplace and keeps all bookings, payments, payouts, and ledger history.\n\nOK = Archive\nCancel = stop (use Delete only for empty drafts with no history)`
+    );
+    if (!archiveFirst) {
+      const hardDelete = confirm(
+        "Hard-delete is only allowed for empty listings with no booking or financial history. Continue?"
+      );
+      if (!hardDelete) return;
+      try {
+        const result = await api.deleteHostProperty(propId, false, "delete");
+        setActionMessage(result.message || "Empty listing deleted.");
+        loadProperties();
+        loadStats();
+      } catch (err: any) {
+        if (err.requiresConfirmation || err.hasFinancialHistory) {
+          if (confirm(`${err.message}\n\nOK to archive instead (history preserved).`)) {
+            try {
+              const result = await api.deleteHostProperty(propId, true, "archive");
+              setActionMessage(result.message || "Listing archived. Financial history preserved.");
+              loadProperties();
+              loadStats();
+            } catch (retryErr: any) {
+              alert(retryErr.message || "Failed to archive property.");
+            }
+          }
+          return;
+        }
+        alert(err.message || "Failed to delete property.");
+      }
+      return;
+    }
     try {
-      await api.deleteHostProperty(propId);
-      setActionMessage("Listing deleted successfully.");
+      const result = await api.deleteHostProperty(propId, false, "archive");
+      setActionMessage(result.message || "Listing archived and hidden from marketplace.");
       loadProperties();
       loadStats();
     } catch (err: any) {
       if (err.requiresConfirmation) {
-        if (confirm(`${err.message}\n\nClick OK to confirm and proceed with deletion anyway.`)) {
+        if (confirm(`${err.message}\n\nOK to archive anyway (reservations and finances stay intact).`)) {
           try {
-            await api.deleteHostProperty(propId, true);
-            setActionMessage("Listing permanently deleted and removed from marketplace.");
+            const result = await api.deleteHostProperty(propId, true, "archive");
+            setActionMessage(result.message || "Listing archived. History preserved.");
             loadProperties();
             loadStats();
           } catch (retryErr: any) {
-            alert(retryErr.message || "Failed to delete property.");
+            alert(retryErr.message || "Failed to archive property.");
           }
         }
       } else {
-        alert(err.message || "Failed to delete property.");
+        alert(err.message || "Failed to archive property.");
       }
     }
   };
@@ -627,14 +671,44 @@ export default function HostDashboardPage() {
   const loadPayouts = async () => {
     setLoadingPayouts(true);
     try {
-      const res = await api.getHostPayouts();
+      const [res, walletRes] = await Promise.all([
+        api.getHostPayouts(),
+        api.getHostWallet().catch(() => null),
+      ]);
       if (res && res.payouts) {
         setPayouts(res.payouts);
+      }
+      if (walletRes?.wallet) {
+        setWallet(walletRes.wallet);
       }
     } catch (err: any) {
       console.warn("Could not load host payouts:", err);
     } finally {
       setLoadingPayouts(false);
+    }
+  };
+
+  const handleWithdrawAvailable = async () => {
+    const gate = validateHostWithdrawRequest({
+      availableNaira: wallet?.balances?.available || 0,
+      requestedNaira: wallet?.balances?.available || 0,
+      bankVerified: !!wallet?.bank?.verified,
+      pendingNaira: wallet?.balances?.pending || 0,
+    });
+    if (!gate.ok) {
+      setWithdrawNotice(gate.message);
+      return;
+    }
+    setWithdrawBusy(true);
+    setWithdrawNotice(null);
+    try {
+      const result = await api.requestHostWithdrawal(gate.amountNaira);
+      setWithdrawNotice(result.message || "Withdrawal submitted.");
+      await loadPayouts();
+    } catch (err: any) {
+      setWithdrawNotice(err.message || "Withdrawal failed");
+    } finally {
+      setWithdrawBusy(false);
     }
   };
 
@@ -693,6 +767,17 @@ export default function HostDashboardPage() {
     loadOnboardingStatus();
     loadPayouts();
   }, []);
+
+  // Display-only host response countdown for PENDING_HOST rows
+  useEffect(() => {
+    if (activeTab !== "bookings") return;
+    const hasPending = bookings.some(
+      (b) => (b.bookingStatus || b.status) === "PENDING_HOST"
+    );
+    if (!hasPending) return;
+    const id = window.setInterval(() => setHostCountdownTick((t) => t + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [activeTab, bookings]);
 
   useEffect(() => {
     if (properties.length > 0 && !calendarSelectedPropId) {
@@ -816,6 +901,13 @@ export default function HostDashboardPage() {
 
   const getBookingStatusBadge = (status: string) => {
     switch (status) {
+      case "PENDING_HOST":
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-50 text-orange-800 border border-orange-200">
+            <Clock size={12} />
+            Awaiting your response
+          </span>
+        );
       case "CONFIRMED":
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -827,7 +919,7 @@ export default function HostDashboardPage() {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
             <Clock size={12} />
-            Payment Pending
+            Awaiting guest payment
           </span>
         );
       case "CANCELLED":
@@ -847,9 +939,75 @@ export default function HostDashboardPage() {
       default:
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
-            {status}
+            {status || "—"}
           </span>
         );
+    }
+  };
+
+  const formatHostCountdown = (deadlineIso?: string | null) => {
+    void hostCountdownTick;
+    if (!deadlineIso) return "—";
+    const ms = new Date(deadlineIso).getTime() - Date.now();
+    if (Number.isNaN(ms) || ms <= 0) return "Expired (refresh)";
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return m > 0 ? `${m}:${r.toString().padStart(2, "0")}` : `${r}s`;
+  };
+
+  const handleAcceptBooking = async (bookingId: string) => {
+    setBookingActionError(null);
+    setBookingActionId(bookingId);
+    try {
+      const res = await api.acceptBooking(bookingId);
+      const updated = res.booking;
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === bookingId
+            ? {
+                ...b,
+                status: updated?.status || "PAYMENT_PENDING",
+                bookingStatus: updated?.status || "PAYMENT_PENDING",
+                paymentDeadlineAt:
+                  res.paymentDeadlineAt || updated?.paymentDeadlineAt || b.paymentDeadlineAt,
+                hostResponse: updated?.hostResponse || "ACCEPTED",
+              }
+            : b
+        )
+      );
+    } catch (err: any) {
+      setBookingActionError(err.message || "Could not accept booking.");
+      await loadBookings();
+    } finally {
+      setBookingActionId(null);
+    }
+  };
+
+  const handleDeclineBooking = async (bookingId: string) => {
+    if (
+      !confirm(
+        "Decline this guest request? The date hold will be released and the guest will be notified. This cannot be undone."
+      )
+    ) {
+      return;
+    }
+    setBookingActionError(null);
+    setBookingActionId(bookingId);
+    try {
+      await api.declineBooking(bookingId, "Host declined from dashboard");
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === bookingId
+            ? { ...b, status: "CANCELLED", bookingStatus: "CANCELLED", hostResponse: "DECLINED" }
+            : b
+        )
+      );
+    } catch (err: any) {
+      setBookingActionError(err.message || "Could not decline booking.");
+      await loadBookings();
+    } finally {
+      setBookingActionId(null);
     }
   };
 
@@ -1145,14 +1303,14 @@ export default function HostDashboardPage() {
             className="p-5 bg-white rounded-xl border border-[#E7E5E0] shadow-[0_2px_8px_-2px_rgba(0,0,0,0.04)] hover:shadow-[0_8px_20px_-4px_rgba(0,0,0,0.08)] transition-shadow cursor-default"
           >
             <div className="text-xs font-semibold uppercase tracking-wider text-[#6B6B67] flex items-center justify-between">
-              <span>Net Host Earnings</span>
+              <span>Your lifetime earnings</span>
               <TrendingUp size={16} className="text-emerald-600" />
             </div>
             <div className="text-3xl font-display font-medium text-emerald-800 mt-2">
               <AnimatedCurrency value={stats?.earnings?.totalNet || 0} />
             </div>
             <div className="text-xs text-[#8B8B86] mt-1">
-              Gross: {formatNaira(stats?.earnings?.totalGross || 0)}
+              Guest accommodation total: {formatNaira(stats?.earnings?.totalGross || 0)}
             </div>
           </motion.div>
         </motion.div>
@@ -1172,58 +1330,49 @@ export default function HostDashboardPage() {
 
         {/* Navigation Tabs & Content (Cascaded with Framer Motion) */}
         <motion.div variants={itemVariants} className="space-y-6">
-          <div className="flex border-b border-[#E7E5E0] gap-6 sm:gap-8 overflow-x-auto">
-            <button
-              type="button"
-              onClick={() => setActiveTab("properties")}
-              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                activeTab === "properties"
-                  ? "border-[#0B5D45] text-[#0B5D45]"
-                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
-              }`}
-            >
-              <Home size={16} />
-              <span>My Listings ({properties.length})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("bookings")}
-              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                activeTab === "bookings"
-                  ? "border-[#0B5D45] text-[#0B5D45]"
-                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
-              }`}
-            >
-              <Calendar size={16} />
-              <span>Reservations ({bookings.length})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("calendar")}
-              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                activeTab === "calendar"
-                  ? "border-[#0B5D45] text-[#0B5D45]"
-                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
-              }`}
-            >
-              <CalendarCheck size={16} />
-              <span>Calendar &amp; Availability</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("financials")}
-              className={`pb-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap cursor-pointer ${
-                activeTab === "financials"
-                  ? "border-[#0B5D45] text-[#0B5D45]"
-                  : "border-transparent text-[#6B6B67] hover:text-[#171717]"
-              }`}
-            >
-              <Wallet size={16} />
-              <span>Settlements &amp; Financials</span>
-            </button>
-          </div>
+          <HostDashboardTabs
+            activeTab={activeTab}
+            onChange={setActiveTab}
+            counts={{
+              properties: properties.length,
+              bookings: bookings.length,
+              alerts: stats?.alerts?.length || 0,
+            }}
+          />
 
-        {/* Tab 1: Listings Overview */}
+        {activeTab === "overview" && (
+          <OverviewPanel
+            stats={stats}
+            pendingRequests={bookings.filter((b) => (b.bookingStatus || b.status) === "PENDING_HOST")}
+            walletAvailable={wallet?.balances?.available || stats?.earnings?.wallet?.available || 0}
+            onOpenReservations={() => setActiveTab("bookings")}
+            onOpenListings={() => setActiveTab("properties")}
+            onOpenEarnings={() => setActiveTab("financials")}
+            nowMs={Date.now() + hostCountdownTick * 0}
+          />
+        )}
+
+        {activeTab === "notifications" && (
+          <NotificationsPanel alerts={stats?.alerts || []} />
+        )}
+
+        {activeTab === "settings" && (
+          <SettingsPanel
+            onboardingStatus={onboardingStatus}
+            bankVerified={!!wallet?.bank?.verified}
+            bankLabel={
+              wallet?.bank?.verified
+                ? `${wallet.bank.bankName || "Bank"} · ${wallet.bank.accountNumberMasked || ""}`
+                : null
+            }
+            onOpenBank={() => {
+              setActiveTab("financials");
+              setShowEditBankModal(true);
+            }}
+          />
+        )}
+
+        {/* Tab: Listings */}
         {activeTab === "properties" && (
           <>
             {/* Status Filters */}
@@ -1234,6 +1383,7 @@ export default function HostDashboardPage() {
                 { id: "PENDING_REVIEW", label: "Pending Review", count: properties.filter((p) => p.status === "PENDING_REVIEW").length },
                 { id: "DRAFT", label: "Drafts", count: properties.filter((p) => p.status === "DRAFT").length },
                 { id: "REJECTED", label: "Needs Attention", count: properties.filter((p) => p.status === "REJECTED").length },
+                { id: "ARCHIVED", label: "Archived", count: properties.filter((p) => p.status === "ARCHIVED").length },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -1470,76 +1620,133 @@ export default function HostDashboardPage() {
                 <Calendar size={40} className="mx-auto text-[#0B5D45]" />
                 <h3 className="font-display text-2xl text-[#171717]">No reservations yet</h3>
                 <p className="text-[15px] text-[#6B6B67]">
-                  When guests book your properties, their reservation details, dates, and payment status will appear here in real time.
+                  When guests request your properties, accept or decline within the host window. After accept, status stays payment-pending until the guest pays.
                 </p>
               </div>
             ) : (
-              <div className="bg-white rounded-2xl border border-[#E7E5E0] overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-[#F8F7F4] border-b border-[#E7E5E0] text-xs uppercase tracking-wider text-[#6B6B67]">
-                      <tr>
-                        <th className="py-3.5 px-4 font-semibold">Ref / Property</th>
-                        <th className="py-3.5 px-4 font-semibold">Guest</th>
-                        <th className="py-3.5 px-4 font-semibold">Dates &amp; Stay</th>
-                        <th className="py-3.5 px-4 font-semibold">Accommodation Value</th>
-                        <th className="py-3.5 px-4 font-semibold">Your Net Payout</th>
-                        <th className="py-3.5 px-4 font-semibold">Status</th>
-                        <th className="py-3.5 px-4 font-semibold">Booked On</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-[#E7E5E0]">
-                      {bookings.map((b) => {
-                        const subtotal = b.accommodationSubtotal || (b.nightlyPrice ? b.nightlyPrice * (b.numberOfNights || b.totalNights || 1) : b.totalPrice || b.totalAmount || 0);
-                        const commission = b.hostCommissionAmount && b.hostCommissionAmount > 0 ? b.hostCommissionAmount : Math.round(subtotal * 0.1);
-                        const netPayout = b.hostNetAmount && b.hostNetAmount > 0 ? b.hostNetAmount : subtotal - commission;
-                        const startDate = b.startDate || b.checkInDate || "";
-                        const endDate = b.endDate || b.checkOutDate || "";
-                        const nights = b.totalNights || b.numberOfNights || 1;
-                        const guests = b.guestCount || b.totalGuests || 1;
+              <div className="space-y-4">
+                {bookingActionError && (
+                  <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm" role="alert">
+                    {bookingActionError}
+                  </div>
+                )}
+                {bookings.some((b) => (b.bookingStatus || b.status) === "PENDING_HOST") && (
+                  <div className="p-4 rounded-2xl bg-orange-50 border border-orange-200 text-orange-950 text-sm">
+                    <strong>Action needed:</strong>{" "}
+                    {bookings.filter((b) => (b.bookingStatus || b.status) === "PENDING_HOST").length}{" "}
+                    request(s) awaiting your accept or decline. Countdown is display-only; server deadlines decide expiry.
+                  </div>
+                )}
+                <div className="bg-white rounded-2xl border border-[#E7E5E0] overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-[#F8F7F4] border-b border-[#E7E5E0] text-xs uppercase tracking-wider text-[#6B6B67]">
+                        <tr>
+                          <th className="py-3.5 px-4 font-semibold">Ref / Property</th>
+                          <th className="py-3.5 px-4 font-semibold">Guest</th>
+                          <th className="py-3.5 px-4 font-semibold">Dates &amp; Stay</th>
+                          <th className="py-3.5 px-4 font-semibold">Accommodation Value</th>
+                          <th className="py-3.5 px-4 font-semibold">Your Net Payout</th>
+                          <th className="py-3.5 px-4 font-semibold">Status</th>
+                          <th className="py-3.5 px-4 font-semibold">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E7E5E0]">
+                        {bookings.map((b) => {
+                          const subtotal = b.accommodationSubtotal || (b.nightlyPrice ? b.nightlyPrice * (b.numberOfNights || b.totalNights || 1) : b.totalPrice || b.totalAmount || 0);
+                          const commission = b.hostCommissionAmount && b.hostCommissionAmount > 0 ? b.hostCommissionAmount : Math.round(subtotal * 0.1);
+                          const netPayout = b.hostNetAmount && b.hostNetAmount > 0 ? b.hostNetAmount : subtotal - commission;
+                          const startDate = b.startDate || b.checkInDate || "";
+                          const endDate = b.endDate || b.checkOutDate || "";
+                          const nights = b.totalNights || b.numberOfNights || 1;
+                          const guests = b.guestCount || b.totalGuests || 1;
+                          const status = b.bookingStatus || b.status || "";
+                          const isPendingHost = status === "PENDING_HOST";
+                          const isPaymentPending = status === "PAYMENT_PENDING";
+                          const busy = bookingActionId === b.id;
 
-                        return (
-                          <tr key={b.id} className="hover:bg-stone-50/50 transition-colors">
-                            <td className="py-4 px-4">
-                              <div className="font-semibold text-[#171717]">{b.referenceCode}</div>
-                              <div className="text-xs text-[#6B6B67] line-clamp-1">{b.propertyTitle}</div>
-                              <div className="text-[11px] text-[#8B8B86]">{b.propertyNeighborhood ? `${b.propertyNeighborhood}, ` : ""}{b.propertyCity}</div>
-                            </td>
-                            <td className="py-4 px-4">
-                              <div className="font-medium text-[#171717]">{b.guestFirstName} {b.guestLastName}</div>
-                              <div className="text-xs text-[#6B6B67]">{b.guestEmail}</div>
-                              <div className="text-[11px] text-[#8B8B86]">{b.guestPhone}</div>
-                            </td>
-                            <td className="py-4 px-4 whitespace-nowrap">
-                              <div className="text-xs font-medium text-[#171717]">
-                                {startDate} → {endDate}
-                              </div>
-                              <div className="text-xs text-[#6B6B67]">
-                                {nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
-                              {formatNaira(subtotal)}
-                            </td>
-                            <td className="py-4 px-4 whitespace-nowrap">
-                              <div className="font-bold text-emerald-800 text-sm">
-                                {formatNaira(netPayout)}
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 whitespace-nowrap">
-                              <div className="space-y-1">
-                                {getBookingStatusBadge(b.bookingStatus || b.status || "")}
-                                <div>{getPaymentStatusBadge(b.paymentStatus || "")}</div>
-                              </div>
-                            </td>
-                            <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
-                              {new Date(b.createdAt).toLocaleDateString()}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                          return (
+                            <tr key={b.id} className="hover:bg-stone-50/50 transition-colors">
+                              <td className="py-4 px-4">
+                                <div className="font-semibold text-[#171717]">{b.referenceCode}</div>
+                                <div className="text-xs text-[#6B6B67] line-clamp-1">{b.propertyTitle}</div>
+                                <div className="text-[11px] text-[#8B8B86]">{b.propertyNeighborhood ? `${b.propertyNeighborhood}, ` : ""}{b.propertyCity}</div>
+                              </td>
+                              <td className="py-4 px-4">
+                                <div className="font-medium text-[#171717]">{b.guestFirstName} {b.guestLastName}</div>
+                                <div className="text-xs text-[#6B6B67]">{b.guestEmail}</div>
+                                <div className="text-[11px] text-[#8B8B86]">{b.guestPhone}</div>
+                              </td>
+                              <td className="py-4 px-4 whitespace-nowrap">
+                                <div className="text-xs font-medium text-[#171717]">
+                                  {startDate} → {endDate}
+                                </div>
+                                <div className="text-xs text-[#6B6B67]">
+                                  {nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
+                                {formatNaira(subtotal)}
+                              </td>
+                              <td className="py-4 px-4 whitespace-nowrap">
+                                <div className="font-bold text-emerald-800 text-sm">
+                                  {formatNaira(netPayout)}
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 whitespace-nowrap">
+                                <div className="space-y-1">
+                                  {getBookingStatusBadge(status)}
+                                  {isPendingHost && (
+                                    <div className="text-[11px] font-mono text-orange-800">
+                                      Respond in {formatHostCountdown(b.hostResponseDeadlineAt)}
+                                    </div>
+                                  )}
+                                  {isPaymentPending && (
+                                    <div className="text-[11px] text-amber-800">
+                                      Guest paying · not confirmed yet
+                                      {b.paymentDeadlineAt
+                                        ? ` · window ${formatHostCountdown(b.paymentDeadlineAt)}`
+                                        : ""}
+                                    </div>
+                                  )}
+                                  {!isPendingHost && !isPaymentPending && (
+                                    <div>{getPaymentStatusBadge(b.paymentStatus || "")}</div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-4 px-4 whitespace-nowrap">
+                                {isPendingHost ? (
+                                  <div className="flex flex-col gap-2 min-w-[120px]">
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => handleAcceptBooking(b.id)}
+                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#0B5D45] text-white text-xs font-semibold hover:bg-[#084936] disabled:opacity-50 min-h-[40px]"
+                                    >
+                                      {busy ? <Loader2 size={14} className="animate-spin" /> : null}
+                                      Accept
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => handleDeclineBooking(b.id)}
+                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-rose-200 text-rose-700 text-xs font-semibold hover:bg-rose-50 disabled:opacity-50 min-h-[40px]"
+                                    >
+                                      Decline
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-[#8B8B86]">
+                                    {new Date(b.createdAt).toLocaleDateString()}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             )}
@@ -1831,53 +2038,61 @@ export default function HostDashboardPage() {
                 </div>
               </div>
 
-              {/* Card 2: Total Disbursed */}
+              {/* Card 2: Available to withdraw */}
               <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm flex flex-col justify-between space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B6B67]">
-                    Total Disbursed to Bank
+                    Available to withdraw
                   </span>
-                  <TrendingUp size={18} className="text-emerald-600" />
+                  <Wallet size={18} className="text-emerald-600" />
                 </div>
                 <div>
                   <div className="text-3xl font-display font-medium text-emerald-800">
-                    <AnimatedCurrency
-                      value={payouts
-                        .filter((p) => p.status === "DISBURSED")
-                        .reduce((sum, p) => sum + p.amount, 0)}
-                    />
+                    <AnimatedCurrency value={wallet?.balances?.available || 0} />
                   </div>
                   <div className="text-xs text-[#8B8B86] mt-1">
-                    {payouts.filter((p) => p.status === "DISBURSED").length} completed transfers
+                    Pending held: {formatNaira(wallet?.balances?.pending || 0)} · Processing:{" "}
+                    {formatNaira(wallet?.balances?.processing || 0)}
                   </div>
                 </div>
-                <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
-                  Cleared to your Nigerian bank account
-                </div>
+                <button
+                  type="button"
+                  disabled={withdrawBusy || !(wallet?.balances?.available)}
+                  onClick={handleWithdrawAvailable}
+                  className="w-full min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-[#0B5D45] text-white text-xs font-semibold disabled:opacity-50"
+                  aria-label="Withdraw available earnings"
+                >
+                  {withdrawBusy ? <Loader2 size={14} className="animate-spin" /> : <ArrowUpRight size={14} />}
+                  Withdraw available
+                </button>
+                {withdrawNotice && (
+                  <p className="text-[11px] text-[#6B6B67]">{withdrawNotice}</p>
+                )}
+                {wallet?.bank?.verified && (
+                  <p className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
+                    To {wallet.bank.bankName} {wallet.bank.accountNumberMasked}
+                  </p>
+                )}
               </div>
 
-              {/* Card 3: In Escrow / Pending Hold */}
+              {/* Card 3: Paid + Pending */}
               <div className="p-5 bg-white rounded-2xl border border-[#E7E5E0] shadow-sm flex flex-col justify-between space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold uppercase tracking-wider text-[#6B6B67]">
-                    In Escrow &amp; Scheduled
+                    Paid to bank / Pending
                   </span>
-                  <Clock size={18} className="text-blue-600" />
+                  <TrendingUp size={18} className="text-blue-600" />
                 </div>
                 <div>
                   <div className="text-3xl font-display font-medium text-blue-900">
-                    <AnimatedCurrency
-                      value={payouts
-                        .filter((p) => p.status === "SCHEDULED" || p.status === "PROCESSING")
-                        .reduce((sum, p) => sum + p.amount, 0)}
-                    />
+                    <AnimatedCurrency value={wallet?.balances?.paid || 0} />
                   </div>
                   <div className="text-xs text-[#8B8B86] mt-1">
-                    {payouts.filter((p) => p.status === "SCHEDULED" || p.status === "PROCESSING").length} upcoming payouts
+                    Paid out · {formatNaira(wallet?.balances?.pending || 0)} still pending guest check-in
                   </div>
                 </div>
                 <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
-                  Cleared after 24h guest check-in hold
+                  Earnings release after guest check-in + hold period — not on host accept alone
                 </div>
               </div>
             </div>
@@ -2543,7 +2758,7 @@ export default function HostDashboardPage() {
                       className="w-full px-4 py-2.5 rounded-xl border border-[#E7E5E0] text-sm focus:outline-none focus:border-[#0B5D45]"
                     />
                     <div className="text-[11px] text-[#0B5D45] font-semibold mt-1">
-                      You receive: {formatNaira(pricePerNight)} / night (100% net payout) · Listed for guests at {formatNaira(Math.round(pricePerNight * 1.10))} / night
+                      Your host rate: {formatNaira(pricePerNight)} / night · Guest list price: {formatNaira(Math.round(pricePerNight * 1.10))} / night (includes platform markup). Confirmed stays pay your snapshotted host earnings — not a flat “100% of guest price.”
                     </div>
                   </div>
                 </div>

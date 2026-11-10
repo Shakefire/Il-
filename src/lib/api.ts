@@ -112,6 +112,23 @@ export const api = {
     return body;
   },
 
+  /** Refresh booking status from backend SoT without recreating. */
+  async refreshBookingStatus(bookingIdOrRef: string, accessToken?: string) {
+    return this.getBooking(bookingIdOrRef, accessToken);
+  },
+
+  /** Similar stays after decline/expire — never auto-books. */
+  async getSimilarProperties(bookingId: string, limit = 8) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    const res = await fetch(`/api/bookings/${bookingId}/similar?${params.toString()}`, {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to load similar properties");
+    return body;
+  },
+
   async getBookingContact(bookingId: string, accessToken?: string) {
     const headers: Record<string, string> = { ...getAuthHeader() };
     if (accessToken) headers["X-Access-Token"] = accessToken;
@@ -143,7 +160,7 @@ export const api = {
     return res.json();
   },
 
-  async cancelBooking(bookingId: string, accessToken?: string) {
+  async cancelBooking(bookingId: string, accessToken?: string, reason?: string) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...getAuthHeader(),
@@ -154,10 +171,116 @@ export const api = {
       method: "POST",
       headers,
       credentials: "include",
+      body: JSON.stringify({ accessToken, reason }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const err: any = new Error(body.error || "Failed to cancel booking");
+      err.code = body.code;
+      err.statusCode = res.status;
+      err.refund = body.refund;
+      err.bookingStatus = body.bookingStatus;
+      throw err;
+    }
+    return body;
+  },
+
+  /** Host accept PENDING_HOST → PAYMENT_PENDING (idempotent). */
+  async acceptBooking(bookingId: string) {
+    const res = await fetch(`/api/bookings/${bookingId}/accept`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify({}),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const err: any = new Error(body.error || "Failed to accept booking");
+      err.code = body.code;
+      err.statusCode = res.status;
+      throw err;
+    }
+    return body;
+  },
+
+  /** Host decline PENDING_HOST → CANCELLED. */
+  async declineBooking(bookingId: string, reason?: string) {
+    const res = await fetch(`/api/bookings/${bookingId}/decline`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify({ reason }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const err: any = new Error(body.error || "Failed to decline booking");
+      err.code = body.code;
+      err.statusCode = res.status;
+      throw err;
+    }
+    return body;
+  },
+
+  /** Guest confirms check-in (Phase 7). Idempotent. */
+  async confirmCheckIn(bookingId: string, accessToken?: string) {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...getAuthHeader(),
+    };
+    if (accessToken) headers["X-Access-Token"] = accessToken;
+    const res = await fetch(`/api/bookings/${bookingId}/confirm-check-in`, {
+      method: "POST",
+      headers,
+      credentials: "include",
       body: JSON.stringify({ accessToken }),
     });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error || "Failed to cancel booking");
+    if (!res.ok) {
+      const err: any = new Error(body.error || "Failed to confirm check-in");
+      err.code = body.code;
+      err.statusCode = res.status;
+      throw err;
+    }
+    return body;
+  },
+
+  async getHostWallet() {
+    const res = await fetch("/api/host/wallet", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || "Failed to load wallet");
+    }
+    return res.json();
+  },
+
+  async requestHostWithdrawal(amountNaira?: number) {
+    const res = await fetch("/api/host/wallet/withdraw", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...getAuthHeader(),
+      },
+      credentials: "include",
+      body: JSON.stringify(
+        amountNaira !== undefined ? { amountNaira } : {}
+      ),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const err: any = new Error(body.error || "Withdrawal failed");
+      err.code = body.code;
+      err.statusCode = res.status;
+      throw err;
+    }
     return body;
   },
 
@@ -299,19 +422,45 @@ export const api = {
     return body;
   },
 
-  async deleteHostProperty(propertyId: string, confirmWithReservations = false) {
-    const res = await fetch(`/api/host/properties/${propertyId}${confirmWithReservations ? "?confirm=true" : ""}`, {
+  async deleteHostProperty(
+    propertyId: string,
+    confirmWithReservations = false,
+    mode?: "archive" | "delete"
+  ) {
+    const params = new URLSearchParams();
+    if (confirmWithReservations) params.set("confirm", "true");
+    if (mode) params.set("mode", mode);
+    const qs = params.toString();
+    const res = await fetch(`/api/host/properties/${propertyId}${qs ? `?${qs}` : ""}`, {
       method: "DELETE",
       headers: getAuthHeader(),
       credentials: "include",
     });
     const body = await res.json();
     if (!res.ok) {
-      const err: any = new Error(body.error || "Failed to delete property listing");
+      const err: any = new Error(body.error || "Failed to archive or delete property listing");
       err.requiresConfirmation = body.requiresConfirmation;
       err.upcomingCount = body.upcomingCount;
+      err.action = body.action;
+      err.hasFinancialHistory = body.hasFinancialHistory;
       throw err;
     }
+    return body;
+  },
+
+  async reorderPropertyMedia(
+    propertyId: string,
+    orderedImageIds: string[],
+    coverImageId?: string
+  ) {
+    const res = await fetch(`/api/host/properties/${propertyId}/media-order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...getAuthHeader() },
+      credentials: "include",
+      body: JSON.stringify({ orderedImageIds, coverImageId }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to reorder media");
     return body;
   },
 

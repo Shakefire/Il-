@@ -184,27 +184,67 @@ export const adminService = {
       throw new Error("Property not found");
     }
 
-    // Clean up dependent child records safely before removing property
+    // Delegate to host soft-archive rules: never cascade bookings/finance.
+    // Admin can archive any listing; hard-delete only when no history exists.
+    const { hostsService } = await import("../hosts/hosts.service");
+    const history = await hostsService.getPropertyFinancialHistory(id);
+
+    if (history.hasHistory || property.status === "ARCHIVED") {
+      const [archived] = await db
+        .update(schema.properties)
+        .set({ status: "ARCHIVED", updatedAt: new Date() })
+        .where(eq(schema.properties.id, id))
+        .returning();
+
+      await db.insert(schema.auditLogs).values({
+        id: `audit_${crypto.randomUUID()}`,
+        userId: adminId,
+        action: "PROPERTY_ARCHIVED",
+        entityType: "property",
+        entityId: id,
+        details: JSON.stringify({
+          title: property.title,
+          previousStatus: property.status,
+          bookingCount: history.bookingCount,
+          paymentCount: history.paymentCount,
+          payoutCount: history.payoutCount,
+          refundCount: history.refundCount,
+          reason: "Admin archive — financial/booking history preserved",
+        }),
+        ipAddress: ipAddress || null,
+      });
+
+      return {
+        success: true,
+        action: "archive",
+        message: `Property "${property.title}" archived. Bookings and financial history preserved.`,
+        property: archived,
+        historyPreserved: history,
+      };
+    }
+
     await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, id));
     await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, id));
     await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, id));
     await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.propertyId, id));
     await db.delete(schema.reviews).where(eq(schema.reviews.propertyId, id));
-    await db.delete(schema.bookings).where(eq(schema.bookings.propertyId, id));
     await db.delete(schema.properties).where(eq(schema.properties.id, id));
 
-    // Insert audit log
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
       userId: adminId,
       action: "PROPERTY_DELETED",
       entityType: "property",
       entityId: id,
-      details: `Property "${property.title}" (ID: ${id}) permanently deleted by administrator. Removed from marketplace.`,
+      details: `Empty property "${property.title}" (ID: ${id}) permanently deleted by administrator (no booking/financial history).`,
       ipAddress: ipAddress || null,
     });
 
-    return { success: true, message: `Property "${property.title}" permanently deleted and removed from marketplace.` };
+    return {
+      success: true,
+      action: "delete",
+      message: `Empty property "${property.title}" permanently deleted (no booking or financial history).`,
+    };
   },
 
   async deleteHost(hostId: string, adminId: string, ipAddress?: string) {
@@ -1039,11 +1079,16 @@ export const adminService = {
         defaultHostCommissionPct: 10,
         defaultHostPayoutPct: 100,
         payoutHoldHours: 24,
+        hostPayoutMode: "MANUAL",
+        updatedBy: null,
         updatedAt: new Date(),
       };
     }
 
-    return settings;
+    return {
+      ...settings,
+      hostPayoutMode: settings.hostPayoutMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL",
+    };
   },
 
   async updateSettings(
@@ -1051,6 +1096,7 @@ export const adminService = {
       defaultHostCommissionPct?: number;
       defaultHostPayoutPct?: number;
       payoutHoldHours?: number;
+      hostPayoutMode?: "AUTOMATIC" | "MANUAL";
     },
     adminId: string,
     ipAddress?: string
@@ -1079,11 +1125,20 @@ export const adminService = {
       }
     }
 
+    if (data.hostPayoutMode !== undefined) {
+      if (data.hostPayoutMode !== "AUTOMATIC" && data.hostPayoutMode !== "MANUAL") {
+        throw new Error("Host payout mode must be AUTOMATIC or MANUAL.");
+      }
+    }
+
     const [existing] = await db
       .select()
       .from(schema.platformSettings)
       .where(eq(schema.platformSettings.id, "default"))
       .limit(1);
+
+    const previousMode =
+      existing?.hostPayoutMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL";
 
     let updated: any;
     if (!existing) {
@@ -1094,6 +1149,7 @@ export const adminService = {
           defaultHostCommissionPct: data.defaultHostCommissionPct ?? 10,
           defaultHostPayoutPct: data.defaultHostPayoutPct ?? 100,
           payoutHoldHours: data.payoutHoldHours ?? 24,
+          hostPayoutMode: data.hostPayoutMode ?? "MANUAL",
           updatedBy: adminId,
           updatedAt: new Date(),
         })
@@ -1110,6 +1166,7 @@ export const adminService = {
             ? { defaultHostPayoutPct: data.defaultHostPayoutPct }
             : {}),
           ...(data.payoutHoldHours !== undefined ? { payoutHoldHours: data.payoutHoldHours } : {}),
+          ...(data.hostPayoutMode !== undefined ? { hostPayoutMode: data.hostPayoutMode } : {}),
           updatedBy: adminId,
           updatedAt: new Date(),
         })
@@ -1118,16 +1175,46 @@ export const adminService = {
       updated = up;
     }
 
+    const nextMode = updated.hostPayoutMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL";
     await db.insert(schema.auditLogs).values({
       id: `audit_${crypto.randomUUID()}`,
       userId: adminId,
       action: "SETTINGS_UPDATED",
       entityType: "platform_settings",
       entityId: "default",
-      details: `Updated platform settings: commission=${updated.defaultHostCommissionPct}%, hostPayout=${updated.defaultHostPayoutPct}%, payoutHold=${updated.payoutHoldHours}h`,
+      details: JSON.stringify({
+        commissionPct: updated.defaultHostCommissionPct,
+        hostPayoutPct: updated.defaultHostPayoutPct,
+        payoutHoldHours: updated.payoutHoldHours,
+        hostPayoutMode: nextMode,
+        previousHostPayoutMode: previousMode,
+        note:
+          "Mode switch does not auto-drain historical pending payouts and does not reverse in-flight transfers.",
+      }),
       ipAddress: ipAddress || null,
     });
 
-    return updated;
+    if (data.hostPayoutMode !== undefined && previousMode !== nextMode) {
+      await db.insert(schema.auditLogs).values({
+        id: `audit_${crypto.randomUUID()}`,
+        userId: adminId,
+        action: "HOST_PAYOUT_MODE_CHANGED",
+        entityType: "platform_settings",
+        entityId: "default",
+        details: JSON.stringify({
+          from: previousMode,
+          to: nextMode,
+          at: new Date().toISOString(),
+          actorId: adminId,
+          historicalPendingUnchanged: true,
+        }),
+        ipAddress: ipAddress || null,
+      });
+    }
+
+    return {
+      ...updated,
+      hostPayoutMode: nextMode,
+    };
   },
 };

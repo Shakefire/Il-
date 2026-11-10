@@ -2,6 +2,7 @@ import { eq, inArray, count, and, asc, desc, or, gte, lte, lt, gt, sql, isNull }
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
 import { PROPERTY_STATUS } from "../../config/constants";
+import { excludeMarketplaceFixtureHosts } from "../../lib/marketplace-fixture-sql";
 
 /**
  * Enrich a raw property row with images, amenities, host, coordinates, and infrastructure.
@@ -77,7 +78,8 @@ export async function getPublishedProperties(pagination: { limit: number; offset
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
         sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
-        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
+        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`,
+        excludeMarketplaceFixtureHosts()
       )
     );
 
@@ -94,7 +96,8 @@ export async function getPublishedProperties(pagination: { limit: number; offset
       and(
         eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
         sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
-        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
+        sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`,
+        excludeMarketplaceFixtureHosts()
       )
     )
     .orderBy(desc(schema.properties.createdAt))
@@ -222,7 +225,8 @@ export async function getPropertyBySlug(slugOrId: string, allowUnpublished = fal
             matchCondition,
             eq(schema.properties.status, PROPERTY_STATUS.PUBLISHED),
             sql`(${schema.properties.moderationStatus} IS NULL OR ${schema.properties.moderationStatus} != 'SUSPENDED')`,
-            sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`
+            sql`(${schema.users.status} IS NULL OR ${schema.users.status} != 'SUSPENDED')`,
+            excludeMarketplaceFixtureHosts()
           )
     )
     .limit(1);

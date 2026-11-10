@@ -4,8 +4,20 @@ import {
   verifyPayment,
   handlePaystackWebhook,
 } from "./payments.service";
+import { BankResolutionService } from "./bank-resolution.service";
 
 export async function paymentsRoutes(fastify: FastifyInstance) {
+  // ─── GET /api/payments/banks — Nigerian bank list (Paystack + fallback) ───
+  // Also mirrored at /api/banks for web/mobile parity with Next route.
+  fastify.get("/banks", async (_request, reply) => {
+    try {
+      const banks = await BankResolutionService.getNigerianBanks();
+      return reply.send({ banks });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message || "Failed to retrieve Nigerian banks" });
+    }
+  });
+
   // ─── POST /api/payments/initialize ───
   fastify.post("/initialize", async (request, reply) => {
     const body = request.body as {

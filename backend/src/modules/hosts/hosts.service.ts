@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { eq, and, desc, inArray, lt, gt, gte } from "drizzle-orm";
+import { eq, and, desc, asc, inArray, lt, gt, gte, sql, ne } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
 import { BankResolutionService, maskAccountNumber } from "../payments/bank-resolution.service";
+import { PROPERTY_STATUS, BOOKING_STATUS } from "../../config/constants";
 
 export const HostPropertyDraftSchema = z.object({
   title: z.string().min(2).default("Untitled Listing"),
@@ -427,7 +428,8 @@ export const hostsService = {
     const images = await db
       .select()
       .from(schema.propertyImages)
-      .where(eq(schema.propertyImages.propertyId, propertyId));
+      .where(eq(schema.propertyImages.propertyId, propertyId))
+      .orderBy(asc(schema.propertyImages.displayOrder));
 
     const amenities = await db
       .select()
@@ -437,7 +439,15 @@ export const hostsService = {
     return {
       property,
       privateDetails,
+      /** URLs in display order (backward compatible for existing web editors). */
       images: images.map((img) => img.url),
+      /** Full media rows for reorder/cover APIs. */
+      media: images.map((img) => ({
+        id: img.id,
+        url: img.url,
+        displayOrder: img.displayOrder,
+        caption: img.caption,
+      })),
       amenities: amenities.map((a) => a.name),
     };
   },
@@ -449,42 +459,117 @@ export const hostsService = {
       .from(schema.properties)
       .where(eq(schema.properties.hostId, userId));
 
-    const totalProperties = properties.length;
-    const published = properties.filter((p) => p.status === "PUBLISHED").length;
+    const activeProperties = properties.filter((p) => p.status !== PROPERTY_STATUS.ARCHIVED);
+    const totalProperties = activeProperties.length;
+    const published = properties.filter((p) => p.status === PROPERTY_STATUS.PUBLISHED).length;
     const pending = properties.filter((p) => p.status === "PENDING_REVIEW" || p.status === "PENDING").length;
-    const drafts = properties.filter((p) => p.status === "DRAFT").length;
-    const rejected = properties.filter((p) => p.status === "REJECTED").length;
+    const drafts = properties.filter((p) => p.status === PROPERTY_STATUS.DRAFT).length;
+    const rejected = properties.filter((p) => p.status === PROPERTY_STATUS.REJECTED).length;
+    const archived = properties.filter((p) => p.status === PROPERTY_STATUS.ARCHIVED).length;
 
     const propIds = properties.map((p) => p.id);
-    let totalGross = 0;
-    let totalNet = 0;
+    let lifetimeGross = 0;
+    let lifetimeHostEarnings = 0;
+    let periodGross = 0;
+    let periodHostEarnings = 0;
     let recentBookings: any[] = [];
+    let byProperty: Array<{
+      propertyId: string;
+      title: string;
+      status: string;
+      gross: number;
+      hostEarnings: number;
+      bookingCount: number;
+    }> = [];
+
+    const periodStart = new Date();
+    periodStart.setUTCDate(1);
+    periodStart.setUTCHours(0, 0, 0, 0);
 
     if (propIds.length > 0) {
-      const bookings = await db
-        .select()
+      const allBookings = await db
+        .select({
+          id: schema.bookings.id,
+          propertyId: schema.bookings.propertyId,
+          status: schema.bookings.status,
+          accommodationSubtotal: schema.bookings.accommodationSubtotal,
+          nightlyPrice: schema.bookings.nightlyPrice,
+          numberOfNights: schema.bookings.numberOfNights,
+          totalAmount: schema.bookings.totalAmount,
+          serviceFee: schema.bookings.serviceFee,
+          hostCommissionPct: schema.bookings.hostCommissionPct,
+          hostCommissionAmount: schema.bookings.hostCommissionAmount,
+          hostNetAmount: schema.bookings.hostNetAmount,
+          checkInDate: schema.bookings.checkInDate,
+          checkOutDate: schema.bookings.checkOutDate,
+          guestFirstName: schema.bookings.guestFirstName,
+          guestLastName: schema.bookings.guestLastName,
+          referenceCode: schema.bookings.referenceCode,
+          hostResponseDeadlineAt: schema.bookings.hostResponseDeadlineAt,
+          createdAt: schema.bookings.createdAt,
+        })
         .from(schema.bookings)
         .where(inArray(schema.bookings.propertyId, propIds))
-        .orderBy(desc(schema.bookings.createdAt))
-        .limit(10);
+        .orderBy(desc(schema.bookings.createdAt));
 
-      const paidBookings = bookings.filter((b) => b.status === "CONFIRMED" || b.status === "COMPLETED");
+      const propertyEarnings = new Map<string, { gross: number; hostEarnings: number; bookingCount: number }>();
 
-      for (const b of paidBookings) {
-        const subtotal = b.accommodationSubtotal || (b.nightlyPrice * b.numberOfNights) || (b.totalAmount - (b.serviceFee || 0));
-        const commission = b.hostCommissionAmount && b.hostCommissionAmount > 0
-          ? b.hostCommissionAmount
-          : Math.round(subtotal * ((b.hostCommissionPct || 10) / 100));
-        const net = b.hostNetAmount && b.hostNetAmount > 0
-          ? b.hostNetAmount
-          : subtotal - commission;
+      for (const b of allBookings) {
+        const isPaid = b.status === BOOKING_STATUS.CONFIRMED || b.status === BOOKING_STATUS.COMPLETED;
+        if (!isPaid) continue;
 
-        totalGross += subtotal;
-        totalNet += net;
+        const subtotal =
+          b.accommodationSubtotal ||
+          (b.nightlyPrice * b.numberOfNights) ||
+          (b.totalAmount - (b.serviceFee || 0));
+        const commission =
+          b.hostCommissionAmount && b.hostCommissionAmount > 0
+            ? b.hostCommissionAmount
+            : Math.round(subtotal * ((b.hostCommissionPct || 10) / 100));
+        const net =
+          b.hostNetAmount && b.hostNetAmount > 0 ? b.hostNetAmount : subtotal - commission;
+
+        lifetimeGross += subtotal;
+        lifetimeHostEarnings += net;
+
+        if (b.createdAt && new Date(b.createdAt) >= periodStart) {
+          periodGross += subtotal;
+          periodHostEarnings += net;
+        }
+
+        const existing = propertyEarnings.get(b.propertyId) || {
+          gross: 0,
+          hostEarnings: 0,
+          bookingCount: 0,
+        };
+        existing.gross += subtotal;
+        existing.hostEarnings += net;
+        existing.bookingCount += 1;
+        propertyEarnings.set(b.propertyId, existing);
       }
 
-      recentBookings = bookings;
+      byProperty = properties.map((p) => {
+        const stats = propertyEarnings.get(p.id) || {
+          gross: 0,
+          hostEarnings: 0,
+          bookingCount: 0,
+        };
+        return {
+          propertyId: p.id,
+          title: p.title,
+          status: p.status,
+          gross: stats.gross,
+          hostEarnings: stats.hostEarnings,
+          bookingCount: stats.bookingCount,
+        };
+      });
+
+      recentBookings = allBookings.slice(0, 10);
     }
+
+    const { FinanceService } = await import("../finance/finance.service");
+    const wallet = await FinanceService.getHostWallet(userId);
+    const occupancy = await this.getOccupancyMetrics(userId, propIds);
 
     return {
       totalProperties,
@@ -492,13 +577,36 @@ export const hostsService = {
       pending,
       drafts,
       rejected,
-      properties,
+      archived,
+      properties: activeProperties,
       recentBookings,
       earnings: {
-        totalGross,
-        totalNet,
-        totalCommission: totalGross - totalNet,
+        /** Lifetime accommodation gross from CONFIRMED/COMPLETED bookings (all rows, not truncated). */
+        totalGross: lifetimeGross,
+        /** Lifetime host earnings (hostNetAmount snapshots). */
+        totalNet: lifetimeHostEarnings,
+        totalCommission: lifetimeGross - lifetimeHostEarnings,
+        lifetimeGross,
+        lifetimeHostEarnings,
+        period: {
+          label: "month_to_date",
+          gross: periodGross,
+          hostEarnings: periodHostEarnings,
+        },
+        byProperty,
+        wallet: wallet.balances,
+        labels: {
+          totalGross: "Guest accommodation (host base × nights)",
+          totalNet: "Your earnings from confirmed stays",
+          totalCommission: "Platform share on accommodation",
+          walletPending: wallet.labels.pending,
+          walletAvailable: wallet.labels.available,
+          walletProcessing: wallet.labels.processing,
+          walletPaid: wallet.labels.paid,
+        },
       },
+      occupancy,
+      alerts: await this.getHostAlerts(userId, propIds),
     };
   },
 
@@ -538,6 +646,11 @@ export const hostsService = {
         hostNetAmount: schema.bookings.hostNetAmount,
         totalAmount: schema.bookings.totalAmount,
         status: schema.bookings.status,
+        hostResponse: schema.bookings.hostResponse,
+        hostResponseDeadlineAt: schema.bookings.hostResponseDeadlineAt,
+        paymentDeadlineAt: schema.bookings.paymentDeadlineAt,
+        hostRespondedAt: schema.bookings.hostRespondedAt,
+        guestCheckInConfirmedAt: schema.bookings.guestCheckInConfirmedAt,
         createdAt: schema.bookings.createdAt,
       })
       .from(schema.bookings)
@@ -556,11 +669,14 @@ export const hostsService = {
 
       return {
         ...b,
+        bookingStatus: b.status,
         accommodationSubtotal: subtotal,
         hostCommissionAmount: commission,
         hostNetAmount: net,
         propertyTitle: prop?.title || "Property",
         propertyCity: prop?.city || "Nigeria",
+        /** Guest-owned; host UI may display but must never forge via confirm-check-in. */
+        guestCheckInConfirmed: !!b.guestCheckInConfirmedAt,
       };
     });
 
@@ -1244,7 +1360,17 @@ export const hostsService = {
     };
   },
 
-  async deleteProperty(userId: string, propertyId: string, confirmWithReservations = false) {
+  /**
+   * Soft-archive when booking/payment/payout/refund/ledger history exists.
+   * Hard-delete only empty listings with no financial or booking history.
+   * Never cascades bookings, payments, payouts, refunds, or ledger rows.
+   */
+  async deleteProperty(
+    userId: string,
+    propertyId: string,
+    confirmWithReservations = false,
+    options: { ipAddress?: string; mode?: "archive" | "delete" } = {}
+  ) {
     const db = getDb();
     const [property] = await db
       .select()
@@ -1258,42 +1384,543 @@ export const hostsService = {
       throw err;
     }
 
-    // 1. Check for upcoming or active reservations
+    if (property.status === PROPERTY_STATUS.ARCHIVED) {
+      return {
+        success: true,
+        action: "archive" as const,
+        message: "Property is already archived and hidden from the marketplace.",
+        property,
+      };
+    }
+
+    const history = await this.getPropertyFinancialHistory(propertyId);
     const todayStr = new Date().toISOString().split("T")[0];
     const upcomingBookings = await db
-      .select({ id: schema.bookings.id, referenceCode: schema.bookings.referenceCode, checkInDate: schema.bookings.checkInDate, checkOutDate: schema.bookings.checkOutDate })
+      .select({
+        id: schema.bookings.id,
+        referenceCode: schema.bookings.referenceCode,
+        checkInDate: schema.bookings.checkInDate,
+        checkOutDate: schema.bookings.checkOutDate,
+        status: schema.bookings.status,
+      })
       .from(schema.bookings)
       .where(
         and(
           eq(schema.bookings.propertyId, propertyId),
-          inArray(schema.bookings.status, ["CONFIRMED", "PENDING", "PAYMENT_PENDING"]),
+          inArray(schema.bookings.status, [
+            BOOKING_STATUS.PENDING_HOST,
+            BOOKING_STATUS.PAYMENT_PENDING,
+            BOOKING_STATUS.CONFIRMED,
+            "PENDING",
+          ]),
           gte(schema.bookings.checkOutDate, todayStr)
         )
       );
 
+    const mustArchive = history.hasHistory;
+    const requestedMode = options.mode || (mustArchive ? "archive" : "delete");
+
     if (upcomingBookings.length > 0 && !confirmWithReservations) {
       const err: any = new Error(
-        `This listing has ${upcomingBookings.length} upcoming or active reservation(s). Deleting it will permanently unlist it and remove it from the marketplace. Are you sure you wish to proceed?`
+        `This listing has ${upcomingBookings.length} upcoming or active reservation(s). Archiving hides it from the marketplace but keeps all bookings and financial history intact.`
       );
       err.statusCode = 409;
       err.requiresConfirmation = true;
       err.upcomingCount = upcomingBookings.length;
+      err.action = "archive";
+      err.hasFinancialHistory = mustArchive;
       throw err;
     }
 
-    // 2. Clean deletion of property and related records
+    if (mustArchive || requestedMode === "archive") {
+      const [archived] = await db
+        .update(schema.properties)
+        .set({
+          status: PROPERTY_STATUS.ARCHIVED,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.properties.id, propertyId))
+        .returning();
+
+      // Remove only future host-created blocks (not reservation-linked inventory)
+      await db
+        .delete(schema.availabilityBlocks)
+        .where(
+          and(
+            eq(schema.availabilityBlocks.propertyId, propertyId),
+            eq(schema.availabilityBlocks.type, "MANUAL_BLOCK"),
+            gte(schema.availabilityBlocks.startDate, todayStr)
+          )
+        );
+
+      await db.insert(schema.auditLogs).values({
+        id: `audit_${crypto.randomUUID()}`,
+        userId,
+        action: "PROPERTY_ARCHIVED",
+        entityType: "property",
+        entityId: propertyId,
+        details: JSON.stringify({
+          title: property.title,
+          previousStatus: property.status,
+          bookingCount: history.bookingCount,
+          paymentCount: history.paymentCount,
+          payoutCount: history.payoutCount,
+          refundCount: history.refundCount,
+          upcomingReservations: upcomingBookings.length,
+          reason: "Host archive — financial/booking history preserved",
+        }),
+        ipAddress: options.ipAddress || null,
+      });
+
+      return {
+        success: true,
+        action: "archive" as const,
+        message:
+          "Listing archived and hidden from the marketplace. Bookings, payments, payouts, refunds, and ledger history were preserved.",
+        property: archived,
+        historyPreserved: {
+          bookings: history.bookingCount,
+          payments: history.paymentCount,
+          payouts: history.payoutCount,
+          refunds: history.refundCount,
+        },
+      };
+    }
+
+    // Empty listing: hard-delete only orphan marketing assets (no booking/finance rows)
     await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, propertyId));
     await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, propertyId));
     await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, propertyId));
     await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.propertyId, propertyId));
     await db.delete(schema.reviews).where(eq(schema.reviews.propertyId, propertyId));
-    await db.delete(schema.bookings).where(eq(schema.bookings.propertyId, propertyId));
     await db.delete(schema.properties).where(eq(schema.properties.id, propertyId));
+
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId,
+      action: "PROPERTY_DELETED",
+      entityType: "property",
+      entityId: propertyId,
+      details: JSON.stringify({
+        title: property.title,
+        previousStatus: property.status,
+        reason: "Hard delete of empty listing with no booking/financial history",
+      }),
+      ipAddress: options.ipAddress || null,
+    });
 
     return {
       success: true,
-      message: "Property listing permanently deleted and removed from marketplace.",
+      action: "delete" as const,
+      message: "Empty listing permanently deleted (no booking or financial history existed).",
     };
+  },
+
+  async getPropertyFinancialHistory(propertyId: string) {
+    const db = getDb();
+    const bookings = await db
+      .select({ id: schema.bookings.id })
+      .from(schema.bookings)
+      .where(eq(schema.bookings.propertyId, propertyId));
+    const bookingIds = bookings.map((b) => b.id);
+
+    let paymentCount = 0;
+    let payoutCount = 0;
+    let refundCount = 0;
+    let hostEarningsCount = 0;
+
+    if (bookingIds.length > 0) {
+      const [payments] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(schema.payments)
+        .where(inArray(schema.payments.bookingId, bookingIds));
+      const [payouts] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(schema.payouts)
+        .where(inArray(schema.payouts.bookingId, bookingIds));
+      const [refunds] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(schema.refunds)
+        .where(inArray(schema.refunds.bookingId, bookingIds));
+      const [earnings] = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(schema.hostEarnings)
+        .where(inArray(schema.hostEarnings.bookingId, bookingIds));
+      paymentCount = payments?.count || 0;
+      payoutCount = payouts?.count || 0;
+      refundCount = refunds?.count || 0;
+      hostEarningsCount = earnings?.count || 0;
+    }
+
+    return {
+      bookingCount: bookings.length,
+      paymentCount,
+      payoutCount,
+      refundCount,
+      hostEarningsCount,
+      hasHistory:
+        bookings.length > 0 ||
+        paymentCount > 0 ||
+        payoutCount > 0 ||
+        refundCount > 0 ||
+        hostEarningsCount > 0,
+    };
+  },
+
+  /**
+   * Occupancy = booked nights (CONFIRMED/COMPLETED overlapping window)
+   * / available nights in window (calendar days × active listings).
+   * Host MANUAL_BLOCK nights are excluded from the denominator.
+   */
+  async getOccupancyMetrics(userId: string, propIds?: string[]) {
+    const db = getDb();
+    const ids =
+      propIds ||
+      (
+        await db
+          .select({ id: schema.properties.id })
+          .from(schema.properties)
+          .where(
+            and(
+              eq(schema.properties.hostId, userId),
+              ne(schema.properties.status, PROPERTY_STATUS.ARCHIVED)
+            )
+          )
+      ).map((p) => p.id);
+
+    const windowDays = 30;
+    const start = new Date();
+    start.setUTCHours(0, 0, 0, 0);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + windowDays);
+    const startStr = start.toISOString().split("T")[0];
+    const endStr = end.toISOString().split("T")[0];
+
+    if (ids.length === 0) {
+      return {
+        windowDays,
+        startDate: startStr,
+        endDate: endStr,
+        listingCount: 0,
+        availableNights: 0,
+        bookedNights: 0,
+        blockedNights: 0,
+        occupancyRate: 0,
+        formula:
+          "occupancyRate = bookedNights / max(1, availableNights) where availableNights = (windowDays × activeListings) − manualBlockNights; bookedNights = nights from CONFIRMED/COMPLETED stays overlapping the window",
+      };
+    }
+
+    const bookings = await db
+      .select({
+        checkInDate: schema.bookings.checkInDate,
+        checkOutDate: schema.bookings.checkOutDate,
+        status: schema.bookings.status,
+      })
+      .from(schema.bookings)
+      .where(
+        and(
+          inArray(schema.bookings.propertyId, ids),
+          inArray(schema.bookings.status, [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.COMPLETED]),
+          lt(schema.bookings.checkInDate, endStr),
+          gt(schema.bookings.checkOutDate, startStr)
+        )
+      );
+
+    const blocks = await db
+      .select({
+        startDate: schema.availabilityBlocks.startDate,
+        endDate: schema.availabilityBlocks.endDate,
+        type: schema.availabilityBlocks.type,
+      })
+      .from(schema.availabilityBlocks)
+      .where(
+        and(
+          inArray(schema.availabilityBlocks.propertyId, ids),
+          eq(schema.availabilityBlocks.type, "MANUAL_BLOCK"),
+          lt(schema.availabilityBlocks.startDate, endStr),
+          gt(schema.availabilityBlocks.endDate, startStr)
+        )
+      );
+
+    const countOverlapNights = (rangeStart: string, rangeEnd: string) => {
+      const s = new Date(Math.max(new Date(rangeStart).getTime(), start.getTime()));
+      const e = new Date(Math.min(new Date(rangeEnd).getTime(), end.getTime()));
+      const nights = Math.round((e.getTime() - s.getTime()) / 86400000);
+      return nights > 0 ? nights : 0;
+    };
+
+    let bookedNights = 0;
+    for (const b of bookings) {
+      bookedNights += countOverlapNights(b.checkInDate, b.checkOutDate);
+    }
+
+    let blockedNights = 0;
+    for (const block of blocks) {
+      blockedNights += countOverlapNights(block.startDate, block.endDate);
+    }
+
+    const capacityNights = windowDays * ids.length;
+    const availableNights = Math.max(0, capacityNights - blockedNights);
+    const occupancyRate =
+      availableNights > 0 ? Math.round((bookedNights / availableNights) * 1000) / 1000 : 0;
+
+    return {
+      windowDays,
+      startDate: startStr,
+      endDate: endStr,
+      listingCount: ids.length,
+      availableNights,
+      bookedNights,
+      blockedNights,
+      occupancyRate,
+      formula:
+        "occupancyRate = bookedNights / max(1, availableNights) where availableNights = (windowDays × activeListings) − manualBlockNights; bookedNights = nights from CONFIRMED/COMPLETED stays overlapping the window",
+    };
+  },
+
+  async getHostAlerts(userId: string, propIds?: string[]) {
+    const db = getDb();
+    const alerts: Array<{
+      id: string;
+      type: string;
+      severity: "info" | "warning" | "action";
+      title: string;
+      body: string;
+      href?: string;
+      createdAt: string;
+    }> = [];
+
+    const ids =
+      propIds ||
+      (
+        await db
+          .select({ id: schema.properties.id })
+          .from(schema.properties)
+          .where(eq(schema.properties.hostId, userId))
+      ).map((p) => p.id);
+
+    if (ids.length > 0) {
+      const pendingHost = await db
+        .select({
+          id: schema.bookings.id,
+          referenceCode: schema.bookings.referenceCode,
+          hostResponseDeadlineAt: schema.bookings.hostResponseDeadlineAt,
+          guestFirstName: schema.bookings.guestFirstName,
+          createdAt: schema.bookings.createdAt,
+        })
+        .from(schema.bookings)
+        .where(
+          and(
+            inArray(schema.bookings.propertyId, ids),
+            eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST)
+          )
+        )
+        .orderBy(desc(schema.bookings.createdAt))
+        .limit(10);
+
+      for (const b of pendingHost) {
+        alerts.push({
+          id: `alert_req_${b.id}`,
+          type: "HOST_REQUEST_RECEIVED",
+          severity: "action",
+          title: "Reservation request awaiting response",
+          body: `${b.guestFirstName || "Guest"} · ${b.referenceCode}. Respond before the host deadline expires.`,
+          href: "/host/dashboard?tab=bookings",
+          createdAt: (b.createdAt || new Date()).toISOString(),
+        });
+      }
+    }
+
+    const [profile] = await db
+      .select({
+        verificationStatus: schema.profiles.verificationStatus,
+        bankAccountVerifiedAt: schema.profiles.bankAccountVerifiedAt,
+        bankAccountNumber: schema.profiles.bankAccountNumber,
+      })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    if (profile && profile.verificationStatus !== "APPROVED") {
+      alerts.push({
+        id: "alert_kyc",
+        type: "KYC_STATUS",
+        severity: "warning",
+        title: "Host verification incomplete",
+        body: `Current status: ${profile.verificationStatus || "NOT_STARTED"}. Complete KYC to publish listings.`,
+        href: "/host/onboarding/status",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    if (!profile?.bankAccountVerifiedAt || !profile?.bankAccountNumber) {
+      alerts.push({
+        id: "alert_bank",
+        type: "PAYOUT_ACCOUNT",
+        severity: "info",
+        title: "Add a verified payout account",
+        body: "Withdrawals require a Paystack-verified Nigerian bank account.",
+        href: "/host/dashboard?tab=financials",
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    try {
+      const inbox = await db
+        .select({
+          id: schema.notificationInbox.id,
+          title: schema.notificationInbox.title,
+          body: schema.notificationInbox.body,
+          eventType: schema.notificationInbox.eventType,
+          deepLink: schema.notificationInbox.deepLink,
+          createdAt: schema.notificationInbox.createdAt,
+          readAt: schema.notificationInbox.readAt,
+        })
+        .from(schema.notificationInbox)
+        .where(
+          and(
+            eq(schema.notificationInbox.userId, userId),
+            sql`${schema.notificationInbox.readAt} IS NULL`
+          )
+        )
+        .orderBy(desc(schema.notificationInbox.createdAt))
+        .limit(5);
+
+      for (const n of inbox) {
+        if (!n.eventType?.startsWith("HOST_") && !n.eventType?.includes("BOOKING")) continue;
+        alerts.push({
+          id: `alert_inbox_${n.id}`,
+          type: n.eventType || "INBOX",
+          severity: "info",
+          title: n.title,
+          body: n.body || "",
+          href: n.deepLink || "/notifications",
+          createdAt: (n.createdAt || new Date()).toISOString(),
+        });
+      }
+    } catch {
+      // notification_inbox may be absent on drifted environments
+    }
+
+    return alerts;
+  },
+
+  async reorderPropertyMedia(
+    userId: string,
+    propertyId: string,
+    orderedImageIds: string[],
+    coverImageId?: string
+  ) {
+    const db = getDb();
+    const [property] = await db
+      .select()
+      .from(schema.properties)
+      .where(and(eq(schema.properties.id, propertyId), eq(schema.properties.hostId, userId)))
+      .limit(1);
+
+    if (!property) {
+      const err: any = new Error("Property not found or unauthorized");
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const images = await db
+      .select()
+      .from(schema.propertyImages)
+      .where(eq(schema.propertyImages.propertyId, propertyId));
+
+    if (images.length === 0) {
+      const err: any = new Error("No media to reorder");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const imageIds = new Set(images.map((img) => img.id));
+    if (orderedImageIds.length !== images.length || orderedImageIds.some((id) => !imageIds.has(id))) {
+      const err: any = new Error("orderedImageIds must include every image for this property exactly once");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    for (let i = 0; i < orderedImageIds.length; i++) {
+      await db
+        .update(schema.propertyImages)
+        .set({ displayOrder: i })
+        .where(eq(schema.propertyImages.id, orderedImageIds[i]));
+    }
+
+    const coverId = coverImageId || orderedImageIds[0];
+    const cover = images.find((img) => img.id === coverId);
+    if (!cover) {
+      const err: any = new Error("coverImageId must belong to this property");
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const [updated] = await db
+      .update(schema.properties)
+      .set({ coverImage: cover.url, updatedAt: new Date() })
+      .where(eq(schema.properties.id, propertyId))
+      .returning();
+
+    const ordered = await db
+      .select()
+      .from(schema.propertyImages)
+      .where(eq(schema.propertyImages.propertyId, propertyId))
+      .orderBy(asc(schema.propertyImages.displayOrder));
+
+    return {
+      success: true,
+      property: updated,
+      images: ordered,
+      message: "Media order and cover image saved.",
+    };
+  },
+
+  async getPayoutAccount(userId: string) {
+    const db = getDb();
+    const [profile] = await db
+      .select({
+        bankName: schema.profiles.bankName,
+        bankCode: schema.profiles.bankCode,
+        bankAccountNumber: schema.profiles.bankAccountNumber,
+        bankAccountName: schema.profiles.bankAccountName,
+        bankAccountVerifiedAt: schema.profiles.bankAccountVerifiedAt,
+      })
+      .from(schema.profiles)
+      .where(eq(schema.profiles.userId, userId))
+      .limit(1);
+
+    if (!profile || !profile.bankAccountNumber) {
+      return { hasAccount: false, account: null };
+    }
+
+    return {
+      hasAccount: true,
+      account: {
+        bankName: profile.bankName,
+        bankCode: profile.bankCode,
+        accountNumberMasked: maskAccountNumber(profile.bankAccountNumber),
+        accountName: profile.bankAccountName,
+        verifiedAt: profile.bankAccountVerifiedAt,
+      },
+    };
+  },
+
+  async updatePayoutAccount(
+    userId: string,
+    body: { bankCode: string; accountNumber: string },
+    ipAddress?: string
+  ) {
+    return BankResolutionService.updateHostPayoutAccount(
+      userId,
+      {
+        bankCode: String(body.bankCode).trim(),
+        accountNumber: String(body.accountNumber).trim(),
+      },
+      ipAddress || "unknown-ip"
+    );
   },
 
   async relistProperty(userId: string, propertyId: string) {
@@ -1325,6 +1952,10 @@ export const hostsService = {
       const err: any = new Error("This property was suspended by platform administrators and cannot be self-relisted. Please contact support.");
       err.statusCode = 403;
       throw err;
+    }
+
+    if (property.status === PROPERTY_STATUS.ARCHIVED) {
+      // Archived listings may be relisted once KYC gates pass (checked above)
     }
 
     // Ensure property has minimum required content to be published

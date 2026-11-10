@@ -15,6 +15,41 @@
       "when": 1762022400000,
       "tag": "0001_newsletter_subscribers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1762200000000,
+      "tag": "0002_phase3_reservation_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762300000000,
+      "tag": "0003_phase6_reliability",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1762500000000,
+      "tag": "0004_core_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1762600000000,
+      "tag": "0005_notification_prefs_phone_otp",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1762700000000,
+      "tag": "0006_host_payout_mode",
+      "breakpoints": true
     }
   ]
 }

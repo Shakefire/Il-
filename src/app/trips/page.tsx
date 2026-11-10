@@ -18,6 +18,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { api } from "@/lib/api";
+import { canConfirmGuestCheckIn } from "@/lib/phase7-guest-host-ui";
+import {
+  guestCancelCtaLabel,
+  guestRefundStatusMessage,
+} from "@/lib/phase9-cancel-ui";
+import { guestReservationOutcome } from "@/lib/phase11-guest-outcome";
 import { formatNaira } from "@/lib/utils";
 
 interface BookingItem {
@@ -33,6 +39,12 @@ interface BookingItem {
   status: string;
   createdAt: string;
   accessToken: string;
+  hostResponseDeadlineAt?: string | null;
+  paymentDeadlineAt?: string | null;
+  cancellationReason?: string | null;
+  hostResponse?: string | null;
+  guestCheckInConfirmedAt?: string | null;
+  guestCheckInConfirmed?: boolean;
   property?: {
     id: string;
     title: string;
@@ -72,6 +84,9 @@ function TripsPageContent() {
     ref?: string;
   } | null>(null);
   const [reverifying, setReverifying] = useState(false);
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const [tripActionError, setTripActionError] = useState<string | null>(null);
+  const [refundGuidanceBooking, setRefundGuidanceBooking] = useState<BookingItem | null>(null);
 
   // Fast booking lookup states
   const [lookupRef, setLookupRef] = useState("");
@@ -157,31 +172,55 @@ function TripsPageContent() {
       const verifyRes = await api.verifyPayment(ref);
 
       if (verifyRes && verifyRes.verified) {
-        setPaymentNotice({
-          type: "success",
-          title: "Payment Confirmed & Stay Secured",
-          message: `Your payment was successfully verified with Paystack (Ref: ${ref})! Your booking is confirmed and access details are unlocked.`,
-          ref,
-        });
+        const isLateRecon =
+          !!verifyRes.reconciliationRequired ||
+          !!verifyRes.resolutionPending ||
+          verifyRes.bookingConfirmed === false;
 
-        if (verifyRes.booking) {
-          const confirmedB = verifyRes.booking;
-          try {
-            const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
-            const merged = [confirmedB, ...stored.filter((b: any) => b.id !== confirmedB.id)];
-            localStorage.setItem("ile_guest_bookings", JSON.stringify(merged));
-          } catch {}
-
-          setBookings((prev) => [confirmedB, ...prev.filter((b) => b.id !== confirmedB.id)]);
-          setLoadingBookings(false);
-
-          if (confirmedB.privateDetails) {
-            setAccessDetails(confirmedB.privateDetails);
+        if (isLateRecon) {
+          setPaymentNotice({
+            type: "pending",
+            title: "Payment Received — Resolution Pending",
+            message: `Paystack recorded payment (Ref: ${ref}) after this booking was no longer payable. Your stay was NOT confirmed. An admin refund/reconciliation request is open — do not pay again.`,
+            ref,
+          });
+          if (verifyRes.booking) {
+            const updated = verifyRes.booking;
+            try {
+              const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+              const merged = [updated, ...stored.filter((b: any) => b.id !== updated.id)];
+              localStorage.setItem("ile_guest_bookings", JSON.stringify(merged));
+            } catch {}
+            setBookings((prev) => [updated, ...prev.filter((b) => b.id !== updated.id)]);
           }
-          setSelectedBookingForAccess(confirmedB);
-        }
+          await loadBookings();
+        } else {
+          setPaymentNotice({
+            type: "success",
+            title: "Payment Confirmed & Stay Secured",
+            message: `Your payment was successfully verified with Paystack (Ref: ${ref})! Your booking is confirmed and access details are unlocked.`,
+            ref,
+          });
 
-        await loadBookings();
+          if (verifyRes.booking) {
+            const confirmedB = verifyRes.booking;
+            try {
+              const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+              const merged = [confirmedB, ...stored.filter((b: any) => b.id !== confirmedB.id)];
+              localStorage.setItem("ile_guest_bookings", JSON.stringify(merged));
+            } catch {}
+
+            setBookings((prev) => [confirmedB, ...prev.filter((b) => b.id !== confirmedB.id)]);
+            setLoadingBookings(false);
+
+            if (confirmedB.privateDetails) {
+              setAccessDetails(confirmedB.privateDetails);
+            }
+            setSelectedBookingForAccess(confirmedB);
+          }
+
+          await loadBookings();
+        }
       } else if (verifyRes && (verifyRes.pending || verifyRes.status === "pending")) {
         setPaymentNotice({
           type: "pending",
@@ -231,6 +270,189 @@ function TripsPageContent() {
     }
   }, [isAuthenticated, loadBookings]);
 
+  // Status recovery: refresh on tab focus (bounded — no websockets)
+  useEffect(() => {
+    const handleFocus = () => {
+      if (isAuthenticated) void loadBookings();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && isAuthenticated) void loadBookings();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [isAuthenticated, loadBookings]);
+
+  // Bounded poll while any unpaid active holds exist
+  useEffect(() => {
+    const hasActiveUnpaid = bookings.some(
+      (b) => b.status === "PENDING_HOST" || b.status === "PAYMENT_PENDING"
+    );
+    if (!hasActiveUnpaid) return;
+    let n = 0;
+    const id = window.setInterval(() => {
+      n += 1;
+      if (n > 45) {
+        window.clearInterval(id);
+        return;
+      }
+      void loadBookings();
+    }, 8000);
+    return () => window.clearInterval(id);
+  }, [bookings, loadBookings]);
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const waiting = bookings.some(
+      (b) =>
+        (b.status === "PENDING_HOST" && b.hostResponseDeadlineAt) ||
+        (b.status === "PAYMENT_PENDING" && b.paymentDeadlineAt)
+    );
+    if (!waiting) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [bookings]);
+
+  const formatWindow = (iso?: string | null) => {
+    if (!iso) return null;
+    const ms = new Date(iso).getTime() - nowMs;
+    if (Number.isNaN(ms)) return null;
+    if (ms <= 0) return "Refreshing…";
+    const total = Math.floor(ms / 1000);
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+
+  const canConfirmCheckIn = (b: BookingItem) => canConfirmGuestCheckIn(b);
+
+  const handleConfirmCheckIn = async (booking: BookingItem) => {
+    setActionBusyId(booking.id);
+    setTripActionError(null);
+    try {
+      const res = await api.confirmCheckIn(booking.id, booking.accessToken);
+      setBookings((prev) =>
+        prev.map((b) =>
+          b.id === booking.id
+            ? {
+                ...b,
+                guestCheckInConfirmed: true,
+                guestCheckInConfirmedAt:
+                  res.guestCheckInConfirmedAt || new Date().toISOString(),
+              }
+            : b
+        )
+      );
+      setPaymentNotice({
+        type: "success",
+        title: res.idempotent ? "Already confirmed" : "Check-in confirmed",
+        message:
+          res.message ||
+          "Thanks — your host can settle earnings once hold rules are met.",
+      });
+    } catch (err: any) {
+      setTripActionError(err.message || "Could not confirm check-in");
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleCancelUnpaid = async (booking: BookingItem) => {
+    if (booking.status !== "PENDING_HOST" && booking.status !== "PAYMENT_PENDING" && booking.status !== "PENDING") {
+      return;
+    }
+    if (!confirm("Cancel booking request?\n\nThis will cancel the booking request you started.")) return;
+    setTripActionError(null);
+    setActionBusyId(booking.id);
+    try {
+      await api.cancelBooking(booking.id, booking.accessToken, "Guest cancelled from trips");
+      await loadBookings();
+      setBookings((prev) =>
+        prev.map((b) => (b.id === booking.id ? { ...b, status: "CANCELLED" } : b))
+      );
+    } catch (err: any) {
+      setTripActionError(err.message || "Could not cancel reservation.");
+      if (err.code === "REFUND_REQUIRED") {
+        setRefundGuidanceBooking(booking);
+      }
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  /** Paid cancel: opens REQUESTED refund for admin — guest never calls Paystack. */
+  const handleRequestPaidRefund = async (booking: BookingItem) => {
+    if (booking.status !== "CONFIRMED" && booking.status !== "COMPLETED") return;
+    if (
+      !confirm(
+        "Request cancellation for this paid stay? Ilé admin reviews refunds — you will not trigger a Paystack refund yourself. Your stay stays confirmed until admin resolves it."
+      )
+    ) {
+      return;
+    }
+    setTripActionError(null);
+    setActionBusyId(booking.id);
+    try {
+      await api.cancelBooking(
+        booking.id,
+        booking.accessToken,
+        "GUEST_REFUND_REQUESTED_AFTER_PAYMENT"
+      );
+    } catch (err: any) {
+      if (err.code === "REFUND_REQUIRED") {
+        setRefundGuidanceBooking({
+          ...booking,
+          // surface pending admin resolution
+        });
+        const statusMsg = guestRefundStatusMessage(err.refund);
+        setTripActionError(
+          err.refund
+            ? `${statusMsg || "Refund request pending admin review."} (₦${Number(
+                err.refund.refundableAmount || 0
+              ).toLocaleString()} estimated). Guest cannot execute Paystack refunds.`
+            : statusMsg || "Refund request is pending admin review."
+        );
+        await loadBookings();
+      } else {
+        setTripActionError(err.message || "Could not open refund request.");
+      }
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleCompletePayment = async (booking: BookingItem) => {
+    setTripActionError(null);
+    setActionBusyId(booking.id);
+    try {
+      const latestRes = await api.getBooking(booking.id, booking.accessToken);
+      const latest = latestRes.booking || latestRes;
+      if (latest.status === "PENDING_HOST") {
+        throw new Error("Payment is not available until the host accepts this reservation.");
+      }
+      if (latest.status !== "PAYMENT_PENDING") {
+        throw new Error(`Cannot pay while booking is ${latest.status}.`);
+      }
+      const res = await api.initializePayment(booking.id, booking.accessToken);
+      if (!res?.success) throw new Error(res?.error || "Failed to initialize payment.");
+      if (res.authorizationUrl) {
+        window.location.href = res.authorizationUrl;
+        return;
+      }
+      if (res.reference) {
+        await verifyAndRefresh(res.reference);
+      }
+    } catch (err: any) {
+      setTripActionError(err.message || "Failed to initialize payment gateway.");
+      await loadBookings();
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
   const handleOpenAccessModal = async (booking: BookingItem) => {
     setSelectedBookingForAccess(booking);
     setLoadingAccess(true);
@@ -271,42 +493,43 @@ function TripsPageContent() {
     (b) => b.checkOutDate < todayStr || b.status === "CANCELLED"
   );
 
-  const renderBookingStatusBadge = (status: string) => {
+  const renderBookingStatusBadge = (b: BookingItem) => {
+    const outcome = guestReservationOutcome({
+      status: b.status,
+      cancellationReason: b.cancellationReason,
+      hostResponse: b.hostResponse,
+    });
+    const status = b.status;
     switch (status) {
+      case "PENDING_HOST":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-orange-100 text-orange-900">
+            Waiting for host
+          </span>
+        );
+      case "PAYMENT_PENDING":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
+            Payment waiting
+          </span>
+        );
+      case "PENDING":
+        return (
+          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-100 text-stone-800">
+            Pending
+          </span>
+        );
       case "CONFIRMED":
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
             Confirmed
           </span>
         );
-      case "CHECKED_IN":
-        return (
-          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-teal-100 text-teal-800">
-            Checked In
-          </span>
-        );
-      case "AWAITING_PAYMENT":
-        return (
-          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
-            Awaiting Payment
-          </span>
-        );
-      case "REFUND_PENDING":
-        return (
-          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
-            Refund Processing
-          </span>
-        );
-      case "REFUNDED":
-        return (
-          <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-purple-100 text-purple-800">
-            Refunded
-          </span>
-        );
       case "CANCELLED":
+      case "FAILED":
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-rose-100 text-rose-800">
-            Cancelled
+            {outcome.headline}
           </span>
         );
       case "COMPLETED":
@@ -385,12 +608,18 @@ function TripsPageContent() {
           </div>
         )}
 
+        {tripActionError && (
+          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-sm" role="alert">
+            {tripActionError}
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#E7E5E0] pb-6">
           <div>
             <h1 className="text-3xl font-bold font-display text-[#171717]">My Trips</h1>
             <p className="text-sm text-[#6B6B67] mt-1">
-              Manage your reservations, view check-in passes, and travel history.
+              Manage your reservations, view check-in passes, and travel history. Refunds for paid stays are handled by Ilé admin only.
             </p>
           </div>
           <Link
@@ -513,7 +742,7 @@ function TripsPageContent() {
 
                         <div className="space-y-1.5">
                           <div className="flex items-center gap-2">
-                            {renderBookingStatusBadge(b.status)}
+                            {renderBookingStatusBadge(b)}
                             <span className="text-xs font-mono text-[#8B8B86]">
                               #{b.referenceCode}
                             </span>
@@ -546,39 +775,116 @@ function TripsPageContent() {
                         </div>
                       </div>
 
-                      {/* Action CTA */}
-                      <div className="w-full md:w-auto flex flex-col sm:flex-row md:flex-col items-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-[#F2F0EB]">
+                      {/* Action CTA — backend statuses only */}
+                      <div className="w-full md:w-auto flex flex-col sm:flex-row md:flex-col items-stretch md:items-end gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-[#F2F0EB]">
                         <p className="text-base font-bold text-[#171717] self-start md:self-end">
                           {formatNaira(b.totalAmount)}
                         </p>
-                        {b.status === "AWAITING_PAYMENT" ? (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                const res = await api.initializePayment(b.id, b.referenceCode);
-                                if (res.authorizationUrl) {
-                                  window.location.href = res.authorizationUrl;
-                                }
-                              } catch (err: any) {
-                                alert(err.message || "Failed to initialize payment gateway.");
-                              }
-                            }}
-                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700 text-xs font-semibold transition-colors shadow-sm"
-                          >
-                            <CreditCard size={14} />
-                            <span>Complete Payment</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenAccessModal(b)}
-                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-sm"
-                          >
-                            <KeyRound size={14} />
-                            <span>View Access &amp; Gate Pass</span>
-                          </button>
+                        {b.status === "PENDING_HOST" && (
+                          <>
+                            <p className="text-[11px] text-orange-800 max-w-[220px] text-right">
+                              Host reviewing your request. Payment unlocks after accept.
+                              {formatWindow(b.hostResponseDeadlineAt)
+                                ? ` Host window ${formatWindow(b.hostResponseDeadlineAt)} (display only).`
+                                : ""}
+                            </p>
+                            <button
+                              type="button"
+                              disabled={actionBusyId === b.id}
+                              onClick={() => handleCancelUnpaid(b)}
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#E7E5E0] text-[#171717] hover:bg-[#FAFAF8] text-xs font-semibold transition-colors min-h-[40px]"
+                            >
+                              {actionBusyId === b.id ? <Loader2 size={14} className="animate-spin" /> : null}
+                              {guestCancelCtaLabel(b.status) || "Cancel request"}
+                            </button>
+                          </>
                         )}
+                        {b.status === "PAYMENT_PENDING" && (
+                          <>
+                            {formatWindow(b.paymentDeadlineAt) && (
+                              <p className="text-[11px] text-amber-800 max-w-[220px] text-right">
+                                Pay window {formatWindow(b.paymentDeadlineAt)} (display only).
+                              </p>
+                            )}
+                            <button
+                              type="button"
+                              disabled={actionBusyId === b.id}
+                              onClick={() => handleCompletePayment(b)}
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700 text-xs font-semibold transition-colors shadow-sm min-h-[40px]"
+                            >
+                              {actionBusyId === b.id ? (
+                                <Loader2 size={14} className="animate-spin" />
+                              ) : (
+                                <CreditCard size={14} />
+                              )}
+                              <span>Complete Payment</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={actionBusyId === b.id}
+                              onClick={() => handleCancelUnpaid(b)}
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-[#E7E5E0] text-[#171717] hover:bg-[#FAFAF8] text-xs font-semibold transition-colors min-h-[40px]"
+                            >
+                              {guestCancelCtaLabel(b.status) || "Cancel request"}
+                            </button>
+                          </>
+                        )}
+                        {b.status === "CONFIRMED" && (
+                          <>
+                            {canConfirmCheckIn(b) ? (
+                              <button
+                                type="button"
+                                disabled={actionBusyId === b.id}
+                                onClick={() => handleConfirmCheckIn(b)}
+                                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-sm min-h-[44px]"
+                                aria-label="Confirm I have checked in"
+                              >
+                                {actionBusyId === b.id ? (
+                                  <Loader2 size={14} className="animate-spin" />
+                                ) : (
+                                  <CheckCircle2 size={14} />
+                                )}
+                                <span>Confirm I&apos;ve checked in</span>
+                              </button>
+                            ) : (b.guestCheckInConfirmedAt || b.guestCheckInConfirmed) ? (
+                              <p className="text-xs text-emerald-800 font-medium flex items-center gap-1.5">
+                                <CheckCircle2 size={14} aria-hidden />
+                                Check-in confirmed
+                              </p>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAccessModal(b)}
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-sm min-h-[40px]"
+                            >
+                              <KeyRound size={14} />
+                              <span>View Access &amp; Gate Pass</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={actionBusyId === b.id}
+                              onClick={() => handleRequestPaidRefund(b)}
+                              className="w-full sm:w-auto text-[11px] text-[#6B6B67] hover:text-[#171717] underline underline-offset-2 text-right disabled:opacity-50"
+                            >
+                              {actionBusyId === b.id
+                                ? "Submitting refund request…"
+                                : guestCancelCtaLabel(b.status) ||
+                                  "Cancel booking"}
+                            </button>
+                          </>
+                        )}
+                        {b.status !== "PENDING_HOST" &&
+                          b.status !== "PAYMENT_PENDING" &&
+                          b.status !== "CONFIRMED" && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAccessModal(b)}
+                              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-sm min-h-[40px]"
+                            >
+                              <KeyRound size={14} />
+                              <span>View details</span>
+                            </button>
+                          )}
                       </div>
                     </div>
                   ))}
@@ -604,7 +910,7 @@ function TripsPageContent() {
                           {b.checkInDate} — {b.checkOutDate} · {formatNaira(b.totalAmount)}
                         </p>
                       </div>
-                      {renderBookingStatusBadge(b.status)}
+                      {renderBookingStatusBadge(b)}
                     </div>
                   ))}
                 </div>
@@ -713,6 +1019,43 @@ function TripsPageContent() {
                   Close Pass
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Paid cancel / refund — admin only (guests never execute refunds) */}
+        {refundGuidanceBooking && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div
+              className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4"
+              role="dialog"
+              aria-labelledby="refund-guidance-title"
+            >
+              <h3 id="refund-guidance-title" className="text-lg font-bold text-[#171717]">
+                Refund pending admin review
+              </h3>
+              <p className="text-sm text-[#6B6B67] leading-relaxed">
+                Booking{" "}
+                <span className="font-mono font-semibold text-[#171717]">
+                  #{refundGuidanceBooking.referenceCode}
+                </span>{" "}
+                stays confirmed until an Ilé admin reviews your refund request. Guests never trigger
+                Paystack refunds. Amount follows paid minus the recorded Paystack fee.
+              </p>
+              <p className="text-xs text-[#8B8B86]">
+                Email{" "}
+                <a href="mailto:support@ilestays.ng" className="text-[#0B5D45] font-semibold underline">
+                  support@ilestays.ng
+                </a>{" "}
+                with your reference.
+              </p>
+              <button
+                type="button"
+                onClick={() => setRefundGuidanceBooking(null)}
+                className="w-full py-2.5 rounded-xl bg-[#171717] text-white text-sm font-semibold min-h-[44px]"
+              >
+                Understood
+              </button>
             </div>
           </div>
         )}

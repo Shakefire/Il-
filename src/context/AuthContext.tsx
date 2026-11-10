@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { authApi, User, LoginCredentials, RegisterCredentials, RegisterOwnerCredentials } from "@/lib/auth";
+import { revokeWebPushOnLogout, syncWebPushIfAlreadyGranted } from "@/lib/web-push-client";
 
 interface AuthContextType {
   user: User | null;
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await authApi.login(credentials);
     if (res.user) {
       setUser(res.user);
+      void syncWebPushIfAlreadyGranted();
       return res.user;
     }
     throw new Error("No user returned from login.");
@@ -65,6 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    try {
+      await revokeWebPushOnLogout();
+    } catch {
+      // Best-effort; session clear still proceeds.
+    }
     await authApi.logout();
     setUser(null);
   };

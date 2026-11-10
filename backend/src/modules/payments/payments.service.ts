@@ -16,7 +16,14 @@ import {
   hostBookingConfirmedEmail,
   bookingPaymentFailedEmail,
   bookingRefundEmail,
+  guestLatePaymentResolutionEmail,
+  adminLatePaymentReconEmail,
 } from "../notifications/notifications.service";
+import {
+  dispatchLifecycleEmail,
+  LIFECYCLE_EMAIL_EVENT,
+} from "../notifications/lifecycle-notify";
+import { recordBookingAudit } from "../../lib/booking-audit";
 import { LedgerService } from "../finance/ledger.service";
 
 export interface PaymentInitResult {
@@ -42,7 +49,60 @@ export interface PaymentVerifyResult {
   rawPayload?: string;
   error?: string;
   booking?: any;
+  reconciliationRequired?: boolean;
+  bookingConfirmed?: boolean;
+  resolutionPending?: boolean;
 }
+
+const notifyLatePaymentReconciliation = (params: {
+  booking: any;
+  propertyTitle: string;
+  paidAmountNaira: number;
+  currency?: string;
+}): void => {
+  const { booking, propertyTitle, paidAmountNaira, currency } = params;
+  dispatchLifecycleEmail(
+    booking.id,
+    LIFECYCLE_EMAIL_EVENT.GUEST_LATE_PAYMENT_RESOLUTION,
+    "guest",
+    guestLatePaymentResolutionEmail({
+      guestName: `${booking.guestFirstName || ""} ${booking.guestLastName || ""}`.trim() || "Guest",
+      guestEmail: booking.guestEmail,
+      propertyTitle,
+      referenceCode: booking.referenceCode,
+      amount: paidAmountNaira,
+      currency: currency || booking.currency || "NGN",
+    })
+  );
+
+  const adminEmail = env.EMAIL_SUPPORT || "support@ilestays.ng";
+  dispatchLifecycleEmail(
+    booking.id,
+    LIFECYCLE_EMAIL_EVENT.ADMIN_LATE_PAYMENT_RECON,
+    "admin",
+    adminLatePaymentReconEmail({
+      adminEmail,
+      propertyTitle,
+      referenceCode: booking.referenceCode,
+      bookingId: booking.id,
+      guestEmail: booking.guestEmail,
+      amount: paidAmountNaira,
+      currency: currency || booking.currency || "NGN",
+    })
+  );
+
+  recordBookingAudit({
+    action: "LATE_PAYMENT_RECON_REQUESTED",
+    bookingId: booking.id,
+    details: {
+      referenceCode: booking.referenceCode,
+      amount: paidAmountNaira,
+      refundStatus: "REQUESTED",
+      autoRefund: false,
+      bookingConfirmed: false,
+    },
+  });
+};
 
 // ─── Initialize Booking Payment ───
 
@@ -426,6 +486,23 @@ export async function processSuccessfulPayment(data: {
         booking.paystackFeeAmount ||
         (booking.totalAmount - accommodationSubtotal > 0 ? booking.totalAmount - accommodationSubtotal : 0);
 
+      let payoutHoldHours = 24;
+      let payoutMode: "AUTOMATIC" | "MANUAL" = "MANUAL";
+      try {
+        const [settings] = await tx
+          .select({
+            payoutHoldHours: schema.platformSettings.payoutHoldHours,
+            hostPayoutMode: schema.platformSettings.hostPayoutMode,
+          })
+          .from(schema.platformSettings)
+          .where(eq(schema.platformSettings.id, "default"))
+          .limit(1);
+        if (settings?.payoutHoldHours != null) payoutHoldHours = settings.payoutHoldHours;
+        if (settings?.hostPayoutMode === "AUTOMATIC") payoutMode = "AUTOMATIC";
+      } catch {
+        // Defaults preserve MANUAL + 24h hold if settings row missing.
+      }
+
       await LedgerService.recordBookingPayment(tx, {
         bookingId: booking.id,
         paymentRef: payment.reference,
@@ -435,18 +512,27 @@ export async function processSuccessfulPayment(data: {
         hostNetAmount: netAmount,
         hostId: property.hostId,
         checkInDate: booking.checkInDate,
-        payoutHoldHours: 24,
+        payoutHoldHours,
+        payoutMode,
       });
     }
   });
 
   if (latePaymentRace) {
+    notifyLatePaymentReconciliation({
+      booking: confirmedBooking || booking,
+      propertyTitle: property?.title || "Ilé Property",
+      paidAmountNaira: data.paidAmountNaira,
+      currency: data.currency || booking.currency,
+    });
     return {
       success: true,
       message:
         "Payment recorded but booking was no longer payable. Flagged for admin reconciliation/refund. Booking was NOT confirmed and no host earnings were created.",
       booking: confirmedBooking,
       reconciliationRequired: true,
+      bookingConfirmed: false,
+      resolutionPending: true,
     } as any;
   }
 
@@ -486,8 +572,11 @@ export async function processSuccessfulPayment(data: {
     const latitude = property?.latitude || undefined;
     const longitude = property?.longitude || undefined;
 
-    // A. Send Booking Confirmation (property summary, reservation details, financial breakdown — NO exact address or host contact)
-    await sendEmail(
+    // A. Confirmation — NO exact address/host contact (CONFIRMED only)
+    dispatchLifecycleEmail(
+      booking.id,
+      LIFECYCLE_EMAIL_EVENT.GUEST_PAYMENT_CONFIRMED,
+      "guest",
       bookingConfirmationEmail({
         guestName,
         guestEmail: booking.guestEmail,
@@ -527,8 +616,11 @@ export async function processSuccessfulPayment(data: {
       })
     );
 
-    // B. Send Private Gate Clearance / Access Pass (Enriched arrival guide)
-    await sendEmail(
+    // B. Arrival guide with private address — CONFIRMED only
+    dispatchLifecycleEmail(
+      booking.id,
+      LIFECYCLE_EMAIL_EVENT.GUEST_ARRIVAL_GUIDE,
+      "guest",
       bookingAccessPassEmail({
         guestName,
         guestEmail: booking.guestEmail,
@@ -568,7 +660,7 @@ export async function processSuccessfulPayment(data: {
       })
     );
 
-    // C. Send Host Booking Confirmed Notification with Guest & Payout Breakdown
+    // C. Host confirmed notification
     if (host?.email) {
       const gross =
         booking.accommodationSubtotal ||
@@ -584,7 +676,10 @@ export async function processSuccessfulPayment(data: {
           ? booking.hostNetAmount
           : gross - commission;
 
-      await sendEmail(
+      dispatchLifecycleEmail(
+        booking.id,
+        LIFECYCLE_EMAIL_EVENT.HOST_BOOKING_CONFIRMED,
+        "host",
         hostBookingConfirmedEmail({
           hostName: host.firstName || "Host",
           hostEmail: host.email,
@@ -604,13 +699,43 @@ export async function processSuccessfulPayment(data: {
         })
       );
     }
+
+    recordBookingAudit({
+      action: "PAYMENT_CONFIRMED",
+      bookingId: booking.id,
+      userId: booking.guestId || null,
+      details: {
+        referenceCode: booking.referenceCode,
+        paymentReference: payment.reference || data.reference,
+        amount: data.paidAmountNaira || booking.totalAmount,
+      },
+    });
   } catch (emailErr) {
     console.warn("[Payments] Failed to dispatch booking confirmation emails:", emailErr);
+  }
+
+  // AUTOMATIC host payout: after backend-verified payment only (not callback alone).
+  // MANUAL mode is a no-op here — settlement gates remain check-in based.
+  let automaticPayout: any = null;
+  try {
+    const { FinanceService } = await import("../finance/finance.service");
+    automaticPayout = await FinanceService.handlePostPaymentPayout(booking.id);
+  } catch (autoErr: any) {
+    console.error(
+      `[Payments] Post-payment payout handler failed for booking ${booking.id}:`,
+      autoErr?.message || autoErr
+    );
+    automaticPayout = {
+      mode: "UNKNOWN",
+      attempted: false,
+      error: autoErr?.message || "automatic_payout_handler_failed",
+    };
   }
 
   return {
     success: true,
     message: "Payment verified and booking confirmed successfully.",
+    automaticPayout,
     booking: {
       ...confirmedBooking,
       property: property
@@ -838,12 +963,27 @@ async function recordLatePaymentForReconciliation(params: {
     }
   });
 
+  const [property] = await db
+    .select({ title: schema.properties.title })
+    .from(schema.properties)
+    .where(eq(schema.properties.id, booking.propertyId))
+    .limit(1);
+
+  notifyLatePaymentReconciliation({
+    booking,
+    propertyTitle: property?.title || "Ilé Property",
+    paidAmountNaira: data.paidAmountNaira,
+    currency: data.currency || booking.currency,
+  });
+
   return {
     success: true,
     message:
       "Late payment recorded and flagged for admin reconciliation/refund. Booking was NOT confirmed.",
     booking,
     reconciliationRequired: true,
+    bookingConfirmed: false,
+    resolutionPending: true,
   };
 }
 
@@ -1087,17 +1227,33 @@ export async function handlePaystackWebhook(
         .limit(1);
 
       if (payout) {
+        // Verified failure: restore READY_FOR_PAYOUT so funds remain withdrawable.
+        // Do NOT invent a FAILED payout status for the wallet projection.
+        // Uncertain/pending transfers stay PROCESSING (handled elsewhere).
+        const restoreStatus =
+          payout.status === "PROCESSING" || payout.status === "READY_FOR_PAYOUT"
+            ? "READY_FOR_PAYOUT"
+            : payout.status === "PAID"
+              ? "PAID"
+              : "READY_FOR_PAYOUT";
+
         await db
           .update(schema.payouts)
           .set({
-            status: "FAILED",
+            status: restoreStatus === "PAID" ? "PAID" : "READY_FOR_PAYOUT",
             transferStatus: "FAILED",
             transferFailureReason: txData.reason || txData.gateway_response || "Paystack transfer failed",
             updatedAt: new Date(),
           })
-          .where(eq(schema.payouts.id, payout.id));
+          .where(
+            and(
+              eq(schema.payouts.id, payout.id),
+              // Never demote an already-PAID row from a late/duplicate fail webhook
+              sql`${schema.payouts.status} <> 'PAID'`
+            )
+          );
 
-        console.error(`[Payments] Paystack transfer failed for payout ${payout.id}: ${txData.reason}`);
+        console.error(`[Payments] Paystack transfer failed for payout ${payout.id}: ${txData.reason}. Restored to READY_FOR_PAYOUT when applicable.`);
       }
 
       await db
@@ -1347,6 +1503,7 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
       rawPayload: JSON.stringify(body),
     });
 
+    const reconciliationRequired = !!(processResult as any).reconciliationRequired;
     return {
       verified: true,
       status: "success",
@@ -1359,6 +1516,9 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
       paidAt: new Date(tx.paid_at),
       rawPayload: JSON.stringify(body),
       booking: processResult.booking,
+      reconciliationRequired,
+      bookingConfirmed: !reconciliationRequired && processResult.booking?.status === "CONFIRMED",
+      resolutionPending: reconciliationRequired,
     };
   } catch (err: any) {
     console.error("[Paystack] Verify error:", err);

@@ -1,80 +1,71 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getDb, schema } from "@/../backend/src/db/client";
-import { eq } from "drizzle-orm";
+import { NextRequest, NextResponse } from "next/server"
+import { requireAdminSession } from "@/lib/serverAuth"
+import { adminService } from "@/../backend/src/modules/admin/admin.service"
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic"
 
-// GET /api/admin/settings — fetch platform settings
+// GET /api/admin/settings — fetch platform settings (admin-only)
 export async function GET(req: NextRequest) {
+  const session = requireAdminSession(req)
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized or not an admin" }, { status: 401 })
+  }
+
   try {
-    const db = getDb();
-    const [settings] = await db
-      .select()
-      .from(schema.platformSettings)
-      .where(eq(schema.platformSettings.id, "default"))
-      .limit(1);
-
-    if (!settings) {
-      // Return defaults if no row exists yet
-      return NextResponse.json({
-        defaultHostCommissionPct: 10,
-        payoutHoldHours: 24,
-      });
-    }
-
-    return NextResponse.json(settings);
+    const settings = await adminService.getSettings()
+    return NextResponse.json(settings)
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500 })
   }
 }
 
-// PUT /api/admin/settings — update platform settings
+// PUT /api/admin/settings — update platform settings (admin-only, audited)
 export async function PUT(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const db = getDb();
+  const session = requireAdminSession(req)
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized or not an admin" }, { status: 401 })
+  }
 
-    const commissionPct = body.defaultHostCommissionPct;
-    const payoutHoldHours = body.payoutHoldHours;
+  try {
+    const body = await req.json()
+    const commissionPct = body.defaultHostCommissionPct
+    const payoutHoldHours = body.payoutHoldHours
+    const hostPayoutPct = body.defaultHostPayoutPct
+    const hostPayoutMode = body.hostPayoutMode as "AUTOMATIC" | "MANUAL" | undefined
 
     if (commissionPct !== undefined && (commissionPct < 0 || commissionPct > 50)) {
       return NextResponse.json(
         { error: "Commission percentage must be between 0 and 50." },
         { status: 400 }
-      );
+      )
     }
 
-    // Upsert the default settings row
-    const [existing] = await db
-      .select()
-      .from(schema.platformSettings)
-      .where(eq(schema.platformSettings.id, "default"))
-      .limit(1);
-
-    const updates: any = { updatedAt: new Date() };
-    if (commissionPct !== undefined) updates.defaultHostCommissionPct = Math.round(commissionPct);
-    if (payoutHoldHours !== undefined) updates.payoutHoldHours = Math.round(payoutHoldHours);
-
-    if (existing) {
-      const [updated] = await db
-        .update(schema.platformSettings)
-        .set(updates)
-        .where(eq(schema.platformSettings.id, "default"))
-        .returning();
-      return NextResponse.json({ success: true, settings: updated });
-    } else {
-      const [created] = await db
-        .insert(schema.platformSettings)
-        .values({
-          id: "default",
-          defaultHostCommissionPct: commissionPct ?? 10,
-          payoutHoldHours: payoutHoldHours ?? 24,
-          updatedAt: new Date(),
-        })
-        .returning();
-      return NextResponse.json({ success: true, settings: created });
+    if (hostPayoutMode !== undefined && hostPayoutMode !== "AUTOMATIC" && hostPayoutMode !== "MANUAL") {
+      return NextResponse.json(
+        { error: "Host payout mode must be AUTOMATIC or MANUAL." },
+        { status: 400 }
+      )
     }
+
+    const settings = await adminService.updateSettings(
+      {
+        ...(commissionPct !== undefined
+          ? { defaultHostCommissionPct: Math.round(commissionPct) }
+          : {}),
+        ...(payoutHoldHours !== undefined
+          ? { payoutHoldHours: Math.round(payoutHoldHours) }
+          : {}),
+        ...(hostPayoutPct !== undefined
+          ? { defaultHostPayoutPct: Math.round(hostPayoutPct) }
+          : {}),
+        ...(hostPayoutMode !== undefined ? { hostPayoutMode } : {}),
+      },
+      session.userId,
+      req.headers.get("x-forwarded-for") || undefined
+    )
+
+    return NextResponse.json({ success: true, settings })
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 400 })
   }
 }

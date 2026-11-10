@@ -6,15 +6,37 @@
  * Configured provider: Resend (domain: ilestays.ng)
  */
 
-import { env } from "../../config/env";
+import crypto from "crypto"
+import { eq, sql } from "drizzle-orm"
+import { env } from "../../config/env"
+import { getDb, schema } from "../../db/client"
 
 export interface EmailPayload {
-  to: string;
-  subject: string;
-  html: string;
-  text?: string;
-  replyTo?: string;
+  to: string
+  subject: string
+  html: string
+  text?: string
+  replyTo?: string
+  /** Unique key for durable idempotent delivery (Phase 6) */
+  idempotencyKey?: string
+  eventType?: string
+  entityType?: string
+  entityId?: string
+  /** Bounded retries; default 3. Never infinite. */
+  maxAttempts?: number
 }
+
+export type SendEmailResult = {
+  sent: boolean
+  idempotent?: boolean
+  exhausted?: boolean
+  attempts?: number
+  providerMessageId?: string
+  error?: string
+}
+
+/** Max Resend attempts per idempotency key (hard ceiling). */
+export const EMAIL_MAX_ATTEMPTS = 3
 
 // ─── Email Template Helpers ───
 
@@ -2106,6 +2128,121 @@ export function guestHostDeclinedEmail(data: {
   };
 }
 
+export function guestHostWindowExpiredEmail(data: {
+  guestName: string
+  guestEmail: string
+  propertyTitle: string
+  referenceCode: string
+  checkIn: string
+  checkOut: string
+}): EmailPayload {
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`
+  const exploreUrl = `${env.FRONTEND_URL}/`
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Host Response Timed Out</h2>
+    <p>Hello ${escapeHtml(data.guestName)},</p>
+    <p>Your request for <strong>${escapeHtml(data.propertyTitle)}</strong> (#${escapeHtml(data.referenceCode)}) for ${dates} expired because the host did not respond in time.</p>
+    <p style="font-size: 14px; color: #374151;">No payment was taken. Dates are released. Browse similar stays and start a new request when ready.</p>
+    <div style="margin: 28px 0;">
+      <a href="${exploreUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Find Similar Stays →</a>
+    </div>
+  `
+  return {
+    to: data.guestEmail,
+    subject: `Request timed out: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Request Timed Out", "No Charge", content),
+    text: `Host response window expired for #${data.referenceCode}. No payment taken. ${exploreUrl}`,
+  }
+}
+
+export function guestPaymentWindowExpiredEmail(data: {
+  guestName: string
+  guestEmail: string
+  propertyTitle: string
+  referenceCode: string
+  checkIn: string
+  checkOut: string
+}): EmailPayload {
+  const dates = `${formatDisplayDate(data.checkIn)} → ${formatDisplayDate(data.checkOut)}`
+  const exploreUrl = `${env.FRONTEND_URL}/`
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Payment Window Expired</h2>
+    <p>Hello ${escapeHtml(data.guestName)},</p>
+    <p>Your payment window for <strong>${escapeHtml(data.propertyTitle)}</strong> (#${escapeHtml(data.referenceCode)}) (${dates}) has ended. The hold was released.</p>
+    <p style="font-size: 14px; color: #374151;">If you still want this stay, submit a new request. If you were charged after the window closed, our team will reconcile — do not pay again.</p>
+    <div style="margin: 28px 0;">
+      <a href="${exploreUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Browse Stays →</a>
+    </div>
+  `
+  return {
+    to: data.guestEmail,
+    subject: `Payment window ended: #${data.referenceCode}`,
+    html: emailShell("Payment Window Ended", "Hold Released", content),
+    text: `Payment window expired for #${data.referenceCode}. Hold released. ${exploreUrl}`,
+  }
+}
+
+export function guestLatePaymentResolutionEmail(data: {
+  guestName: string
+  guestEmail: string
+  propertyTitle: string
+  referenceCode: string
+  amount: number
+  currency?: string
+}): EmailPayload {
+  const formatted = formatCurrency(data.amount, data.currency || "NGN")
+  const statusUrl = `${env.FRONTEND_URL}/trips?ref=${encodeURIComponent(data.referenceCode)}`
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Payment Received — Resolution Pending</h2>
+    <p>Hello ${escapeHtml(data.guestName)},</p>
+    <p>We recorded a payment of <strong>${formatted}</strong> for <strong>${escapeHtml(data.propertyTitle)}</strong> (#${escapeHtml(data.referenceCode)}) after the booking was no longer payable.</p>
+    <p style="font-size: 14px; color: #374151;"><strong>Your stay was not confirmed.</strong> An admin refund/reconciliation request has been opened. Do not attempt another payment for this reference.</p>
+    <div style="margin: 28px 0;">
+      <a href="${statusUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">View Booking Status →</a>
+    </div>
+  `
+  return {
+    to: data.guestEmail,
+    subject: `Resolution pending: payment after cancel (#${data.referenceCode})`,
+    html: emailShell("Resolution Pending", "Admin Review", content),
+    text: `Late payment ${formatted} recorded for #${data.referenceCode}. Stay NOT confirmed. Admin reconciliation requested. ${statusUrl}`,
+  }
+}
+
+export function adminLatePaymentReconEmail(data: {
+  adminEmail: string
+  propertyTitle: string
+  referenceCode: string
+  bookingId: string
+  guestEmail: string
+  amount: number
+  currency?: string
+}): EmailPayload {
+  const formatted = formatCurrency(data.amount, data.currency || "NGN")
+  const adminUrl = `${env.FRONTEND_URL}/admin`
+  const content = `
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Late Paystack Success — Refund REQUESTED</h2>
+    <p>Paystack reported success after booking left PAYMENT_PENDING.</p>
+    <p style="font-size: 14px; color: #374151;">
+      <strong>Ref:</strong> #${escapeHtml(data.referenceCode)}<br/>
+      <strong>Booking:</strong> ${escapeHtml(data.bookingId)}<br/>
+      <strong>Property:</strong> ${escapeHtml(data.propertyTitle)}<br/>
+      <strong>Guest:</strong> ${escapeHtml(data.guestEmail)}<br/>
+      <strong>Amount:</strong> ${formatted}<br/>
+      <strong>Action:</strong> Admin-only refund. No auto-refund. No silent confirm. No host earnings.
+    </p>
+    <div style="margin: 28px 0;">
+      <a href="${adminUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Open Admin Finance →</a>
+    </div>
+  `
+  return {
+    to: data.adminEmail,
+    subject: `[Ilé] Late payment recon REQUESTED — #${data.referenceCode}`,
+    html: emailShell("Admin Recon", "Refund REQUESTED", content),
+    text: `Late payment recon REQUESTED for #${data.referenceCode} (${formatted}). Admin refund only. ${adminUrl}`,
+  }
+}
+
 // ─── 19. Booking Payment Failed Email ───
 
 export function bookingPaymentFailedEmail(data: {
@@ -2469,31 +2606,231 @@ export function hostPayoutDisbursedEmail(data: {
   };
 }
 
-// ─── Dispatch Function ───
+// ─── Dispatch Function (Phase 6: idempotent + bounded retry) ───
 
+/**
+ * Send transactional email. When idempotencyKey is set, duplicate calls are
+ * skipped after a successful send. Failures are logged and retried up to
+ * maxAttempts (default 3) — never infinite. Does not throw for provider errors.
+ */
 export async function sendEmail(payload: EmailPayload): Promise<boolean> {
-  const provider = env.EMAIL_PROVIDER;
-  const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY;
-
-  if (provider === "console" || !apiKey) {
-    console.log(`\n📧 [Email Mock] To: ${payload.to} | Subject: ${payload.subject}`);
-    return true;
-  }
-
-  if (provider === "resend") {
-    return sendViaResend(payload);
-  }
-
-  console.warn(`[Email] Unknown provider: ${provider}, falling back to console`);
-  return true;
+  const result = await sendTransactionalEmail(payload)
+  return result.sent || !!result.idempotent
 }
 
-async function sendViaResend(payload: EmailPayload): Promise<boolean> {
+export async function sendTransactionalEmail(
+  payload: EmailPayload
+): Promise<SendEmailResult> {
+  const maxAttempts = Math.min(
+    Math.max(1, payload.maxAttempts || EMAIL_MAX_ATTEMPTS),
+    EMAIL_MAX_ATTEMPTS
+  )
+  const eventType = payload.eventType || "GENERIC"
+  const entityType = payload.entityType || "booking"
+  const entityId = payload.entityId || null
+
+  if (payload.idempotencyKey) {
+    try {
+      const ledger = await ensureEmailDeliveryRow({
+        idempotencyKey: payload.idempotencyKey,
+        eventType,
+        entityType,
+        entityId,
+        recipient: payload.to,
+        subject: payload.subject,
+        maxAttempts,
+      })
+
+      if (ledger.status === "SENT") {
+        return {
+          sent: false,
+          idempotent: true,
+          attempts: ledger.attempts,
+          providerMessageId: ledger.providerMessageId || undefined,
+        }
+      }
+
+      if (ledger.attempts >= ledger.maxAttempts || ledger.status === "EXHAUSTED") {
+        console.warn(
+          `[Email] Attempts exhausted for ${payload.idempotencyKey} (${ledger.attempts}/${ledger.maxAttempts})`
+        )
+        return {
+          sent: false,
+          exhausted: true,
+          attempts: ledger.attempts,
+          error: ledger.lastError || "Max email attempts exhausted",
+        }
+      }
+    } catch (err) {
+      console.warn("[Email] Delivery ledger unavailable; sending without durable idempotency:", err)
+    }
+  }
+
+  const provider = env.EMAIL_PROVIDER
+  const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY
+
+  let sendOk = false
+  let providerMessageId: string | undefined
+  let sendError: string | undefined
+
+  if (provider === "console" || !apiKey) {
+    console.log(`\n📧 [Email Mock] To: ${payload.to} | Subject: ${payload.subject} | Key: ${payload.idempotencyKey || "none"}`)
+    sendOk = true
+    providerMessageId = `mock_${Date.now()}`
+  } else if (provider === "resend") {
+    const resend = await sendViaResend(payload)
+    sendOk = resend.ok
+    providerMessageId = resend.id
+    sendError = resend.error
+  } else {
+    console.warn(`[Email] Unknown provider: ${provider}, falling back to console`)
+    sendOk = true
+    providerMessageId = `fallback_${Date.now()}`
+  }
+
+  if (payload.idempotencyKey) {
+    try {
+      await recordEmailDeliveryAttempt({
+        idempotencyKey: payload.idempotencyKey,
+        success: sendOk,
+        providerMessageId,
+        error: sendError,
+        maxAttempts,
+      })
+    } catch (err) {
+      console.warn("[Email] Failed to update delivery ledger:", err)
+    }
+  }
+
+  if (!sendOk) {
+    console.error(`[Email] Send failed (logged, non-fatal): ${sendError || "unknown"}`)
+  }
+
+  return {
+    sent: sendOk,
+    attempts: sendOk ? 1 : undefined,
+    providerMessageId,
+    error: sendError,
+  }
+}
+
+const ensureEmailDeliveryRow = async (params: {
+  idempotencyKey: string
+  eventType: string
+  entityType: string
+  entityId: string | null
+  recipient: string
+  subject: string
+  maxAttempts: number
+}): Promise<{
+  status: string
+  attempts: number
+  maxAttempts: number
+  lastError: string | null
+  providerMessageId: string | null
+}> => {
+  const db = getDb()
+  const [existing] = await db
+    .select()
+    .from(schema.emailDeliveries)
+    .where(eq(schema.emailDeliveries.idempotencyKey, params.idempotencyKey))
+    .limit(1)
+
+  if (existing) {
+    return {
+      status: existing.status,
+      attempts: existing.attempts,
+      maxAttempts: existing.maxAttempts,
+      lastError: existing.lastError,
+      providerMessageId: existing.providerMessageId,
+    }
+  }
+
   try {
-    const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY;
-    const fromAddress = env.EMAIL_FROM || "Ilé <hello@notifications.ilestays.ng>";
-    const replyTo = payload.replyTo || env.EMAIL_SUPPORT || "support@ilestays.ng";
-    console.log(`[Email] Sending via Resend → To: ${payload.to} | Subject: ${payload.subject} | From: ${fromAddress} | Reply-To: ${replyTo}`);
+    await db.insert(schema.emailDeliveries).values({
+      id: `eml_${crypto.randomUUID()}`,
+      idempotencyKey: params.idempotencyKey,
+      eventType: params.eventType,
+      entityType: params.entityType,
+      entityId: params.entityId,
+      recipient: params.recipient,
+      subject: params.subject,
+      status: "PENDING",
+      attempts: 0,
+      maxAttempts: params.maxAttempts,
+    })
+  } catch {
+    // Unique race — re-read
+  }
+
+  const [row] = await db
+    .select()
+    .from(schema.emailDeliveries)
+    .where(eq(schema.emailDeliveries.idempotencyKey, params.idempotencyKey))
+    .limit(1)
+
+  return {
+    status: row?.status || "PENDING",
+    attempts: row?.attempts || 0,
+    maxAttempts: row?.maxAttempts || params.maxAttempts,
+    lastError: row?.lastError || null,
+    providerMessageId: row?.providerMessageId || null,
+  }
+}
+
+const recordEmailDeliveryAttempt = async (params: {
+  idempotencyKey: string
+  success: boolean
+  providerMessageId?: string
+  error?: string
+  maxAttempts: number
+}): Promise<void> => {
+  const db = getDb()
+  const now = new Date()
+
+  if (params.success) {
+    await db
+      .update(schema.emailDeliveries)
+      .set({
+        status: "SENT",
+        attempts: sql`${schema.emailDeliveries.attempts} + 1`,
+        providerMessageId: params.providerMessageId || null,
+        lastError: null,
+        sentAt: now,
+        updatedAt: now,
+      })
+      .where(eq(schema.emailDeliveries.idempotencyKey, params.idempotencyKey))
+    return
+  }
+
+  const [row] = await db
+    .select()
+    .from(schema.emailDeliveries)
+    .where(eq(schema.emailDeliveries.idempotencyKey, params.idempotencyKey))
+    .limit(1)
+
+  const nextAttempts = (row?.attempts || 0) + 1
+  const exhausted = nextAttempts >= (row?.maxAttempts || params.maxAttempts)
+
+  await db
+    .update(schema.emailDeliveries)
+    .set({
+      status: exhausted ? "EXHAUSTED" : "FAILED",
+      attempts: nextAttempts,
+      lastError: (params.error || "Send failed").slice(0, 2000),
+      updatedAt: now,
+    })
+    .where(eq(schema.emailDeliveries.idempotencyKey, params.idempotencyKey))
+}
+
+async function sendViaResend(
+  payload: EmailPayload
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  try {
+    const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY
+    const fromAddress = env.EMAIL_FROM || "Ilé <hello@notifications.ilestays.ng>"
+    const replyTo = payload.replyTo || env.EMAIL_SUPPORT || "support@ilestays.ng"
+    console.log(`[Email] Sending via Resend → To: ${payload.to} | Subject: ${payload.subject} | From: ${fromAddress} | Reply-To: ${replyTo}`)
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -2509,20 +2846,22 @@ async function sendViaResend(payload: EmailPayload): Promise<boolean> {
         html: payload.html,
         text: payload.text,
       }),
-    });
+    })
 
-    const resBody = await res.json().catch(() => ({}));
+    const resBody = await res.json().catch(() => ({}))
 
     if (!res.ok) {
-      console.error(`[Email] Resend error: HTTP ${res.status} — ${JSON.stringify(resBody)}`);
-      return false;
+      const error = `HTTP ${res.status} — ${JSON.stringify(resBody)}`
+      console.error(`[Email] Resend error: ${error}`)
+      return { ok: false, error }
     }
 
-    console.log(`[Email] Resend delivered ✓ id=${(resBody as any).id || "unknown"} → ${payload.to}`);
-    return true;
-  } catch (err) {
-    console.error("[Email] Resend network error:", err);
-    return false;
+    const id = (resBody as any).id || undefined
+    console.log(`[Email] Resend delivered ✓ id=${id || "unknown"} → ${payload.to}`)
+    return { ok: true, id }
+  } catch (err: any) {
+    console.error("[Email] Resend network error:", err)
+    return { ok: false, error: err?.message || "Resend network error" }
   }
 }
 

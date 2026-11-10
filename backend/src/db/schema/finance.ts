@@ -61,6 +61,11 @@ export const payouts = pgTable("payouts", {
   accountNumber: varchar("account_number", { length: 30 }),
   accountName: text("account_name"),
   status: varchar("status", { length: 30 }).notNull().default("HELD"), // 'HELD' | 'READY_FOR_PAYOUT' | 'PROCESSING' | 'PAID' | 'CANCELLED'
+  /** Immutable stamp of platform host_payout_mode at payable creation. */
+  payoutMode: varchar("payout_mode", { length: 20 }).notNull().default("MANUAL"),
+  /** Admin-visible exception: NO_VERIFIED_BANK | ADMIN_HOLD | ADMIN_REJECTED | INSUFFICIENT_BALANCE | TRANSFER_UNCERTAIN */
+  exceptionCode: varchar("exception_code", { length: 60 }),
+  exceptionReason: text("exception_reason"),
   scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   approvedBy: varchar("approved_by", { length: 100 }).references(() => users.id, { onDelete: "set null" }),

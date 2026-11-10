@@ -8,3 +8,4 @@ export * from "./locations";
 export * from "./settings";
 export * from "./finance";
 export * from "./newsletter";
+export * from "./notifications";

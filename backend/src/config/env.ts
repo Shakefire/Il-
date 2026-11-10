@@ -39,9 +39,31 @@ const envSchema = z.object({
   EMAIL_PROVIDER: z.enum(["resend", "sendgrid", "console"]).default("resend"),
   RESEND_DOMAIN: z.string().default("notifications.ilestays.ng"),
 
+  // ─── SMS (Termii) ───
+  SMS_PROVIDER: z.enum(["termii", "console"]).default("console"),
+  TERMII_API_KEY: z.string().optional(),
+  TERMII_SENDER_ID: z.string().default("IleStays"),
+  TERMII_BASE_URL: z.string().url().default("https://api.ng.termii.com"),
+
+  // ─── Push (FCM Admin) ───
+  PUSH_PROVIDER: z.enum(["fcm", "console"]).default("console"),
+  FIREBASE_PROJECT_ID: z.string().optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
+
+  // ─── Web Push (VAPID) ───
+  WEB_PUSH_PROVIDER: z.enum(["webpush", "console"]).default("console"),
+  WEB_PUSH_VAPID_PUBLIC_KEY: z.string().optional(),
+  WEB_PUSH_VAPID_PRIVATE_KEY: z.string().optional(),
+  WEB_PUSH_SUBJECT: z.string().default("mailto:support@ilestays.ng"),
+
   // ─── Payments (Paystack) ───
   PAYSTACK_SECRET_KEY: z.string().optional(),
   PAYSTACK_PUBLIC_KEY: z.string().optional(),
+  PAYSTACK_MOCK_TRANSFERS: z
+    .string()
+    .optional()
+    .transform((v) => v === "true" || v === "1"),
 
   // ─── Frontend ───
   FRONTEND_URL: z.string().url().default("https://ilestays.ng"),

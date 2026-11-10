@@ -227,6 +227,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
           defaultHostCommissionPct?: number;
           defaultHostPayoutPct?: number;
           payoutHoldHours?: number;
+          hostPayoutMode?: "AUTOMATIC" | "MANUAL";
         },
         session.userId,
         request.ip
@@ -321,6 +322,48 @@ export async function adminRoutes(fastify: FastifyInstance) {
         notes: body.notes,
       });
       return reply.send({ message: "Payout successfully marked as disbursed.", ...result });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/payouts/:id/approve — MANUAL queue approve
+  fastify.post("/finance/payouts/:id/approve", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body as { notes?: string }) || {};
+    try {
+      const result = await FinanceService.approvePayout(session.userId, id, body.notes);
+      return reply.send({ message: "Payout approved for disbursement.", ...result });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/payouts/:id/hold — MANUAL queue hold with reason
+  fastify.post("/finance/payouts/:id/hold", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body as { reason?: string }) || {};
+    try {
+      const result = await FinanceService.holdPayout(session.userId, id, body.reason || "");
+      return reply.send({ message: "Payout held.", ...result });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/payouts/:id/reject — MANUAL queue reject with reason
+  fastify.post("/finance/payouts/:id/reject", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body as { reason?: string }) || {};
+    try {
+      const result = await FinanceService.rejectPayout(session.userId, id, body.reason || "");
+      return reply.send({ message: "Payout rejected.", ...result });
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
     }
@@ -545,6 +588,42 @@ export async function adminRoutes(fastify: FastifyInstance) {
       return reply.send({ success: true, ...result });
     } catch (err: any) {
       return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // GET /api/admin/finance/ops — Plain-language Phase 7 ops overview
+  fastify.get("/finance/ops", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const q = request.query as Record<string, string>;
+    try {
+      const result = await FinanceService.getAdminFinanceOpsOverview({
+        status: q.status,
+        hostId: q.hostId,
+        bookingId: q.bookingId,
+        transferRef: q.transferRef,
+        limit: q.limit ? parseInt(q.limit, 10) : 100,
+      });
+      return reply.send({ success: true, ...result });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/admin/finance/settlements/:bookingId/override — Admin exception release
+  fastify.post("/finance/settlements/:bookingId/override", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { bookingId } = request.params as { bookingId: string };
+    const body = (request.body || {}) as { reason?: string };
+    try {
+      const result = await FinanceService.adminOverrideSettlement(session.userId, {
+        bookingId,
+        reason: body.reason || "",
+      });
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
     }
   });
 }

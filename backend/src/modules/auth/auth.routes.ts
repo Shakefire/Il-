@@ -241,6 +241,24 @@ export async function authRoutes(fastify: FastifyInstance) {
     return reply.send({ user });
   });
 
+  // PATCH /api/auth/profile — guest/host self profile (name/phone only)
+  fastify.patch("/profile", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const body = (request.body || {}) as {
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+    };
+    try {
+      const user = await authService.updateGuestProfile(session.userId, body);
+      return reply.send({ success: true, user });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
   // POST /api/auth/forgot-password
   fastify.post("/forgot-password", async (request, reply) => {
     const { email } = request.body as any;
@@ -249,9 +267,11 @@ export async function authRoutes(fastify: FastifyInstance) {
     }
 
     await authService.requestPasswordReset(email);
+    // Do not reveal whether the email exists.
     return reply.send({
       success: true,
-      message: `If an account exists for ${email.trim()}, a password reset link has been dispatched.`,
+      message:
+        "If an account exists for that email address, password reset instructions have been sent.",
     });
   });
 

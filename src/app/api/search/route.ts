@@ -1,11 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { searchProperties } from "@/../backend/src/modules/search/search.service";
-import { PROPERTIES } from "@/data/properties";
+import { NextRequest, NextResponse } from "next/server"
+import { searchProperties } from "@/../backend/src/modules/search/search.service"
 
-export const dynamic = "force-dynamic";
+export const dynamic = "force-dynamic"
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
+  const { searchParams } = new URL(req.url)
 
   const params = {
     location: searchParams.get("location") || undefined,
@@ -24,38 +23,25 @@ export async function GET(req: NextRequest) {
     amenities: searchParams.get("amenities") || undefined,
     page: searchParams.get("page") || undefined,
     limit: searchParams.get("limit") || undefined,
-  };
+  }
 
   try {
-    const result = await searchProperties(params);
-    return NextResponse.json(result);
+    const result = await searchProperties(params)
+    return NextResponse.json(result)
   } catch (err: any) {
-    console.error("[API] Search error:", err);
-
-    // Fallback: simple filter over static PROPERTIES
-    let filtered = [...PROPERTIES];
-    if (params.location) {
-      const loc = params.location.toLowerCase();
-      filtered = filtered.filter(
-        (p) =>
-          p.city.toLowerCase().includes(loc) ||
-          p.neighborhood.toLowerCase().includes(loc) ||
-          p.title.toLowerCase().includes(loc)
-      );
-    }
-    if (params.guests) {
-      const g = Number(params.guests);
-      if (!isNaN(g)) filtered = filtered.filter((p) => p.maxGuests >= g);
-    }
-
-    return NextResponse.json({
-      properties: filtered,
-      total: filtered.length,
-      page: 1,
-      limit: filtered.length,
-      searchCenter: null,
-      radiusKm: null,
-      datesRequested: Boolean(params.checkIn && params.checkOut),
-    });
+    console.error("[API] Search error:", err)
+    return NextResponse.json(
+      {
+        properties: [],
+        total: 0,
+        page: 1,
+        limit: 0,
+        searchCenter: null,
+        radiusKm: null,
+        datesRequested: Boolean(params.checkIn && params.checkOut),
+        error: "Search is temporarily unavailable.",
+      },
+      { status: 503 }
+    )
   }
 }

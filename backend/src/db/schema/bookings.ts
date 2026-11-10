@@ -1,4 +1,4 @@
-import { pgTable, varchar, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, varchar, timestamp, integer, text } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { properties } from "./properties";
 
@@ -45,6 +45,14 @@ export const bookings = pgTable("bookings", {
   hostArrivalReminderSentAt: timestamp("host_arrival_reminder_sent_at", { withTimezone: true }),
   cancellationReason: varchar("cancellation_reason", { length: 255 }),
   cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+
+  /** Phase 7: guest-confirmed arrival (required for settlement release) */
+  guestCheckInConfirmedAt: timestamp("guest_check_in_confirmed_at", { withTimezone: true }),
+  guestCheckInConfirmedBy: varchar("guest_check_in_confirmed_by", { length: 100 }),
+  /** Admin exception path — does not rewrite ledger history */
+  settlementOverrideReason: text("settlement_override_reason"),
+  settlementOverrideBy: varchar("settlement_override_by", { length: 100 }),
+  settlementOverrideAt: timestamp("settlement_override_at", { withTimezone: true }),
 
   accessToken: varchar("access_token", { length: 64 }).notNull().unique(),
 

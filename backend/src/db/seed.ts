@@ -428,6 +428,13 @@ export async function initAndSeedDb() {
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_reason VARCHAR(255);`,
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;`,
 
+    // Phase 7: Guest check-in confirmation + admin settlement override
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_check_in_confirmed_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS guest_check_in_confirmed_by VARCHAR(100);`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS settlement_override_reason TEXT;`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS settlement_override_by VARCHAR(100);`,
+    sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS settlement_override_at TIMESTAMPTZ;`,
+
     // Phase 1: Authoritative Financial Snapshot Columns
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS accommodation_subtotal INT;`,
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_commission_pct INT DEFAULT 10;`,
@@ -442,6 +449,10 @@ export async function initAndSeedDb() {
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS host_response VARCHAR(30);`,
     sql`ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_deadline_at TIMESTAMPTZ;`,
     sql`ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS default_host_payout_pct INT NOT NULL DEFAULT 100;`,
+    sql`ALTER TABLE platform_settings ADD COLUMN IF NOT EXISTS host_payout_mode VARCHAR(20) NOT NULL DEFAULT 'MANUAL';`,
+    sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS payout_mode VARCHAR(20) NOT NULL DEFAULT 'MANUAL';`,
+    sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS exception_code VARCHAR(60);`,
+    sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS exception_reason TEXT;`,
 
     // Phase 1: Concurrency Guard - Unique Booking ID on Host Earnings
     sql`CREATE UNIQUE INDEX IF NOT EXISTS host_earnings_booking_id_unique ON host_earnings (booking_id);`,

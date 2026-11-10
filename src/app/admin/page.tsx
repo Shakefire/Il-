@@ -132,8 +132,12 @@ export default function AdminPortalPage() {
   const [downloadSuccessNotice, setDownloadSuccessNotice] = useState<string | null>(null);
 
   // ── Financial Center States ──
-  const [financeSubTab, setFinanceSubTab] = useState<"overview" | "transactions" | "payouts" | "refunds" | "settlements" | "ledger" | "reports" | "audit" | "reconciliation" | "records">("overview");
+  const [financeSubTab, setFinanceSubTab] = useState<"overview" | "transactions" | "payouts" | "refunds" | "settlements" | "ledger" | "reports" | "audit" | "reconciliation" | "records" | "ops">("overview");
   const [financialSummary, setFinancialSummary] = useState<any>(null);
+  const [financeOps, setFinanceOps] = useState<any>(null);
+  const [overrideBookingId, setOverrideBookingId] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideBusy, setOverrideBusy] = useState(false);
   const [trialBalance, setTrialBalance] = useState<any>(null);
   const [payoutsQueue, setPayoutsQueue] = useState<any[]>([]);
   const [refundsQueue, setRefundsQueue] = useState<any[]>([]);
@@ -201,11 +205,17 @@ export default function AdminPortalPage() {
   const [isProcessingRefund, setIsProcessingRefund] = useState(false);
   const [financeActionFeedback, setFinanceActionFeedback] = useState<string | null>(null);
 
-  // Platform Settings (Commission)
+  // Platform Settings (Commission + Host Payout Mode)
   const [platformCommissionPct, setPlatformCommissionPct] = useState<number>(10);
   const [editingCommission, setEditingCommission] = useState(false);
   const [pendingCommissionPct, setPendingCommissionPct] = useState<number>(10);
   const [savingCommission, setSavingCommission] = useState(false);
+  const [hostPayoutMode, setHostPayoutMode] = useState<"AUTOMATIC" | "MANUAL">("MANUAL");
+  const [pendingHostPayoutMode, setPendingHostPayoutMode] = useState<"AUTOMATIC" | "MANUAL">("MANUAL");
+  const [settingsUpdatedAt, setSettingsUpdatedAt] = useState<string | null>(null);
+  const [settingsUpdatedBy, setSettingsUpdatedBy] = useState<string | null>(null);
+  const [savingPayoutMode, setSavingPayoutMode] = useState(false);
+  const [showPayoutModeConfirm, setShowPayoutModeConfirm] = useState(false);
 
   // Profile Dropdown & Modal States
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
@@ -281,7 +291,7 @@ export default function AdminPortalPage() {
   const loadFinanceData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoadingFinance(true);
     try {
-      const [sumRes, tbRes, payRes, refRes, jrnRes, settingsRes, balRes] = await Promise.all([
+      const [sumRes, tbRes, payRes, refRes, jrnRes, settingsRes, balRes, opsRes] = await Promise.all([
         api.getAdminFinancialSummary().catch(() => null),
         api.getAdminTrialBalance().catch(() => null),
         api.getAdminPayoutQueue().catch(() => ({ payouts: [] })),
@@ -289,12 +299,14 @@ export default function AdminPortalPage() {
         api.getAdminJournals(50).catch(() => ({ journals: [] })),
         fetch("/api/admin/settings").then(r => r.json()).catch(() => null),
         api.getAdminTransferBalance().catch(() => null),
+        fetch("/api/admin/finance/ops", { credentials: "include" }).then((r) => r.json()).catch(() => null),
       ]);
       if (sumRes) setFinancialSummary(sumRes);
       if (tbRes?.trialBalance) setTrialBalance(tbRes.trialBalance);
       if (payRes?.payouts) setPayoutsQueue(payRes.payouts);
       if (refRes?.refunds) setRefundsQueue(refRes.refunds);
       if (jrnRes?.journals) setJournals(jrnRes.journals);
+      if (opsRes?.plainLanguage) setFinanceOps(opsRes);
       if (balRes?.success) {
         setPaystackBalance({
           balanceNaira: balRes.balanceNaira || 0,
@@ -304,6 +316,16 @@ export default function AdminPortalPage() {
       if (settingsRes?.defaultHostCommissionPct !== undefined) {
         setPlatformCommissionPct(settingsRes.defaultHostCommissionPct);
         setPendingCommissionPct(settingsRes.defaultHostCommissionPct);
+      }
+      if (settingsRes?.hostPayoutMode === "AUTOMATIC" || settingsRes?.hostPayoutMode === "MANUAL") {
+        setHostPayoutMode(settingsRes.hostPayoutMode);
+        setPendingHostPayoutMode(settingsRes.hostPayoutMode);
+      }
+      if (settingsRes?.updatedAt) {
+        setSettingsUpdatedAt(new Date(settingsRes.updatedAt).toISOString());
+      }
+      if (settingsRes?.updatedBy !== undefined) {
+        setSettingsUpdatedBy(settingsRes.updatedBy || null);
       }
     } catch (err: any) {
       console.warn("[Admin] Could not load finance data:", err);
@@ -2110,6 +2132,7 @@ export default function AdminPortalPage() {
                   { id: "transactions", label: `Transactions (${bookings.length})`, icon: CreditCard },
                   { id: "payouts", label: `Host Payouts (${payoutsQueue.filter((p) => p.status !== "PAID").length})`, icon: Landmark },
                   { id: "refunds", label: `Refunds (${refundsQueue.length})`, icon: Receipt },
+                  { id: "ops", label: "Ops overview", icon: Activity },
                   { id: "settlements", label: "Settlements", icon: CheckCircle2 },
                   { id: "ledger", label: "Ledger", icon: BookOpen },
                   { id: "reports", label: "Reports", icon: BarChart3 },
@@ -2231,80 +2254,186 @@ export default function AdminPortalPage() {
                     </div>
                   </div>
 
-                  {/* Platform Commission Rate Setting */}
-                  <div className="p-5 bg-surface rounded-2xl border border-border space-y-3">
-                    <div className="flex items-center justify-between">
+                  {/* Host Payout Configuration */}
+                  <div className="p-5 bg-surface rounded-2xl border border-border space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                       <div>
-                        <h4 className="font-bold text-sm text-primary">Platform Commission Rate</h4>
-                        <p className="text-xs text-primary-muted mt-0.5">Applied to all new bookings. Existing bookings retain the rate at time of booking.</p>
+                        <h4 className="font-bold text-sm text-primary">Host Payout Configuration</h4>
+                        <p className="text-xs text-primary-muted mt-0.5 max-w-xl">
+                          Controls commission on <span className="font-semibold">new</span> bookings and whether host net is paid automatically after verified guest payment (AUTOMATIC) or stays in the admin queue (MANUAL). Mode switches never drain historical pending payouts or reverse in-flight transfers.
+                        </p>
                       </div>
-                      {!editingCommission ? (
+                      <div className="text-[11px] text-primary-muted space-y-0.5 sm:text-right">
+                        <div>Last update: {settingsUpdatedAt ? new Date(settingsUpdatedAt).toLocaleString() : "—"}</div>
+                        <div>Actor: {settingsUpdatedBy || "—"}</div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-xl border border-border p-4 space-y-3">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted">Payout mode</div>
+                        <div className="flex flex-wrap gap-2">
+                          {(["MANUAL", "AUTOMATIC"] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              type="button"
+                              onClick={() => setPendingHostPayoutMode(mode)}
+                              className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+                                pendingHostPayoutMode === mode
+                                  ? "bg-primary text-white border-primary"
+                                  : "bg-surface border-border text-primary-muted hover:text-primary"
+                              }`}
+                            >
+                              {mode === "AUTOMATIC" ? "Automatic" : "Manual"}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-primary-secondary leading-relaxed">
+                          {pendingHostPayoutMode === "AUTOMATIC"
+                            ? "After backend-verified payment: retain Ilé commission snapshot, release payable without check-in gate, transfer host net to verified bank (or raise admin exception if bank missing)."
+                            : "After verified payment: create payable/pending as today. Check-in + hold gates apply. Admin approve / hold / reject, then transfer via existing disburse path."}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-primary-muted">Active:</span>
+                          <span className="text-sm font-bold text-primary">{hostPayoutMode}</span>
+                        </div>
                         <button
                           type="button"
-                          onClick={() => { setEditingCommission(true); setPendingCommissionPct(platformCommissionPct); }}
-                          className="px-3 py-1.5 text-xs font-semibold border border-border rounded-lg hover:bg-surface-muted transition-colors cursor-pointer"
+                          disabled={savingPayoutMode || pendingHostPayoutMode === hostPayoutMode}
+                          onClick={() => setShowPayoutModeConfirm(true)}
+                          className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-lg hover:bg-black transition-colors cursor-pointer disabled:opacity-50"
                         >
-                          Edit
+                          {savingPayoutMode ? "Saving…" : "Save payout mode"}
                         </button>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min={0}
-                            max={50}
-                            step={1}
-                            value={pendingCommissionPct}
-                            onChange={(e) => setPendingCommissionPct(Number(e.target.value))}
-                            className="w-20 px-2.5 py-1.5 text-sm border border-border rounded-lg text-center font-semibold"
-                          />
-                          <span className="text-sm font-medium text-primary-muted">%</span>
+                      </div>
+
+                      <div className="rounded-xl border border-border p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-primary-muted">Platform commission %</div>
+                          {!editingCommission ? (
+                            <button
+                              type="button"
+                              onClick={() => { setEditingCommission(true); setPendingCommissionPct(platformCommissionPct); }}
+                              className="px-3 py-1.5 text-xs font-semibold border border-border rounded-lg hover:bg-surface-muted transition-colors cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                max={50}
+                                step={1}
+                                value={pendingCommissionPct}
+                                onChange={(e) => setPendingCommissionPct(Number(e.target.value))}
+                                className="w-20 px-2.5 py-1.5 text-sm border border-border rounded-lg text-center font-semibold"
+                              />
+                              <span className="text-sm font-medium text-primary-muted">%</span>
+                              <button
+                                type="button"
+                                disabled={savingCommission}
+                                onClick={async () => {
+                                  setSavingCommission(true);
+                                  try {
+                                    const res = await fetch("/api/admin/settings", {
+                                      method: "PUT",
+                                      headers: { "Content-Type": "application/json" },
+                                      credentials: "include",
+                                      body: JSON.stringify({ defaultHostCommissionPct: pendingCommissionPct }),
+                                    });
+                                    const data = await res.json();
+                                    if (data.success) {
+                                      setPlatformCommissionPct(pendingCommissionPct);
+                                      setEditingCommission(false);
+                                      if (data.settings?.updatedAt) setSettingsUpdatedAt(new Date(data.settings.updatedAt).toISOString());
+                                      if (data.settings?.updatedBy !== undefined) setSettingsUpdatedBy(data.settings.updatedBy || null);
+                                      setFinanceActionFeedback(`Commission rate updated to ${pendingCommissionPct}% (new bookings only)`);
+                                    } else {
+                                      alert(data.error || "Failed to save");
+                                    }
+                                  } catch (err: any) {
+                                    alert(err.message || "Failed to save");
+                                  } finally {
+                                    setSavingCommission(false);
+                                  }
+                                }}
+                                className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-lg hover:bg-black transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {savingCommission ? "Saving…" : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setEditingCommission(false); setPendingCommissionPct(platformCommissionPct); }}
+                                className="px-2 py-1.5 text-xs text-primary-muted hover:text-primary cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {!editingCommission && (
+                          <div className="flex items-center gap-3">
+                            <span className="text-3xl font-bold text-emerald-800 tabular-nums">{platformCommissionPct}%</span>
+                            <span className="text-xs text-primary-muted">snapshotted on each new booking — never retrocalculated</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {showPayoutModeConfirm && (
+                    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Confirm host payout mode">
+                      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-4 border border-border">
+                        <h3 className="font-bold text-base text-primary">Confirm payout mode change</h3>
+                        <p className="text-sm text-primary-secondary leading-relaxed">
+                          Switch from <span className="font-semibold">{hostPayoutMode}</span> to <span className="font-semibold">{pendingHostPayoutMode}</span>?
+                          Historical pending payouts are <span className="font-semibold">not</span> auto-drained. In-flight transfers are not reversed or duplicated. Only new verified payments use the new mode stamp.
+                        </p>
+                        <div className="flex justify-end gap-2">
                           <button
                             type="button"
-                            disabled={savingCommission}
+                            onClick={() => { setShowPayoutModeConfirm(false); setPendingHostPayoutMode(hostPayoutMode); }}
+                            className="px-3 py-1.5 text-xs font-semibold border border-border rounded-lg cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            disabled={savingPayoutMode}
                             onClick={async () => {
-                              setSavingCommission(true);
+                              setSavingPayoutMode(true);
                               try {
                                 const res = await fetch("/api/admin/settings", {
                                   method: "PUT",
                                   headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ defaultHostCommissionPct: pendingCommissionPct }),
+                                  credentials: "include",
+                                  body: JSON.stringify({ hostPayoutMode: pendingHostPayoutMode }),
                                 });
                                 const data = await res.json();
                                 if (data.success) {
-                                  setPlatformCommissionPct(pendingCommissionPct);
-                                  setEditingCommission(false);
-                                  setFinanceActionFeedback(`Commission rate updated to ${pendingCommissionPct}%`);
+                                  setHostPayoutMode(pendingHostPayoutMode);
+                                  setShowPayoutModeConfirm(false);
+                                  if (data.settings?.updatedAt) setSettingsUpdatedAt(new Date(data.settings.updatedAt).toISOString());
+                                  if (data.settings?.updatedBy !== undefined) setSettingsUpdatedBy(data.settings.updatedBy || null);
+                                  setFinanceActionFeedback(`Host payout mode set to ${pendingHostPayoutMode}`);
                                 } else {
-                                  alert(data.error || "Failed to save");
+                                  alert(data.error || "Failed to save mode");
                                 }
                               } catch (err: any) {
-                                alert(err.message || "Failed to save");
+                                alert(err.message || "Failed to save mode");
                               } finally {
-                                setSavingCommission(false);
+                                setSavingPayoutMode(false);
                               }
                             }}
-                            className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-lg hover:bg-black transition-colors cursor-pointer disabled:opacity-50"
+                            className="px-3 py-1.5 text-xs font-semibold bg-primary text-white rounded-lg cursor-pointer disabled:opacity-50"
                           >
-                            {savingCommission ? "Saving…" : "Save"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => { setEditingCommission(false); setPendingCommissionPct(platformCommissionPct); }}
-                            className="px-2 py-1.5 text-xs text-primary-muted hover:text-primary cursor-pointer"
-                          >
-                            Cancel
+                            {savingPayoutMode ? "Saving…" : "Confirm change"}
                           </button>
                         </div>
-                      )}
-                    </div>
-                    {!editingCommission && (
-                      <div className="flex items-center gap-3">
-                        <span className="text-3xl font-bold text-emerald-800 tabular-nums">{platformCommissionPct}%</span>
-                        <span className="text-xs text-primary-muted">deducted from host earnings on each confirmed booking</span>
                       </div>
-                    )}
-                  </div>
-
+                    </div>
+                  )}
                   {/* Paystack Balance & Settlement Automation Card */}
                   <div className="p-5 bg-gradient-to-r from-emerald-950 via-[#0B5D45] to-emerald-900 text-white rounded-2xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                     <div className="space-y-1">
@@ -2459,6 +2588,127 @@ export default function AdminPortalPage() {
               )}
 
               {/* ── Sub-Tab 2: Transactions ── */}
+              {financeSubTab === "ops" && (
+                <div className="space-y-6">
+                  <div className="p-5 bg-surface rounded-2xl border border-border">
+                    <h3 className="font-bold text-sm text-primary">Host earnings — plain language</h3>
+                    <p className="text-xs text-primary-muted mt-1">
+                      Pending = held · Eligible = ready to withdraw · Processing = transfer in flight · Paid = banked.
+                      Guest check-in is required before release (unless admin override).
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4">
+                      {[
+                        ["Pending (held)", financeOps?.plainLanguage?.pendingHostEarnings],
+                        ["Eligible to withdraw", financeOps?.plainLanguage?.eligibleToWithdraw],
+                        ["Processing withdrawals", financeOps?.plainLanguage?.processingWithdrawals],
+                        ["Paid to hosts", financeOps?.plainLanguage?.paidToHosts],
+                      ].map(([label, block]: any) => (
+                        <div key={label as string} className="p-4 rounded-xl border border-border bg-white">
+                          <div className="text-[11px] uppercase tracking-wider text-primary-muted font-semibold">{label}</div>
+                          <div className="text-xl font-bold tabular-nums mt-1">{formatNaira(block?.amount || 0)}</div>
+                          <div className="text-[11px] text-primary-secondary mt-1">{block?.count || 0} items · {block?.meaning}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                      <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs">
+                        Refunds needing review: <strong>{financeOps?.plainLanguage?.refundsNeedingReview?.count || 0}</strong>
+                      </div>
+                      <div className="p-3 rounded-xl border border-rose-200 bg-rose-50 text-xs">
+                        Late-pay recon: <strong>{financeOps?.plainLanguage?.latePaymentRecon?.count || 0}</strong>
+                      </div>
+                      <div className="p-3 rounded-xl border border-blue-200 bg-blue-50 text-xs">
+                        Check-in exceptions: <strong>{financeOps?.plainLanguage?.checkInExceptions?.count || 0}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-5 bg-surface rounded-2xl border border-border space-y-3">
+                    <h3 className="font-bold text-sm text-primary">Admin settlement override</h3>
+                    <p className="text-xs text-primary-muted">
+                      Skips guest check-in only. Still blocks open refunds. Posts ledger once. Reason required.
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        className="flex-1 min-h-[44px] px-3 rounded-xl border border-border text-sm"
+                        placeholder="Booking ID"
+                        value={overrideBookingId}
+                        onChange={(e) => setOverrideBookingId(e.target.value)}
+                        aria-label="Booking ID for settlement override"
+                      />
+                      <input
+                        className="flex-[2] min-h-[44px] px-3 rounded-xl border border-border text-sm"
+                        placeholder="Reason (min 8 chars)"
+                        value={overrideReason}
+                        onChange={(e) => setOverrideReason(e.target.value)}
+                        aria-label="Override reason"
+                      />
+                      <button
+                        type="button"
+                        disabled={overrideBusy || !overrideBookingId || overrideReason.trim().length < 8}
+                        className="min-h-[44px] px-4 rounded-xl bg-primary text-white text-xs font-semibold disabled:opacity-50"
+                        onClick={async () => {
+                          setOverrideBusy(true);
+                          try {
+                            const res = await fetch(
+                              `/api/admin/finance/settlements/${encodeURIComponent(overrideBookingId)}/override`,
+                              {
+                                method: "POST",
+                                credentials: "include",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ reason: overrideReason }),
+                              }
+                            );
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.error || "Override failed");
+                            setFinanceActionFeedback(data.reason || "Settlement override applied");
+                            setOverrideBookingId("");
+                            setOverrideReason("");
+                            await loadFinanceData(true);
+                          } catch (err: any) {
+                            alert(err.message);
+                          } finally {
+                            setOverrideBusy(false);
+                          }
+                        }}
+                      >
+                        {overrideBusy ? "Working…" : "Override release"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-border overflow-hidden">
+                    <div className="p-4 border-b border-border">
+                      <h3 className="font-semibold text-sm">Check-in exceptions</h3>
+                      <p className="text-xs text-primary-muted">Past check-in date, guest has not confirmed, payout still held.</p>
+                    </div>
+                    <div className="divide-y divide-border max-h-80 overflow-y-auto">
+                      {(financeOps?.checkInExceptions || []).length === 0 ? (
+                        <p className="p-4 text-xs text-primary-muted">No check-in exceptions right now.</p>
+                      ) : (
+                        (financeOps.checkInExceptions as any[]).map((row) => (
+                          <div key={row.bookingId} className="p-3 text-xs flex flex-wrap gap-3 justify-between">
+                            <span className="font-semibold">{row.bookingRef}</span>
+                            <span>Check-in {row.checkInDate}</span>
+                            <span>{formatNaira(row.payoutAmount || 0)}</span>
+                            <button
+                              type="button"
+                              className="underline text-primary"
+                              onClick={() => {
+                                setOverrideBookingId(row.bookingId);
+                                setFinanceSubTab("ops");
+                              }}
+                            >
+                              Use for override
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {financeSubTab === "transactions" && (
                 <div className="space-y-4">
                   {/* Search, Filter & Export Toolbar */}
@@ -2784,28 +3034,98 @@ export default function AdminPortalPage() {
                                   </div>
                                 </td>
                                 <td className="py-3 px-3 text-right whitespace-nowrap">
-                                  {p.status === "PAID" || p.status === "DISBURSED" ? (
-                                    <div className="text-[11px] text-primary-muted">
-                                      <span className="font-mono">{p.paystackTransferRef || "Disbursed"}</span>
-                                    </div>
-                                  ) : p.status === "PROCESSING" ? (
-                                    <span className="inline-flex items-center gap-1 text-[11px] text-indigo-700 font-semibold">
-                                      <Loader2 size={12} className="animate-spin" /> In-Flight
-                                    </span>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setDisburseModalPayout(p);
-                                        setDisburseMethod("automated");
-                                        setDisburseTransferRef("");
-                                        setDisburseNotes("");
-                                      }}
-                                      className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs"
-                                    >
-                                      {p.status === "FAILED" ? "Retry Transfer" : "Authorize & Disburse"}
-                                    </button>
-                                  )}
+                                  <div className="flex flex-col items-end gap-1.5">
+                                    {(p as any).payoutMode && (
+                                      <span className="text-[10px] font-semibold text-primary-muted uppercase tracking-wider">
+                                        {(p as any).payoutMode}
+                                      </span>
+                                    )}
+                                    {(p as any).exceptionCode && (
+                                      <span className="text-[10px] font-semibold text-rose-700 max-w-[160px] truncate" title={(p as any).exceptionReason || (p as any).exceptionCode}>
+                                        {(p as any).exceptionCode}
+                                      </span>
+                                    )}
+                                    {p.status === "PAID" || p.status === "DISBURSED" ? (
+                                      <div className="text-[11px] text-primary-muted">
+                                        <span className="font-mono">{p.paystackTransferRef || "Disbursed"}</span>
+                                      </div>
+                                    ) : p.status === "PROCESSING" ? (
+                                      <span className="inline-flex items-center gap-1 text-[11px] text-indigo-700 font-semibold">
+                                        <Loader2 size={12} className="animate-spin" /> In-Flight
+                                      </span>
+                                    ) : (
+                                      <div className="flex flex-wrap justify-end gap-1">
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            const res = await fetch(`/api/admin/finance/payouts/${p.id}/approve`, {
+                                              method: "POST",
+                                              headers: { "Content-Type": "application/json" },
+                                              credentials: "include",
+                                              body: JSON.stringify({ notes: "Approved from admin queue" }),
+                                            });
+                                            const data = await res.json();
+                                            if (!res.ok) alert(data.error || "Approve failed");
+                                            else { setFinanceActionFeedback("Payout approved"); loadFinanceData(true); }
+                                          }}
+                                          className="px-2 py-1 border border-border text-[10px] font-semibold rounded-lg cursor-pointer hover:bg-surface-muted"
+                                        >
+                                          Approve
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            const reason = window.prompt("Hold reason (required)");
+                                            if (!reason) return;
+                                            const res = await fetch(`/api/admin/finance/payouts/${p.id}/hold`, {
+                                              method: "POST",
+                                              headers: { "Content-Type": "application/json" },
+                                              credentials: "include",
+                                              body: JSON.stringify({ reason }),
+                                            });
+                                            const data = await res.json();
+                                            if (!res.ok) alert(data.error || "Hold failed");
+                                            else { setFinanceActionFeedback("Payout held"); loadFinanceData(true); }
+                                          }}
+                                          className="px-2 py-1 border border-border text-[10px] font-semibold rounded-lg cursor-pointer hover:bg-surface-muted"
+                                        >
+                                          Hold
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            const reason = window.prompt("Reject reason (required)");
+                                            if (!reason) return;
+                                            const res = await fetch(`/api/admin/finance/payouts/${p.id}/reject`, {
+                                              method: "POST",
+                                              headers: { "Content-Type": "application/json" },
+                                              credentials: "include",
+                                              body: JSON.stringify({ reason }),
+                                            });
+                                            const data = await res.json();
+                                            if (!res.ok) alert(data.error || "Reject failed");
+                                            else { setFinanceActionFeedback("Payout rejected"); loadFinanceData(true); }
+                                          }}
+                                          className="px-2 py-1 border border-rose-200 text-[10px] font-semibold text-rose-700 rounded-lg cursor-pointer hover:bg-rose-50"
+                                        >
+                                          Reject
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={(p as any).exceptionCode === "ADMIN_HOLD" || (p as any).exceptionCode === "ADMIN_REJECTED"}
+                                          onClick={() => {
+                                            setDisburseModalPayout(p);
+                                            setDisburseMethod("automated");
+                                            setDisburseTransferRef("");
+                                            setDisburseNotes("");
+                                          }}
+                                          className="px-3 py-1.5 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                                        >
+                                          {p.status === "FAILED" ? "Retry Transfer" : "Authorize & Disburse"}
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}

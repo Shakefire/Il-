@@ -127,6 +127,32 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // POST /api/bookings/:id/confirm-check-in — Guest confirms arrival (Phase 7)
+  fastify.post("/:id/confirm-check-in", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { accessToken?: string };
+    const headerToken = request.headers["x-access-token"] as string | undefined;
+    const session = extractSession(request);
+    const accessToken = body.accessToken || headerToken;
+
+    if (!session?.userId && !accessToken) {
+      return reply.status(401).send({ error: "Authentication or booking access token required." });
+    }
+
+    try {
+      const result = await bookingsService.confirmGuestCheckIn(
+        id,
+        { userId: session?.userId || null, accessToken: accessToken || null },
+        { ipAddress: request.ip }
+      );
+      return reply.send(result);
+    } catch (error: any) {
+      return reply
+        .status(error.statusCode || 400)
+        .send({ error: error.message, code: error.code });
+    }
+  });
+
   // POST /api/bookings/:id/cancel — Cancel booking & release date lock
   fastify.post("/:id/cancel", async (request, reply) => {
     const { id } = request.params as { id: string };
@@ -143,7 +169,12 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
       const result = await bookingsService.cancelBooking(id, tokenOrUserId, reason);
       return reply.send(result);
     } catch (error: any) {
-      return reply.status(error.statusCode || 400).send({ error: error.message });
+      return reply.status(error.statusCode || 400).send({
+        error: error.message,
+        code: error.code,
+        refund: error.refund || undefined,
+        bookingStatus: error.bookingStatus || undefined,
+      });
     }
   });
 
@@ -156,7 +187,22 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
     });
   });
 
-  // GET /api/bookings/:id — Get booking details
+  // GET /api/bookings/:id/similar — Similar stays after decline/expire (never auto-book)
+  fastify.get("/:id/similar", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const query = request.query as { limit?: string };
+    try {
+      const result = await bookingsService.findSimilarProperties(
+        id,
+        query.limit ? Number(query.limit) : 8
+      );
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(error.statusCode || 404).send({ error: error.message });
+    }
+  });
+
+  // GET /api/bookings/:id — Get booking details (+ recovery metadata)
   fastify.get("/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     try {

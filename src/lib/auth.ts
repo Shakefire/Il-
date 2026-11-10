@@ -308,6 +308,32 @@ export const authApi = {
     }
   },
 
+  async updateProfile(data: {
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+  }): Promise<User> {
+    const token = typeof window !== "undefined" ? localStorage.getItem("ile_token") : null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch("/api/auth/profile", {
+      method: "PATCH",
+      headers,
+      credentials: "include",
+      body: JSON.stringify(data),
+    });
+
+    const body = await res.json();
+    if (!res.ok) {
+      throw new Error(body.error || "Failed to update profile.");
+    }
+    if (typeof window !== "undefined" && body.user) {
+      localStorage.setItem("ile_user", JSON.stringify(body.user));
+    }
+    return body.user;
+  },
+
   async forgotPassword(email: string): Promise<AuthResponse> {
     if (!email || !email.includes("@")) {
       throw new Error("Please enter a valid email address.");
@@ -324,7 +350,9 @@ export const authApi = {
 
     return {
       success: true,
-      message: data.message || `If an account exists for ${email}, a reset link has been dispatched.`,
+      message:
+        data.message ||
+        "If an account exists for that email address, password reset instructions have been sent.",
     };
   },
 

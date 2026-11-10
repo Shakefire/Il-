@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { PROPERTIES } from "@/data/properties";
 import BookingPanel from "@/components/BookingPanel";
 import PropertyGallery from "@/components/PropertyGallery";
 import { api } from "@/lib/api";
@@ -23,25 +22,17 @@ import {
 } from "lucide-react";
 
 export default function StayDetailClient({ slug }: { slug: string }) {
-  const staticMatch = PROPERTIES.find(
-    (p) => p.slug === slug || p.id === slug
-  );
-
-  const [property, setProperty] = useState<Property | null>(staticMatch || null);
-  const [loading, setLoading] = useState(!staticMatch);
+  const [property, setProperty] = useState<Property | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState(false);
 
   useEffect(() => {
     let active = true;
 
     async function loadProperty() {
-      // Show static match immediately if available, while refreshing with live database
-      if (staticMatch) {
-        setProperty(staticMatch);
-        setLoading(false);
-      } else {
-        setLoading(true);
-      }
+      setLoading(true);
+      setLoadError(null);
 
       try {
         const res = await api.getProperty(slug);
@@ -64,6 +55,7 @@ export default function StayDetailClient({ slug }: { slug: string }) {
             bedrooms: Number(raw.bedrooms) || 1,
             bathrooms: Number(raw.bathrooms) || 1,
             maxGuests: Number(raw.maxGuests) || 2,
+            minimumNights: Number(raw.minimumNights) || 1,
             coverImage: raw.coverImage || "/images/placeholder-property.jpg",
             images: Array.isArray(raw.images) && raw.images.length > 0 ? raw.images : [raw.coverImage || "/images/placeholder-property.jpg"],
             propertyType: raw.propertyType || "Serviced Apartment",
@@ -91,9 +83,16 @@ export default function StayDetailClient({ slug }: { slug: string }) {
             status: raw.status || "PUBLISHED",
           };
           setProperty(normalized);
+        } else if (active) {
+          setProperty(null);
+          setLoadError("This stay could not be found.");
         }
       } catch (err) {
         console.warn("Could not fetch remote property:", err);
+        if (active) {
+          setProperty(null);
+          setLoadError("Unable to load this stay right now.");
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -104,7 +103,7 @@ export default function StayDetailClient({ slug }: { slug: string }) {
     return () => {
       active = false;
     };
-  }, [slug, staticMatch]);
+  }, [slug]);
 
   const handleShare = async () => {
     if (typeof window !== "undefined") {
@@ -138,9 +137,12 @@ export default function StayDetailClient({ slug }: { slug: string }) {
       <div className="min-h-[70vh] flex flex-col items-center justify-center p-6 text-center bg-[#FAFAF8]">
         <div className="max-w-md w-full bg-white border border-[#E7E5E0] rounded-2xl p-8 space-y-4 shadow-sm">
           <Building size={40} className="mx-auto text-[#0B5D45]" />
-          <h2 className="text-2xl font-display font-medium text-[#171717]">Listing Not Found</h2>
+          <h2 className="text-2xl font-display font-medium text-[#171717]">
+            {loadError?.includes("Unable") ? "Stay Unavailable" : "Listing Not Found"}
+          </h2>
           <p className="text-sm text-[#6B6B67] leading-relaxed">
-            This property listing might have been removed, unlisted, or the link may be invalid.
+            {loadError ||
+              "This property listing might have been removed, unlisted, or the link may be invalid."}
           </p>
           <div className="pt-2">
             <Link

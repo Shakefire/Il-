@@ -163,14 +163,64 @@ export async function hostsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // DELETE /api/host/properties/:id — Delete draft/unbooked property
+  // DELETE /api/host/properties/:id — Archive (with history) or delete empty listing
   fastify.delete("/properties/:id", async (request, reply) => {
     const session = await authenticateRequest(request, reply);
     if (!session) return;
 
     const { id } = request.params as { id: string };
+    const query = request.query as { confirm?: string; mode?: string };
+    const confirmWithReservations = query.confirm === "true";
+    const mode = query.mode === "delete" ? "delete" : query.mode === "archive" ? "archive" : undefined;
     try {
-      const result = await hostsService.deleteProperty(session.userId, id);
+      const result = await hostsService.deleteProperty(session.userId, id, confirmWithReservations, {
+        ipAddress: request.ip,
+        mode,
+      });
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({
+        error: error.message,
+        requiresConfirmation: !!error.requiresConfirmation,
+        upcomingCount: error.upcomingCount || 0,
+        action: error.action || "archive",
+        hasFinancialHistory: !!error.hasFinancialHistory,
+      });
+    }
+  });
+
+  // POST /api/host/properties/:id/unpublish — Hide published listing (Draft)
+  fastify.post("/properties/:id/unpublish", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    try {
+      const result = await hostsService.unpublishProperty(session.userId, id);
+      return reply.send(result);
+    } catch (error: any) {
+      return reply.status(error.statusCode || 400).send({ error: error.message });
+    }
+  });
+
+  // PUT /api/host/properties/:id/media-order — Persist gallery order + cover
+  fastify.put("/properties/:id/media-order", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { orderedImageIds?: string[]; coverImageId?: string };
+    if (!Array.isArray(body.orderedImageIds) || body.orderedImageIds.length === 0) {
+      return reply.status(400).send({ error: "orderedImageIds array is required" });
+    }
+
+    try {
+      const result = await hostsService.reorderPropertyMedia(
+        session.userId,
+        id,
+        body.orderedImageIds,
+        body.coverImageId
+      );
       return reply.send(result);
     } catch (error: any) {
       return reply.status(error.statusCode || 400).send({ error: error.message });
@@ -302,5 +352,75 @@ export async function hostsRoutes(fastify: FastifyInstance) {
 
     const result = await hostsService.getHostPayouts(session.userId);
     return reply.send(result);
+  });
+
+  // GET /api/host/wallet — Pending / available / processing / paid projection
+  fastify.get("/wallet", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const { FinanceService } = await import("../finance/finance.service");
+      const wallet = await FinanceService.getHostWallet(session.userId);
+      return reply.send({ success: true, wallet });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // POST /api/host/wallet/withdraw — Atomic reserve + Paystack transfer
+  fastify.post("/wallet/withdraw", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const body = (request.body || {}) as { amountNaira?: number; payoutIds?: string[] };
+
+    try {
+      const { FinanceService } = await import("../finance/finance.service");
+      const result = await FinanceService.requestHostWithdrawal(session.userId, {
+        amountNaira: body.amountNaira,
+        payoutIds: body.payoutIds,
+      });
+      return reply.send(result);
+    } catch (err: any) {
+      return reply
+        .status(err.statusCode || 400)
+        .send({ error: err.message, code: err.code });
+    }
+  });
+
+  // GET /api/host/payout-account — Masked verified bank account
+  fastify.get("/payout-account", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    try {
+      const result = await hostsService.getPayoutAccount(session.userId);
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message });
+    }
+  });
+
+  // PUT /api/host/payout-account — Resolve + save Paystack-verified account
+  fastify.put("/payout-account", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+
+    const body = (request.body || {}) as { bankCode?: string; accountNumber?: string };
+    if (!body.bankCode || !body.accountNumber) {
+      return reply.status(400).send({ error: "Both bankCode and accountNumber are required." });
+    }
+
+    try {
+      const result = await hostsService.updatePayoutAccount(
+        session.userId,
+        { bankCode: body.bankCode, accountNumber: body.accountNumber },
+        request.ip
+      );
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(err.statusCode || 400).send({ error: err.message });
+    }
   });
 }

@@ -16,6 +16,7 @@ import { locationsRoutes } from "./modules/locations/locations.routes";
 import { uploadsRoutes } from "./modules/uploads/uploads.routes";
 import { paymentsRoutes } from "./modules/payments/payments.routes";
 import { healthRoutes } from "./modules/health/health.routes";
+import { notificationsRoutes } from "./modules/notifications/notifications.routes";
 
 /**
  * Build and configure the Fastify application instance.
@@ -95,6 +96,17 @@ export async function buildApp(): Promise<FastifyInstance> {
   await fastify.register(locationsRoutes, { prefix: "/api/locations" });
   await fastify.register(uploadsRoutes, { prefix: "/api/uploads" });
   await fastify.register(paymentsRoutes, { prefix: "/api/payments" });
+  // Public bank list — parity with Next `/api/banks` for Flutter when Fastify is sole origin
+  fastify.get("/api/banks", async (_request, reply) => {
+    try {
+      const { BankResolutionService } = await import("./modules/payments/bank-resolution.service");
+      const banks = await BankResolutionService.getNigerianBanks();
+      return reply.send({ banks });
+    } catch (err: any) {
+      return reply.status(500).send({ error: err.message || "Failed to retrieve Nigerian banks" });
+    }
+  });
+  await fastify.register(notificationsRoutes, { prefix: "/api/notifications" });
 
   // ─── Graceful Shutdown ───
   const shutdown = async () => {

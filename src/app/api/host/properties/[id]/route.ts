@@ -49,16 +49,24 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   const { id } = await Promise.resolve(params);
   const { searchParams } = new URL(req.url);
   const confirmWithReservations = searchParams.get("confirm") === "true";
+  const modeParam = searchParams.get("mode");
+  const mode = modeParam === "delete" || modeParam === "archive" ? modeParam : undefined;
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
 
   try {
-    const result = await hostsService.deleteProperty(session.userId, id, confirmWithReservations);
+    const result = await hostsService.deleteProperty(session.userId, id, confirmWithReservations, {
+      ipAddress: ip,
+      mode,
+    });
     return NextResponse.json(result);
   } catch (err: any) {
     return NextResponse.json(
       {
-        error: err.message || "Failed to delete property listing",
+        error: err.message || "Failed to archive or delete property listing",
         requiresConfirmation: !!err.requiresConfirmation,
         upcomingCount: err.upcomingCount || 0,
+        action: err.action || "archive",
+        hasFinancialHistory: !!err.hasFinancialHistory,
       },
       { status: err.statusCode || 400 }
     );

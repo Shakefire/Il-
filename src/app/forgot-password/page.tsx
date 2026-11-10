@@ -50,7 +50,7 @@ export default function ForgotPasswordPage() {
           <div className="space-y-6">
             <FormAlert
               type="success"
-              message={`We've sent a reset link to ${email}. Check your inbox and spam folder.`}
+              message="If an account exists for that email address, password reset instructions have been sent. Check your inbox and spam folder."
             />
             <div className="pt-2">
               <Link

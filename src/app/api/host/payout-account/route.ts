@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateNextRequest } from "@/lib/serverAuth";
-import { getDb, schema } from "@/../backend/src/db/client";
-import { eq } from "drizzle-orm";
-import { BankResolutionService, maskAccountNumber } from "@/../backend/src/modules/payments/bank-resolution.service";
+import { hostsService } from "@/../backend/src/modules/hosts/hosts.service";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/host/payout-account
  * Securely retrieve saved host payout account (account number masked).
+ * Canonical logic: hostsService.getPayoutAccount (shared with Fastify).
  */
 export async function GET(req: NextRequest) {
   const session = authenticateNextRequest(req);
@@ -17,36 +16,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const db = getDb();
-    const [profile] = await db
-      .select({
-        bankName: schema.profiles.bankName,
-        bankCode: schema.profiles.bankCode,
-        bankAccountNumber: schema.profiles.bankAccountNumber,
-        bankAccountName: schema.profiles.bankAccountName,
-        bankAccountVerifiedAt: schema.profiles.bankAccountVerifiedAt,
-      })
-      .from(schema.profiles)
-      .where(eq(schema.profiles.userId, session.userId))
-      .limit(1);
-
-    if (!profile || !profile.bankAccountNumber) {
-      return NextResponse.json({
-        hasAccount: false,
-        account: null,
-      });
-    }
-
-    return NextResponse.json({
-      hasAccount: true,
-      account: {
-        bankName: profile.bankName,
-        bankCode: profile.bankCode,
-        accountNumberMasked: maskAccountNumber(profile.bankAccountNumber),
-        accountName: profile.bankAccountName,
-        verifiedAt: profile.bankAccountVerifiedAt,
-      },
-    });
+    const result = await hostsService.getPayoutAccount(session.userId);
+    return NextResponse.json(result);
   } catch (err: any) {
     console.error("[API /api/host/payout-account GET] Error:", err);
     return NextResponse.json(
@@ -58,8 +29,8 @@ export async function GET(req: NextRequest) {
 
 /**
  * PUT /api/host/payout-account
- * Set or replace host payout account. Must be authoritatively resolved with Paystack.
- * Payload: { bankCode: string, accountNumber: string }
+ * Set or replace host payout account via Paystack resolve.
+ * Canonical logic: hostsService.updatePayoutAccount (shared with Fastify).
  */
 export async function PUT(req: NextRequest) {
   const session = authenticateNextRequest(req);
@@ -77,8 +48,7 @@ export async function PUT(req: NextRequest) {
     }
 
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown-ip";
-
-    const result = await BankResolutionService.updateHostPayoutAccount(
+    const result = await hostsService.updatePayoutAccount(
       session.userId,
       {
         bankCode: String(body.bankCode).trim(),

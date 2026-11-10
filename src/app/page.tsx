@@ -4,23 +4,21 @@ import SearchBar from "@/components/SearchBar";
 import DestinationTile from "@/components/DestinationTile";
 import HostCTA from "@/components/HostCTA";
 import StaysExplorer from "@/components/StaysExplorer";
-import { PROPERTIES, DESTINATIONS } from "@/data/properties";
+import { DESTINATIONS } from "@/data/properties";
 import { getPublishedProperties } from "@/../backend/src/modules/properties/properties.service";
 import { Property } from "@/types";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  let stays: Property[] = PROPERTIES;
+  let stays: Property[] = [];
   try {
     const result = await getPublishedProperties({ limit: 50, offset: 0 });
-    if (result && Array.isArray(result.properties) && result.properties.length > 0) {
-      const dbSlugs = new Set(result.properties.map((p: any) => p.slug || p.id));
-      const remainingStatic = PROPERTIES.filter((p) => !dbSlugs.has(p.slug) && !dbSlugs.has(p.id));
-      stays = [...(result.properties as unknown as Property[]), ...remainingStatic];
+    if (result && Array.isArray(result.properties)) {
+      stays = result.properties as unknown as Property[];
     }
   } catch (err) {
-    console.warn("[HomePage] DB properties load fallback to static:", err);
+    console.warn("[HomePage] DB properties load failed — showing empty marketplace:", err);
   }
 
   return (
