@@ -211,7 +211,7 @@ class _HostOverviewScreenState extends State<HostOverviewScreen> {
                               style: AppTypography.bodyMedium,
                             ),
                             subtitle: Text(
-                              'Respond before the 120s server deadline.',
+                              'Respond before the deadline ends.',
                               style: AppTypography.caption,
                             ),
                             trailing: const Icon(Icons.chevron_right),
@@ -307,12 +307,13 @@ class _KycBanner extends StatelessWidget {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  approved ? 'KYC approved' : 'Host verification',
+                  approved ? 'Verified host' : 'Identity verification',
                   style: AppTypography.bodyMedium,
                 ),
               ),
               HostStatusChip(
                 label: status,
+                kind: HostStatusChipKind.verification,
                 tone: approved
                     ? HostStatusTone.success
                     : HostStatusTone.warning,

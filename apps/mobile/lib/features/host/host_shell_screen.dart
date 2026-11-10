@@ -89,7 +89,7 @@ class _HostShellScreenState extends State<HostShellScreen> {
         body: IleEmptyState(
           title: 'Host access required',
           message:
-              'Complete host verification to manage listings, reservations, and earnings. Guests start KYC from Become a host.',
+              'Complete identity verification to manage listings, booking requests, and earnings.',
           icon: Icons.home_work_outlined,
           actionLabel: 'Become a host',
           onAction: () => context.push(AppRoutes.hostOnboarding),

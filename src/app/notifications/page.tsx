@@ -147,7 +147,7 @@ export default function NotificationsPage() {
             <Bell className="mx-auto text-[#8B8B86]" size={28} aria-hidden />
             <p className="mt-3 text-[#171717] font-medium">No notifications yet</p>
             <p className="mt-1 text-sm text-[#6B6B67]">
-              Updates about bookings and account security will appear here.
+              Booking and account updates land here. Email remains the backup if push is unavailable on this device.
             </p>
           </div>
         )}

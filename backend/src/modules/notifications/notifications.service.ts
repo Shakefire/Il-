@@ -188,7 +188,7 @@ export function welcomeEmail(data: { name: string; email: string }): EmailPayloa
   const safeName = escapeHtml(data.name);
   const content = `
     <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Welcome to Ilé, ${safeName}!</h2>
-    <p>Your account has been created. You can now discover, reserve, and enjoy verified shortlets across Abuja, Lagos, and throughout Nigeria.</p>
+    <p>Your account has been created. You can now discover and request verified stays across Abuja, Lagos, and throughout Nigeria.</p>
     <div style="margin: 24px 0;">
       <a href="${env.FRONTEND_URL}/search" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 24px; border-radius: 8px; text-decoration: none;">Explore Stays</a>
     </div>
@@ -197,9 +197,9 @@ export function welcomeEmail(data: { name: string; email: string }): EmailPayloa
 
   return {
     to: data.email,
-    subject: `Welcome to Ilé — Verified Nigerian Shortlets`,
+    subject: `Welcome to Ilé — verified Nigerian stays`,
     html: emailShell("Welcome", "Your account is ready", content),
-    text: `Welcome to Ilé, ${data.name}!\n\nYour account is ready. Discover verified shortlets at ${env.FRONTEND_URL}/search`,
+    text: `Welcome to Ilé, ${data.name}!\n\nYour account is ready. Discover verified stays at ${env.FRONTEND_URL}/search`,
   };
 }
 
@@ -350,46 +350,46 @@ export function bookingConfirmationEmail(data: BookingConfirmationData): EmailPa
       : `${env.FRONTEND_URL}/trips?ref=${encodeURIComponent(data.referenceCode)}`
   );
 
-  // Status Badge Metadata
-  let statusBadgeText = "● CONFIRMED";
+  // Status Badge Metadata — hospitality labels, never raw enums
+  let statusBadgeText = "● Confirmed";
   let statusBadgeBg = "#EDF5F2";
   let statusBadgeBorder = "#D1E5DE";
   let statusBadgeColor = "#0B5D45";
   let headlineTitle = "Your reservation is confirmed.";
   let headlineSubtitle = `Dear ${escapeHtml(data.guestName)}, your stay at <strong>${escapeHtml(data.propertyTitle)}</strong> is secured. Below is your official reservation record, apartment summary, arrival address, and gate clearance.`;
-  let ctaButtonLabel = "View Reservation &amp; Access Pass &rarr;";
+  let ctaButtonLabel = "View Reservation &amp; Arrival Details &rarr;";
 
   if (isPending) {
-    statusBadgeText = "● PAYMENT PENDING";
+    statusBadgeText = "● Payment waiting";
     statusBadgeBg = "#FEF7ED";
     statusBadgeBorder = "#FCE8CF";
     statusBadgeColor = "#9A5B13";
-    headlineTitle = "Reservation received — awaiting payment.";
-    headlineSubtitle = `Dear ${escapeHtml(data.guestName)}, we have received your booking request for <strong>${escapeHtml(data.propertyTitle)}</strong>. Please finalize your payment to confirm your dates and unlock arrival clearance.`;
-    ctaButtonLabel = "Complete Payment &amp; Secure Stay &rarr;";
+    headlineTitle = "Host accepted — payment waiting.";
+    headlineSubtitle = `Dear ${escapeHtml(data.guestName)}, the host accepted your request for <strong>${escapeHtml(data.propertyTitle)}</strong>. Complete payment before the window ends to confirm your stay.`;
+    ctaButtonLabel = "Proceed to payment &rarr;";
   } else if (isCancelled) {
-    statusBadgeText = "✕ CANCELLED";
+    statusBadgeText = "✕ Cancelled";
     statusBadgeBg = "#FDF2F2";
     statusBadgeBorder = "#F8D7D7";
     statusBadgeColor = "#B91C1C";
     headlineTitle = "Your reservation has been cancelled.";
     headlineSubtitle = `Dear ${escapeHtml(data.guestName)}, this is to confirm that reservation <strong>${escapeHtml(data.referenceCode)}</strong> for ${escapeHtml(data.propertyTitle)} has been cancelled and dates released.`;
-    ctaButtonLabel = "Explore Verified Stays &rarr;";
+    ctaButtonLabel = "Explore stays &rarr;";
   } else if (isFailed) {
-    statusBadgeText = "⚠ PAYMENT INCOMPLETE";
+    statusBadgeText = "⚠ Payment not completed";
     statusBadgeBg = "#FDF2F2";
     statusBadgeBorder = "#F8D7D7";
     statusBadgeColor = "#B91C1C";
     headlineTitle = "Payment was not completed.";
     headlineSubtitle = `Dear ${escapeHtml(data.guestName)}, your payment transaction could not be completed. Your reservation remains on hold. Please retry or choose an alternative payment method.`;
-    ctaButtonLabel = "Retry Payment &rarr;";
+    ctaButtonLabel = "Retry payment &rarr;";
   }
 
   // Subject line
-  let emailSubject = `Booking Confirmed: ${data.propertyTitle} (${data.referenceCode})`;
-  if (isPending) emailSubject = `Reservation Received — Payment Pending: ${data.propertyTitle} (${data.referenceCode})`;
-  else if (isCancelled) emailSubject = `Reservation Cancelled: ${data.propertyTitle} (${data.referenceCode})`;
-  else if (isFailed) emailSubject = `Payment Required: ${data.propertyTitle} (${data.referenceCode})`;
+  let emailSubject = `Booking confirmed: ${data.propertyTitle} (${data.referenceCode})`;
+  if (isPending) emailSubject = `Payment waiting: ${data.propertyTitle} (${data.referenceCode})`;
+  else if (isCancelled) emailSubject = `Reservation cancelled: ${data.propertyTitle} (${data.referenceCode})`;
+  else if (isFailed) emailSubject = `Payment not completed: ${data.propertyTitle} (${data.referenceCode})`;
 
   const checkInFormatted = formatDisplayDate(data.checkIn);
   const checkOutFormatted = formatDisplayDate(data.checkOut);
@@ -1621,7 +1621,7 @@ export function propertyReviewStatusEmail(data: {
   return {
     to: data.hostEmail,
     subject: isApproved
-      ? `🎉 Your listing is live: ${data.propertyTitle}`
+      ? `Your listing is live: ${data.propertyTitle}`
       : `Action required for your listing: ${data.propertyTitle}`,
     html: emailShell(
       isApproved ? "Listing Approved" : "Listing Review Update",
@@ -1706,7 +1706,7 @@ export function hostApplicationApprovedEmail(data: {
 
   return {
     to: data.hostEmail,
-    subject: `🎉 Host Verification Approved — Welcome to Ilé`,
+    subject: `Host Verification Approved — Welcome to Ilé`,
     html: emailShell("Account Approved", "Verified Property Partner", content),
     text: `Congratulations ${data.hostName}! Your host verification is approved. Manage your properties at ${env.FRONTEND_URL}/host/dashboard`,
   };
@@ -1778,7 +1778,7 @@ export function hostWelcomeEmail(data: { name: string; email: string }): EmailPa
     <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 24px 0;">
       <h3 style="font-size: 15px; margin: 0 0 12px 0; color: #0B5D45; font-weight: 700;">Next Steps to Publish Your Listings</h3>
       <ol style="margin: 0; padding-left: 20px; font-size: 14px; color: #374151; line-height: 1.8;">
-        <li><strong>Complete Verification (KYC):</strong> Submit your valid government ID and property ownership or management authority.</li>
+        <li><strong>Complete identity verification:</strong> Submit your valid government ID and property ownership or management authority.</li>
         <li><strong>Add Payout Details:</strong> Enter your Nigerian bank account to receive automated guest payouts.</li>
         <li><strong>Create &amp; Publish:</strong> Once verified, create and publish your listings immediately without routine per-listing delays.</li>
       </ol>
@@ -1901,7 +1901,7 @@ export function listingPublishedEmail(data: {
 
   return {
     to: data.hostEmail,
-    subject: `🎉 Your listing is live: ${data.propertyTitle}`,
+    subject: `Your listing is live: ${data.propertyTitle}`,
     html: emailShell("Listing Published", "Live on Ilé", content),
     text: `Congratulations ${data.hostName}! Your property "${data.propertyTitle}" (${location} at ${formattedPrice}/night) is live on Ilé.\n\nView listing: ${env.FRONTEND_URL}/properties/${data.propertyId}`,
   };
@@ -2025,9 +2025,9 @@ export function bookingInitiatedEmail(data: {
 
   return {
     to: data.guestEmail,
-    subject: `Request Submitted: ${data.propertyTitle} (#${data.referenceCode})`,
-    html: emailShell("Booking Request", "Awaiting Host", content),
-    text: `Hello ${data.guestName}, your reservation #${data.referenceCode} for ${data.propertyTitle} (${dates}) is awaiting host approval (${formattedTotal}). Status: ${statusUrl}`,
+    subject: `Waiting for the host: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Booking Request", "Waiting for the host", content),
+    text: `Hello ${data.guestName}, your booking request #${data.referenceCode} for ${data.propertyTitle} (${dates}) is waiting for the host (${formattedTotal}). You only pay after they accept. Status: ${statusUrl}`,
   };
 }
 
@@ -2083,19 +2083,19 @@ export function guestHostAcceptedEmail(data: {
   const formattedTotal = formatCurrency(data.totalAmount, data.currency || "NGN");
   const payUrl = `${env.FRONTEND_URL}/booking/status/${data.referenceCode}${data.accessToken ? `?accessToken=${encodeURIComponent(data.accessToken)}` : ""}`;
   const content = `
-    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Host Accepted — Complete Payment</h2>
+    <h2 style="font-size: 20px; margin-top: 0; color: #171717;">Host accepted — proceed to payment</h2>
     <p>Hello ${escapeHtml(data.guestName)},</p>
     <p>Your host accepted the request for <strong>${escapeHtml(data.propertyTitle)}</strong> (#${escapeHtml(data.referenceCode)}).</p>
-    <p style="font-size: 14px; color: #374151;">Stay: ${dates}. Amount due: <strong>${formattedTotal}</strong>. Pay before ${escapeHtml(data.paymentDeadlineAt)}.</p>
+    <p style="font-size: 14px; color: #374151;">Stay: ${dates}. Amount due: <strong>${formattedTotal}</strong>. Complete payment before ${escapeHtml(data.paymentDeadlineAt)} to confirm your stay.</p>
     <div style="margin: 28px 0;">
-      <a href="${payUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Complete Payment →</a>
+      <a href="${payUrl}" style="display: inline-block; background-color: #0B5D45; color: #FFFFFF; font-weight: 600; padding: 12px 26px; border-radius: 8px; text-decoration: none;">Proceed to payment →</a>
     </div>
   `;
   return {
     to: data.guestEmail,
-    subject: `Payment due: ${data.propertyTitle} (#${data.referenceCode})`,
-    html: emailShell("Payment Due", "Host Accepted", content),
-    text: `Host accepted #${data.referenceCode}. Pay ${formattedTotal} before ${data.paymentDeadlineAt}: ${payUrl}`,
+    subject: `Proceed to payment: ${data.propertyTitle} (#${data.referenceCode})`,
+    html: emailShell("Proceed to payment", "Host accepted", content),
+    text: `Host accepted #${data.referenceCode}. Proceed to payment of ${formattedTotal} before ${data.paymentDeadlineAt}: ${payUrl}`,
   };
 }
 
@@ -2442,7 +2442,7 @@ export function hostBookingConfirmedEmail(data: {
           <td style="padding: 8px 0 0 0; text-align: right; font-weight: 800; color: #0B5D45; font-size: 16px;">${formatCurrency(data.netPayout, cur)}</td>
         </tr>
       </table>
-      <p style="margin: 12px 0 0 0; font-size: 12px; color: #8B8B86;">Payouts are automatically scheduled to your verified Nigerian bank account after guest check-in verification.</p>
+      <p style="margin: 12px 0 0 0; font-size: 12px; color: #8B8B86;">These earnings stay held until settlement rules for your payout mode are met. Held amounts are not withdrawable yet.</p>
     </div>
 
     <div style="margin: 28px 0;">
@@ -2452,9 +2452,9 @@ export function hostBookingConfirmedEmail(data: {
 
   return {
     to: data.hostEmail,
-    subject: `💰 New Booking Confirmed: ${data.propertyTitle} (${formatCurrency(data.netPayout, cur)} net)`,
-    html: emailShell("Booking Confirmed", "Host Notification", content),
-    text: `Hello ${data.hostName}, new confirmed booking for ${data.propertyTitle} from ${data.guestName} (${dates}). Net payout: ${formatCurrency(data.netPayout, cur)}. View dashboard: ${env.FRONTEND_URL}/host/dashboard`,
+    subject: `Booking confirmed: ${data.propertyTitle} (${formatCurrency(data.netPayout, cur)} host earnings)`,
+    html: emailShell("Booking confirmed", "Host notification", content),
+    text: `Hello ${data.hostName}, new confirmed booking for ${data.propertyTitle} from ${data.guestName} (${dates}). Host earnings: ${formatCurrency(data.netPayout, cur)} (held until settlement rules are met). View dashboard: ${env.FRONTEND_URL}/host/dashboard`,
   };
 }
 
@@ -2549,7 +2549,7 @@ export function hostNewReviewEmail(data: {
 
   return {
     to: data.hostEmail,
-    subject: `⭐ New ${data.rating}-Star Review for ${data.propertyTitle}`,
+    subject: `New ${data.rating}-Star Review for ${data.propertyTitle}`,
     html: emailShell("New Review", "Guest Feedback", content),
     text: `New review for ${data.propertyTitle} by ${data.guestName}: ${data.rating}/5 stars. "${data.reviewBody || ""}". Manage in dashboard: ${env.FRONTEND_URL}/host/dashboard`,
   };
@@ -2600,9 +2600,9 @@ export function hostPayoutDisbursedEmail(data: {
 
   return {
     to: data.hostEmail,
-    subject: `💰 Payout Disbursed: ${formattedAmount}`,
-    html: emailShell("Payout Disbursed", "Host Earnings", content),
-    text: `Hello ${data.hostName}, a payout of ${formattedAmount} has been disbursed to your account. Transfer ref: ${data.transferRef || "Completed"}.`,
+    subject: `Payout sent: ${formattedAmount}`,
+    html: emailShell("Payout sent", "Host earnings", content),
+    text: `Hello ${data.hostName}, a payout of ${formattedAmount} was sent to your bank account. Transfer ref: ${data.transferRef || "Completed"}.`,
   };
 }
 

@@ -27,7 +27,7 @@ const NotificationsPanel = ({ alerts, loading, error }: Props) => {
       <div className="space-y-2 py-10">
         <h2 className="text-lg font-semibold text-[#171717]">No host alerts right now</h2>
         <p className="text-sm text-[#6B6B67]">
-          Reservation requests, KYC reminders, and unread host inbox items appear here.
+          Booking requests, identity verification reminders, and unread host inbox items appear here.
         </p>
         <Link href="/notifications" className="text-sm text-[#0B5D45] underline-offset-4 hover:underline">
           Open full inbox

@@ -45,6 +45,11 @@ import type { HostDashboardTab, HostDashboardStats } from "@/components/host-das
 import { api } from "@/lib/api";
 import { validateHostWithdrawRequest } from "@/lib/phase7-guest-host-ui";
 import { formatNaira } from "@/lib/utils";
+import {
+  hostBookingStatusLabel,
+  hostPayoutStatusLabel,
+  HostMessages,
+} from "@/lib/host-messages";
 import { useAuth } from "@/context/AuthContext";
 import { motion, AnimatePresence, useSpring, useTransform, type Variants } from "framer-motion";
 
@@ -900,46 +905,47 @@ export default function HostDashboardPage() {
   };
 
   const getBookingStatusBadge = (status: string) => {
+    const label = hostBookingStatusLabel(status)
     switch (status) {
       case "PENDING_HOST":
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-50 text-orange-800 border border-orange-200">
             <Clock size={12} />
-            Awaiting your response
+            {label}
           </span>
         );
       case "CONFIRMED":
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
             <CheckCircle2 size={12} />
-            Confirmed
+            {label}
           </span>
         );
       case "PAYMENT_PENDING":
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
             <Clock size={12} />
-            Awaiting guest payment
+            {label}
           </span>
         );
       case "CANCELLED":
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
             <XCircle size={12} />
-            Cancelled
+            {label}
           </span>
         );
       case "COMPLETED":
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
             <CheckCircle2 size={12} />
-            Completed
+            {label}
           </span>
         );
       default:
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
-            {status || "—"}
+            {label}
           </span>
         );
     }
@@ -1012,35 +1018,52 @@ export default function HostDashboardPage() {
   };
 
   const getPaymentStatusBadge = (status: string) => {
-    if (status === "SUCCESS") {
+    const normalized = (status || "").toUpperCase()
+    if (normalized === "SUCCESS" || normalized === "PAID") {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
           Paid
         </span>
       );
     }
+    if (normalized === "PENDING" || normalized === "PROCESSING") {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+          {HostMessages.waitingForGuestPayment}
+        </span>
+      );
+    }
+    if (!normalized) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">
+          No payment yet
+        </span>
+      );
+    }
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600 border border-gray-200">
-        {status || "Pending"}
+        Payment update
       </span>
     );
   };
 
   const getPayoutStatusBadge = (status: string) => {
-    switch (status) {
+    const label = hostPayoutStatusLabel(status)
+    const normalized = (status || "").toUpperCase()
+    switch (normalized) {
       case "DISBURSED":
       case "PAID":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
             <CheckCircle2 size={13} />
-            Paid &amp; Disbursed
+            {label}
           </span>
         );
       case "READY_FOR_PAYOUT":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
             <Clock size={13} />
-            Available for Payout
+            {label}
           </span>
         );
       case "SCHEDULED":
@@ -1048,40 +1071,35 @@ export default function HostDashboardPage() {
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
             <Clock size={13} />
-            Held in Escrow
+            {label}
           </span>
         );
       case "PROCESSING":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
             <Loader2 size={13} className="animate-spin" />
-            Transfer In-Flight
+            {label}
           </span>
         );
       case "FAILED":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
             <XCircle size={13} />
-            Payout Failed
+            {label}
           </span>
         );
       case "REVERSED":
+      case "CANCELLED":
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300">
             <AlertCircle size={13} />
-            Reversed by Bank
-          </span>
-        );
-      case "CANCELLED":
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
-            Cancelled
+            {label}
           </span>
         );
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-200">
-            {status}
+            {label}
           </span>
         );
     }
@@ -2051,7 +2069,7 @@ export default function HostDashboardPage() {
                     <AnimatedCurrency value={wallet?.balances?.available || 0} />
                   </div>
                   <div className="text-xs text-[#8B8B86] mt-1">
-                    Pending held: {formatNaira(wallet?.balances?.pending || 0)} · Processing:{" "}
+                    Held for settlement: {formatNaira(wallet?.balances?.pending || 0)} · Transferring:{" "}
                     {formatNaira(wallet?.balances?.processing || 0)}
                   </div>
                 </div>
@@ -2092,7 +2110,7 @@ export default function HostDashboardPage() {
                   </div>
                 </div>
                 <div className="text-[11px] text-[#8B8B86] border-t border-[#E7E5E0] pt-2">
-                  Earnings release after guest check-in + hold period — not on host accept alone
+                  Held earnings are not withdrawable yet. Release follows your payout mode and settlement rules — not host accept alone.
                 </div>
               </div>
             </div>
@@ -2102,12 +2120,14 @@ export default function HostDashboardPage() {
               <div className="flex items-center gap-2.5">
                 <ShieldCheck size={18} className="text-[#0B5D45] shrink-0" />
                 <div>
-                  <span className="font-bold">Transparent Host Economics: </span>
-                  <span>Hosts receive 100% of their desired base nightly rate. Standard platform distribution is seamlessly integrated into guest pricing.</span>
+                  <span className="font-bold">Your host rate: </span>
+                  <span>
+                    You earn 100% of your base nightly rate. Ilé’s fee is included in the guest list price — not taken from your host amount.
+                  </span>
                 </div>
               </div>
               <span className="font-mono text-[11px] text-[#0B5D45] bg-white px-2.5 py-1 rounded-lg border border-emerald-300 font-semibold shrink-0">
-                Host Payout: 100% Net
+                Host amount: 100% of base rate
               </span>
             </div>
 
@@ -2116,10 +2136,10 @@ export default function HostDashboardPage() {
               <div className="p-4 sm:p-5 border-b border-[#E7E5E0] flex items-center justify-between">
                 <div>
                   <h3 className="font-semibold text-base text-[#171717]">
-                    Payout Schedule &amp; Disbursements ({payouts.length})
+                    Payout schedule ({payouts.length})
                   </h3>
                   <p className="text-xs text-[#6B6B67] mt-0.5">
-                    Itemized settlements for each completed stay after 24-hour check-in verification.
+                    Host earnings per confirmed stay. Held amounts are not ready to withdraw.
                   </p>
                 </div>
               </div>
@@ -2127,14 +2147,14 @@ export default function HostDashboardPage() {
               {loadingPayouts ? (
                 <div className="flex items-center justify-center py-20 text-[#6B6B67]">
                   <Loader2 size={24} className="animate-spin mr-2 text-[#0B5D45]" />
-                  <span>Loading payout ledger...</span>
+                  <span>Loading payouts…</span>
                 </div>
               ) : payouts.length === 0 ? (
                 <div className="text-center py-16 px-4 space-y-3">
                   <Wallet size={36} className="mx-auto text-[#0B5D45]" />
-                  <h4 className="font-display text-xl text-[#171717]">No payouts recorded yet</h4>
+                  <h4 className="font-display text-xl text-[#171717]">No payouts yet</h4>
                   <p className="text-xs text-[#6B6B67] max-w-sm mx-auto">
-                    When guests complete check-in on your published properties, your net earnings (100% of your requested base rate) are automatically scheduled and disbursed here.
+                    After a stay is confirmed and settlement rules are met, your host earnings appear here. Held amounts are not yet ready to withdraw.
                   </p>
                 </div>
               ) : (
@@ -2182,7 +2202,7 @@ export default function HostDashboardPage() {
                             ) : p.status === "FAILED" ? (
                               <span className="text-rose-500 font-medium">Failed</span>
                             ) : (
-                              <span className="text-stone-400 italic">Held in Escrow</span>
+                              <span className="text-stone-400 italic">Held for settlement</span>
                             )}
                           </td>
                         </tr>

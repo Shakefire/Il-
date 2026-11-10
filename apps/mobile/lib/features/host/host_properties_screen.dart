@@ -135,7 +135,7 @@ class _HostPropertiesScreenState extends State<HostPropertiesScreen> {
                   ? IleEmptyState(
                       title: 'No listings yet',
                       message:
-                          'Create a listing after KYC approval. Publish is enforced by the server.',
+                          'Create a listing after identity verification. Publish is allowed only when Ilé marks you verified.',
                       icon: Icons.apartment_outlined,
                       actionLabel: 'Create listing',
                       onAction: () =>
@@ -167,6 +167,7 @@ class _HostPropertiesScreenState extends State<HostPropertiesScreen> {
                               style: AppTypography.supporting,
                             ),
                             leading: HostStatusChip(
+                              kind: HostStatusChipKind.listing,
                               label: status,
                               tone: toneForPropertyStatus(status),
                             ),

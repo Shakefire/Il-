@@ -1,28 +1,37 @@
 /// Central guest-facing copy for statuses, alerts, cancel dialogs, and CTAs.
 /// Never surface raw API enums (PAYMENT_PENDING, REQUESTED) or stack traces.
 abstract final class GuestMessages {
-  static const String bookNow = 'Book Now';
+  static const String bookNow = 'Request to book';
 
   static const String confirmingStayHeadline = 'Waiting for the host';
   static const String confirmingStayBody =
-      "We've sent your booking request. Payment unlocks only after the host accepts.";
+      "We've sent your booking request. You'll only pay after the host accepts.";
 
-  static const String acceptedHeadline = 'Your stay has been accepted!';
-  static const String paymentWaitingHeadline = 'Payment is waiting for you.';
+  static const String acceptedHeadline = 'Your stay has been accepted';
+  /// Exact lifecycle badge/label for PAYMENT_PENDING.
+  static const String paymentWaitingHeadline = 'Payment waiting';
   static const String paymentWaitingBody =
       'Complete payment before the window ends to confirm your stay.';
+  static const String proceedToPayment = 'Proceed to payment';
+  static const String completePayment = 'Complete payment';
+  static const String confirmed = 'Confirmed';
+  static const String completed = 'Completed';
+  static const String cancelled = 'Cancelled';
+  static const String declined = 'Host declined';
+  static const String requestExpiredLabel = 'Request expired';
+  static const String paymentWindowClosedLabel = 'Payment window closed';
 
   static const String unpaidCancelTitle = 'Cancel booking request?';
   static const String unpaidCancelBody =
-      'This will cancel the booking request you started.';
+      'This will cancel the booking request you started. No payment was taken.';
   static const String unpaidCancelKeep = 'Keep request';
   static const String unpaidCancelConfirm = 'Cancel request';
 
   static const String paidCancelTitle = 'Cancel booking?';
   static const String paidCancelBody =
-      'Are you sure you want to cancel this booking?';
+      'Request cancellation for this confirmed stay. Ilé reviews refunds — you will not trigger a bank refund yourself.';
   static const String paidCancelKeep = 'Keep booking';
-  static const String paidCancelConfirm = 'Cancel booking';
+  static const String paidCancelConfirm = 'Request cancellation';
 
   static const String paymentWindowClosed =
       'The payment window ended. This stay is not confirmed.';
@@ -30,14 +39,25 @@ abstract final class GuestMessages {
       'The host declined this request. No payment was taken.';
   static const String requestExpired =
       'The host did not respond in time. You can search for another stay.';
+  static const String latePaymentTitle =
+      'Payment received — stay not confirmed';
+  static const String latePaymentBody =
+      'A payment arrived after this booking was no longer payable. Your stay was not confirmed. Ilé is reviewing a refund — do not pay again.';
   static const String findAnotherStay = 'Find another stay';
+  static const String exploreStays = 'Explore stays';
 
   static const String openingPaystack =
-      'Opening secure Paystack checkout…';
+      'Opening secure checkout…';
   static const String paymentVerified =
       'Payment verified. Your stay is confirmed.';
   static const String paymentStillProcessing =
       'Payment is still processing. Pull to refresh — we confirm from the server.';
+
+  static const String emptyTripsTitle = 'No trips yet';
+  static const String emptyTripsBody =
+      'When you request a stay, it will show up here with its status.';
+
+  static const String genericError = 'Something went wrong. Try again.';
 
   /// Map backend status → guest language. Never return the raw enum alone.
   static String statusLabel(String status) {
@@ -48,14 +68,14 @@ abstract final class GuestMessages {
       case 'PAYMENT_PENDING':
         return paymentWaitingHeadline;
       case 'CONFIRMED':
-        return 'Confirmed';
+        return confirmed;
       case 'COMPLETED':
-        return 'Completed';
+        return completed;
       case 'CANCELLED':
       case 'FAILED':
-        return 'Cancelled';
+        return cancelled;
       default:
-        return 'Reservation update';
+        return 'Booking update';
     }
   }
 
@@ -70,6 +90,9 @@ abstract final class GuestMessages {
         return 'Payment verified. Arrival details unlock for confirmed stays.';
       case 'COMPLETED':
         return 'Thank you for staying with Ilé.';
+      case 'CANCELLED':
+      case 'FAILED':
+        return 'This booking is no longer active.';
       default:
         return 'Check the details below for the latest update.';
     }
@@ -77,7 +100,7 @@ abstract final class GuestMessages {
 
   static String sanitizeAlert(String? raw) {
     if (raw == null || raw.trim().isEmpty) {
-      return 'Something went wrong. Try again.';
+      return genericError;
     }
     final String trimmed = raw.trim();
     final String upper = trimmed.toUpperCase();
@@ -85,15 +108,19 @@ abstract final class GuestMessages {
     if (upper == 'PENDING_HOST' || upper == 'PENDING') {
       return confirmingStayHeadline;
     }
+    if (upper == 'CONFIRMED') return confirmed;
+    if (upper == 'COMPLETED') return completed;
+    if (upper == 'CANCELLED' || upper == 'FAILED') return cancelled;
     if (upper == 'REQUESTED') {
-      return 'Your refund request is with Ilé admin for review.';
+      return 'Your refund request is with Ilé for review.';
     }
     if (RegExp(r'status\s*[:=]?\s*\d{3}', caseSensitive: false)
             .hasMatch(trimmed) ||
         trimmed.contains('Exception') ||
         trimmed.contains('Stack Trace') ||
-        trimmed.startsWith('Error:')) {
-      return 'Something went wrong. Try again.';
+        trimmed.startsWith('Error:') ||
+        RegExp(r'^[A-Z][A-Z0-9_]{3,}$').hasMatch(trimmed)) {
+      return genericError;
     }
     return trimmed;
   }

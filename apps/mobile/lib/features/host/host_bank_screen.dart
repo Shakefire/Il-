@@ -142,7 +142,7 @@ class _HostBankScreenState extends State<HostBankScreen> {
                   padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
                   children: <Widget>[
                     Text(
-                      'Withdrawals require a Paystack-verified Nigerian account. This screen only resolves and saves — it does not initiate a live transfer.',
+                      'Withdrawals need a verified Nigerian bank account. Saving an account does not send money by itself.',
                       style: AppTypography.supporting,
                     ),
                     const SizedBox(height: AppSpacing.lg),

@@ -52,7 +52,7 @@ void main() {
       });
       expect(pay.canPay, isTrue);
       expect(pay.isRequest, isTrue);
-      expect(pay.statusHeadline, 'Payment is waiting for you.');
+      expect(pay.statusHeadline, 'Payment waiting');
 
       final IleBooking confirmed = IleBooking.fromJson(<String, dynamic>{
         'id': 'book_3',
@@ -77,8 +77,8 @@ void main() {
         'guestCount': 1,
         'totalAmount': 1,
       });
-      expect(b.statusBody.toLowerCase(), contains('not a confirmed'));
-      expect(b.statusBody.toLowerCase(), contains('admin'));
+      expect(b.statusBody.toLowerCase(), contains('not confirmed'));
+      expect(b.statusBody.toLowerCase(), contains('refund'));
     });
 
     test('declined, expired, and guest cancel are distinct and not payable', () {

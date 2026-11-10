@@ -5,42 +5,42 @@ abstract final class AppStrings {
       'Boutique stays & architectural havens in Nigeria';
 
   // Welcome
-  static const String welcomeHeadline = 'Find Your Perfect Apartment';
+  static const String welcomeHeadline = 'Ilé';
   static const String welcomeSupporting =
-      'Discover modern living spaces curated for your lifestyle.';
-  static const String getStarted = 'Get Started';
-  static const String continueAsGuest = 'Continue as Guest';
+      'Boutique stays across Abuja, Lagos, and Nigeria — power-ready homes you can trust.';
+  static const String getStarted = 'Sign in';
+  static const String continueAsGuest = 'Browse stays';
 
   // Auth shared
-  static const String authGreeting = 'Hi there!';
+  static const String authGreeting = 'Welcome back';
   static const String authSupporting =
-      'Your trusted and dependable partner in finding the perfect apartment.';
+      'Sign in to manage booking requests, payments, and confirmed stays.';
   static const String authSupportingRegister =
-      'Your trusted partner for finding the perfect apartment.';
+      'Create an account to request stays and save favourites.';
   static const String emailLabel = 'Email';
-  static const String emailHint = 'Chajipodonson@gmail.com';
+  static const String emailHint = 'you@email.com';
   static const String passwordLabel = 'Password';
   static const String passwordHint = '••••••••••••••••';
-  static const String fullNameLabel = 'Full Name';
-  static const String fullNameHint = 'Michal Jackson';
+  static const String fullNameLabel = 'Full name';
+  static const String fullNameHint = 'Adaeze Okonkwo';
   static const String orDivider = 'OR';
   static const String signIn = 'Sign in';
-  static const String signUp = 'Sign Up';
-  static const String forgotPassword = 'Forget Password';
-  static const String dontHaveAccount = "Don't Have Account?";
+  static const String signUp = 'Create account';
+  static const String forgotPassword = 'Forgot password?';
+  static const String dontHaveAccount = "Don't have an account?";
   static const String alreadyHaveAccount = 'Already have an account?';
   static const String termsAgreementPrefix = 'I agree to the ';
-  static const String termsLink = 'Terms & condition';
+  static const String termsLink = 'Terms of Service';
   static const String termsAgreementMiddle = ' and ';
-  static const String privacyLink = 'privacy policy';
-  static const String termsAgreementSuffix = ' of this platform';
+  static const String privacyLink = 'Privacy Policy';
+  static const String termsAgreementSuffix = '';
 
   // OTP (email verification — 6 digits from backend)
-  static const String otpTitle = 'Enter OTP Code';
+  static const String otpTitle = 'Enter verification code';
   static const String otpBodyPrefix =
-      "Check your email. We've sent a 6-digit verification code to ";
+      "Check your email. We've sent a 6-digit code to ";
   static const String otpBodySuffix =
-      '. Enter the code below to verify your account.';
+      '. Enter it below to verify your account.';
   static const String otpResendCountdownPrefix = 'You can resend the code in ';
   static const String otpResendCountdownSuffix = ' seconds';
   static const String otpResend = 'Resend code';

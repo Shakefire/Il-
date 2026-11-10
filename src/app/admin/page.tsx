@@ -839,7 +839,7 @@ export default function AdminPortalPage() {
   };
 
   const handleDeleteProperty = async (id: string) => {
-    if (!window.confirm("Are you sure you want to permanently delete this property listing? This action cannot be undone.")) {
+    if (!window.confirm("Permanently delete this listing?\n\nIt will leave the marketplace. Prefer Archive if the listing has booking or payout history. This cannot be undone.")) {
       return;
     }
     setActionLoading(id);
@@ -856,7 +856,7 @@ export default function AdminPortalPage() {
   };
 
   const handleDeleteHost = async (hostId: string) => {
-    if (!window.confirm("Are you sure you want to permanently delete this host? All listings, KYC records, and accounts associated with this host will be permanently removed. This action cannot be undone.")) {
+    if (!window.confirm("Permanently delete this host?\n\nThis removes their listings, identity documents, and account access. Bookings and financial history may be retained for audit. This cannot be undone.")) {
       return;
     }
     setActionLoading(hostId);
@@ -874,7 +874,7 @@ export default function AdminPortalPage() {
   };
 
   const handleDeleteKyc = async (hostId: string) => {
-    if (!window.confirm("Are you sure you want to clear/delete this host's KYC submission? The host verification will be reset to UNVERIFIED.")) {
+    if (!window.confirm("Clear this host's identity documents?\n\nVerification resets to unverified and they cannot publish until they resubmit. This cannot be undone.")) {
       return;
     }
     setActionLoading(hostId);

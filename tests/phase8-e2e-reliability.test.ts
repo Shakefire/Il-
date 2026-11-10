@@ -152,7 +152,7 @@ describe("Phase 8: E2E reliability, financial integrity, security", async () => 
     assert.equal(guestStatusHeadline("PENDING_HOST"), "Waiting for the host")
     assert.equal(
       guestStatusHeadline("PAYMENT_PENDING"),
-      "Payment is waiting for you."
+      "Payment waiting"
     )
     assert.equal(canGuestCancelUnpaid("PENDING_HOST"), true)
     assert.equal(canGuestCancelUnpaid("PAYMENT_PENDING"), true)

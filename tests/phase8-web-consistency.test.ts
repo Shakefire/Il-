@@ -8,6 +8,7 @@ import {
   expectedAfterStep,
 } from "../src/lib/phase8-consistency"
 import { canConfirmGuestCheckIn } from "../src/lib/phase7-guest-host-ui"
+import { hostBookingStatusLabel, hostPayoutStatusLabel } from "../src/lib/host-messages"
 
 describe("Phase 8: web/Flutter consistency helpers", () => {
   it("exposes the known backend booking statuses", () => {
@@ -27,11 +28,11 @@ describe("Phase 8: web/Flutter consistency helpers", () => {
 
   it("status headlines stay guest-readable and stable", () => {
     assert.equal(guestStatusHeadline("PENDING_HOST"), "Waiting for the host")
-    assert.equal(
-      guestStatusHeadline("PAYMENT_PENDING"),
-      "Payment is waiting for you."
-    )
+    assert.equal(guestStatusHeadline("PAYMENT_PENDING"), "Payment waiting")
     assert.equal(guestStatusHeadline("CONFIRMED"), "Confirmed")
+    assert.equal(guestStatusHeadline("COMPLETED"), "Completed")
+    assert.ok(!guestStatusHeadline("PAYMENT_PENDING").includes("PAYMENT_PENDING"))
+    assert.ok(!guestStatusHeadline("PENDING_HOST").includes("PENDING_HOST"))
   })
 
   it("journey expectations and check-in CTA align", () => {
@@ -50,5 +51,16 @@ describe("Phase 8: web/Flutter consistency helpers", () => {
       ),
       false
     )
+  })
+
+  it("host payout and booking labels never echo raw enums", () => {
+    assert.equal(hostPayoutStatusLabel("HELD"), "Held for settlement")
+    assert.equal(hostPayoutStatusLabel("READY_FOR_PAYOUT"), "Ready to withdraw")
+    assert.equal(hostPayoutStatusLabel("PROCESSING"), "Transfer in progress")
+    assert.equal(hostPayoutStatusLabel("PAID"), "Paid to your bank")
+    assert.ok(!hostPayoutStatusLabel("HELD").toLowerCase().includes("ready"))
+    assert.equal(hostBookingStatusLabel("PENDING_HOST"), "Waiting for your response")
+    assert.equal(hostBookingStatusLabel("PAYMENT_PENDING"), "Waiting for guest payment")
+    assert.ok(!hostBookingStatusLabel("PENDING_HOST").includes("PENDING_HOST"))
   })
 })

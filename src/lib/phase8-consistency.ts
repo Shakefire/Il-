@@ -3,6 +3,8 @@
  * Status labels must match backend BOOKING_STATUS + Flutter IleBooking headlines.
  */
 
+import { guestStatusLabel } from "./guest-messages"
+
 export const BACKEND_BOOKING_STATUSES = [
   "PENDING",
   "PENDING_HOST",
@@ -14,24 +16,9 @@ export const BACKEND_BOOKING_STATUSES = [
 
 export type BackendBookingStatus = (typeof BACKEND_BOOKING_STATUSES)[number]
 
-/** Guest-facing headline — keep aligned with Flutter IleBooking.statusHeadline */
+/** Guest-facing headline — single source: guest-messages.guestStatusLabel */
 export function guestStatusHeadline(status: string): string {
-  switch (status) {
-    case "PENDING_HOST":
-    case "PENDING":
-      return "Waiting for the host"
-    case "PAYMENT_PENDING":
-      return "Payment is waiting for you."
-    case "CONFIRMED":
-      return "Confirmed"
-    case "CANCELLED":
-    case "FAILED":
-      return "Cancelled"
-    case "COMPLETED":
-      return "Completed"
-    default:
-      return "Reservation update"
-  }
+  return guestStatusLabel(status)
 }
 
 /** Whether guest UI may call cancel for unpaid holds (backend cancelBooking gate). */

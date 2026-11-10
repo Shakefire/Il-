@@ -10,6 +10,7 @@ import '../../app/app_typography.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/ile_api.dart';
 import '../../core/constants/app_routes.dart';
+import '../../core/host_messages.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/ile_button.dart';
 import '../../shared/widgets/ile_empty_state.dart';
@@ -98,7 +99,7 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
     setState(() => _busyId = id);
     try {
       await context.read<IleApi>().acceptHostBooking(id);
-      setState(() => _notice = 'Accepted — guest can pay (PAYMENT_PENDING).');
+      setState(() => _notice = 'Accepted — guest can proceed to payment.');
       await _load();
     } on ApiException catch (err) {
       setState(() => _notice = err.message);
@@ -160,7 +161,11 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
                             return Padding(
                               padding: const EdgeInsets.only(right: 8),
                               child: ChoiceChip(
-                                label: Text(f == 'ALL' ? 'All' : f),
+                                label: Text(
+                                  f == 'ALL'
+                                      ? 'All'
+                                      : HostMessages.bookingStatusLabel(f),
+                                ),
                                 selected: selected,
                                 onSelected: (_) => setState(() => _filter = f),
                               ),
@@ -173,8 +178,8 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
                         IleEmptyState(
                           title: 'No reservations',
                           message: _filter == 'PENDING_HOST'
-                              ? 'New PENDING_HOST requests appear here with a 120s server deadline.'
-                              : 'Nothing in $_filter right now.',
+                              ? 'New booking requests appear here. Respond before the deadline ends.'
+                              : 'Nothing in this list right now.',
                           icon: Icons.event_note_outlined,
                         )
                       else
@@ -210,6 +215,7 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
                                       ),
                                       HostStatusChip(
                                         label: status,
+                                        kind: HostStatusChipKind.booking,
                                         tone: toneForBookingStatus(status),
                                       ),
                                     ],
@@ -219,21 +225,21 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
                                     style: AppTypography.supporting,
                                   ),
                                   Text(
-                                    'Host net ₦${IleFormatters.formatInteger(net)}',
+                                    'Your earnings ₦${IleFormatters.formatInteger(net)}',
                                     style: AppTypography.caption,
                                   ),
                                   if (status == 'CONFIRMED')
                                     Text(
                                       guestCheckedIn
                                           ? 'Guest checked in'
-                                          : 'Awaiting guest check-in (host cannot forge)',
+                                          : 'Awaiting guest check-in',
                                       style: AppTypography.caption,
                                     ),
                                   if (status == 'PENDING_HOST')
                                     Text(
                                       secs > 0
-                                          ? 'Respond in ${secs}s (server deadline)'
-                                          : 'Deadline passed — server will expire',
+                                          ? 'Respond in ${secs}s'
+                                          : 'Deadline passed — this request will expire',
                                       style: AppTypography.caption.copyWith(
                                         color: secs > 0
                                             ? AppColors.warningText

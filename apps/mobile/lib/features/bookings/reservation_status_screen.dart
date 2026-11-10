@@ -560,7 +560,7 @@ class _ReservationStatusScreenState extends State<ReservationStatusScreen>
                     if (booking.status == 'PENDING_HOST') ...[
                       const SizedBox(height: 10),
                       Text(
-                        'Still waiting on a real host response — status updates from the server only.',
+                        'Waiting for the host to respond. Pull to refresh for the latest status.',
                         textAlign: TextAlign.center,
                         style: AppTypography.caption.copyWith(
                           color: visual.fg.withValues(alpha: 0.85),

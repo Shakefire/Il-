@@ -306,15 +306,15 @@ class _BookingsScreenState extends State<BookingsScreen> {
   String _emptyMessage(_BookingTab tab) {
     switch (tab) {
       case _BookingTab.requests:
-        return 'When you reserve a stay, payment-due holds appear here until you complete checkout.';
+        return 'Waiting-for-host and payment-waiting bookings appear here until you complete payment or the request ends.';
       case _BookingTab.upcoming:
-        return 'Confirmed trips with a future check-in will show up here.';
+        return 'Confirmed stays with a future check-in will show up here.';
       case _BookingTab.ongoing:
-        return 'Once check-in day arrives for a confirmed booking, it moves here until check-out.';
+        return 'Once check-in day arrives for a confirmed stay, it moves here until check-out.';
       case _BookingTab.past:
-        return 'Completed trips and stays past check-out will collect here.';
+        return 'Completed stays past check-out will collect here.';
       case _BookingTab.cancelled:
-        return 'Cancelled or expired unpaid holds will appear in this list.';
+        return 'Cancelled, declined, or expired unpaid requests appear here.';
     }
   }
 

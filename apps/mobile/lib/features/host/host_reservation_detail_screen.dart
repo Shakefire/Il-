@@ -116,6 +116,7 @@ class _HostReservationDetailScreenState
                           ),
                         ),
                         HostStatusChip(
+                          kind: HostStatusChipKind.booking,
                           label: status,
                           tone: toneForBookingStatus(status),
                         ),

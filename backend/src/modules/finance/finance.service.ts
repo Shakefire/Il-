@@ -481,8 +481,8 @@ export class FinanceService {
               email: emailPayload,
               inbox: {
                 userId: host.id,
-                title: "Payout disbursed",
-                body: `Your payout of ${payout.currency || "NGN"} ${payout.amount} was sent.`,
+                title: "Payout sent to your bank",
+                body: `Your earnings payout of ${payout.currency || "NGN"} ${payout.amount} was sent.`,
                 deepLink: "/host/dashboard",
               },
               push: true,

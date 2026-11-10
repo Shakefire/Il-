@@ -29,6 +29,7 @@ import { api } from "@/lib/api";
 import { compressFile } from "@/lib/imageCompression";
 import FintechLivenessModal from "@/components/FintechLivenessModal";
 import BankAccountInput from "@/components/bank/BankAccountInput";
+import { hostVerificationLabel } from "@/lib/product-language";
 
 const NIGERIAN_CITIES = [
   "Abuja",
@@ -924,7 +925,7 @@ export default function OwnerOnboardingWizard() {
             <div className="border-b border-gray-100 pb-5 mb-6">
               <span className="text-xs font-bold uppercase tracking-wider text-[#0B5D45]">Step 3 of 6</span>
               <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 mt-1">
-                Government Identity / KYC Verification
+                Government identity verification
               </h2>
               <p className="text-sm text-gray-500 mt-1">
                 We verify who is listing properties on our platform so we can protect tenants and maintain community trust.
@@ -1415,9 +1416,9 @@ export default function OwnerOnboardingWizard() {
 
                 <div className="mt-6 bg-[#FAFAF8] border border-gray-200 rounded-xl p-4 text-left space-y-2 text-xs text-gray-600">
                   <div className="flex justify-between py-1 border-b border-gray-100">
-                    <span className="font-semibold text-gray-800">Verification Status:</span>
-                    <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold uppercase tracking-wide">
-                      {verificationStatus}
+                    <span className="font-semibold text-gray-800">Verification status</span>
+                    <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-semibold tracking-wide">
+                      {hostVerificationLabel(verificationStatus)}
                     </span>
                   </div>
                   <div className="flex justify-between py-1 border-b border-gray-100">
@@ -1490,7 +1491,7 @@ export default function OwnerOnboardingWizard() {
                   {/* KYC & Identity Summary */}
                   <div className="bg-[#FAFAF8] p-4 rounded-xl border border-gray-200">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-[#0B5D45] mb-2">
-                      2. KYC Government Credentials
+                      2. Government identity documents
                     </h4>
                     <p className="text-sm font-semibold text-gray-900 uppercase">{idType}: {idNumber}</p>
                     <p className="text-xs text-emerald-700 font-medium mt-1">

@@ -2,7 +2,7 @@
 /// Final payable amount is the server `totalAmount` after the request is created.
 /// Platform commission is intentionally omitted.
 const String reviewNoPaymentCopy =
-    'No payment is required yet. The host must confirm availability. This total is an estimate — the server sets the payable amount when you send the request.';
+    'No payment yet. You only pay after the host accepts. This total is an estimate until your request is created.';
 
 class GuestPriceEstimate {
   const GuestPriceEstimate({

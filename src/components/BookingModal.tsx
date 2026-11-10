@@ -328,7 +328,11 @@ export default function BookingModal({
       }
       if (status !== "PAYMENT_PENDING") {
         applyStatusFromBooking(booking, accessToken)
-        setErrorMessage(`Cannot pay while booking is ${status}.`)
+        setErrorMessage(
+          status === "PENDING_HOST" || status === "PENDING"
+            ? "Payment opens after the host accepts your request."
+            : "This booking is not ready for payment yet."
+        )
         return
       }
       if (booking.paymentDeadlineAt) setPaymentDeadlineAt(booking.paymentDeadlineAt)
@@ -652,8 +656,7 @@ export default function BookingModal({
                 </span>
               </div>
               <p className="text-[13px] text-[#6B6B67]">
-                Status updates from the server only — this screen does not
-                invent host acceptance. Ref:{" "}
+                We&apos;ll update this screen when the host responds. Ref:{" "}
                 <span className="font-mono font-semibold text-[#171717]">
                   {serverBooking?.referenceCode || "—"}
                 </span>
@@ -720,7 +723,7 @@ export default function BookingModal({
 
               <div className="flex items-center gap-2.5 text-[12.5px] text-[#6B6B67]">
                 <Lock size={14} className="text-[#065F46] shrink-0" />
-                <span>Secured by Paystack. Confirmation only after backend verification.</span>
+                <span>Secure checkout. Your stay confirms after payment is verified.</span>
               </div>
 
               <div className="pt-1 flex flex-col gap-3">

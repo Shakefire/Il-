@@ -1,5 +1,7 @@
 /// Guest-facing labels for live booking statuses.
 /// Mirrors `src/lib/phase11-guest-outcome.ts`. Does not rename API statuses.
+import 'guest_messages.dart';
+
 class GuestReservationOutcome {
   const GuestReservationOutcome({
     required this.kind,
@@ -26,24 +28,24 @@ class GuestReservationOutcome {
     if (normalized == 'PENDING_HOST' || normalized == 'PENDING') {
       return const GuestReservationOutcome(
         kind: 'waiting_host',
-        headline: 'Waiting for the host',
-        body: "We've sent your booking request to the host.",
+        headline: GuestMessages.confirmingStayHeadline,
+        body: GuestMessages.confirmingStayBody,
         paymentAvailable: false,
       );
     }
     if (normalized == 'PAYMENT_PENDING') {
-      return const GuestReservationOutcome(
+      return GuestReservationOutcome(
         kind: 'payment_due',
-        headline: 'Payment is waiting for you.',
+        headline: GuestMessages.paymentWaitingHeadline,
         body:
-            'Your stay has been accepted! Complete payment before the window ends.',
+            '${GuestMessages.acceptedHeadline}. ${GuestMessages.paymentWaitingBody}',
         paymentAvailable: true,
       );
     }
     if (normalized == 'CONFIRMED') {
       return const GuestReservationOutcome(
         kind: 'confirmed',
-        headline: 'Confirmed',
+        headline: GuestMessages.confirmed,
         body: 'Payment verified. Arrival details unlock for confirmed stays.',
         paymentAvailable: false,
       );
@@ -51,7 +53,7 @@ class GuestReservationOutcome {
     if (normalized == 'COMPLETED') {
       return const GuestReservationOutcome(
         kind: 'completed',
-        headline: 'Completed',
+        headline: GuestMessages.completed,
         body: 'Thank you for staying with Ilé.',
         paymentAvailable: false,
       );
@@ -62,36 +64,33 @@ class GuestReservationOutcome {
       if (reason.contains('LATE_PAYMENT_RECONCILIATION')) {
         return const GuestReservationOutcome(
           kind: 'late_reconciliation',
-          headline: 'Payment window closed',
-          body:
-              'This hold closed after the payment window. Late payment reconciliation is handled by Ilé admin — this is not a confirmed stay.',
+          headline: GuestMessages.latePaymentTitle,
+          body: GuestMessages.latePaymentBody,
           paymentAvailable: false,
         );
       }
       if (reason.contains('PAYMENT_WINDOW_EXPIRED')) {
         return const GuestReservationOutcome(
           kind: 'payment_expired',
-          headline: 'Payment window closed',
+          headline: GuestMessages.paymentWindowClosedLabel,
           body:
-              'The payment window ended before Paystack verified a payment. This is not a confirmed stay.',
+              'The payment window ended before we could confirm a payment. This is not a confirmed stay.',
           paymentAvailable: false,
         );
       }
       if (reason.contains('HOST_WINDOW_EXPIRED') || reason.contains('EXPIRED')) {
         return const GuestReservationOutcome(
           kind: 'request_expired',
-          headline: 'Request expired',
-          body:
-              'The host did not respond in time. You can search for another stay.',
+          headline: GuestMessages.requestExpiredLabel,
+          body: GuestMessages.requestExpired,
           paymentAvailable: false,
         );
       }
       if (reason.contains('HOST_DECLINED') || reason.contains('DECLINED')) {
         return const GuestReservationOutcome(
           kind: 'declined',
-          headline: 'Host declined',
-          body:
-              'The host declined this request. No payment was taken. Search again when you are ready.',
+          headline: GuestMessages.declined,
+          body: GuestMessages.hostDeclined,
           paymentAvailable: false,
         );
       }
@@ -114,16 +113,16 @@ class GuestReservationOutcome {
       }
       return const GuestReservationOutcome(
         kind: 'cancelled',
-        headline: 'Cancelled',
+        headline: GuestMessages.cancelled,
         body:
-            'This reservation was cancelled. No new charge was created from this screen.',
+            'This booking was cancelled. No new charge was created from this screen.',
         paymentAvailable: false,
       );
     }
     return GuestReservationOutcome(
       kind: 'other',
-      headline: normalized.isEmpty ? 'Reservation' : normalized,
-      body: 'Status from server: ${normalized.isEmpty ? 'unknown' : normalized}.',
+      headline: GuestMessages.statusLabel(normalized),
+      body: GuestMessages.statusDetail(normalized),
       paymentAvailable: false,
     );
   }

@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { formatNaira } from "@/lib/utils"
+import { HostMessages } from "@/lib/host-messages"
 import type { HostAlert, HostBooking, HostDashboardStats } from "./types"
 import { remainingHostSeconds } from "./types"
 
@@ -32,9 +33,9 @@ const OverviewPanel = ({
     <section className="space-y-8" aria-label="Host overview">
       <div className="space-y-2">
         <p className="font-display text-3xl sm:text-4xl text-[#0B5D45]">Ilé Host</p>
-        <h2 className="text-xl font-semibold text-[#171717]">Your listings and payouts at a glance</h2>
+        <h2 className="text-xl font-semibold text-[#171717]">{HostMessages.overviewTitle}</h2>
         <p className="text-sm text-[#6B6B67] max-w-2xl">
-          Guest list prices include platform markup. Your earnings use the host amount snapshotted on each confirmed stay.
+          {HostMessages.overviewBody}
         </p>
       </div>
 
@@ -77,11 +78,11 @@ const OverviewPanel = ({
           className="text-left space-y-1 min-h-[44px]"
           aria-label="Open earnings"
         >
-          <p className="text-xs uppercase tracking-wide text-[#8B8B86]">Available to withdraw</p>
-          <p className="text-2xl font-semibold text-[#0B5D45]">{formatNaira(walletAvailable)}</p>
+          <p className="text-xs uppercase tracking-wide text-[#8B8B86]">{HostMessages.availableToWithdraw}</p>
+          <p className="text-2xl font-semibold text-[#0B5D45] tabular-nums">{formatNaira(walletAvailable)}</p>
         </button>
         <div className="space-y-1">
-          <p className="text-xs uppercase tracking-wide text-[#8B8B86]">Lifetime earnings (confirmed)</p>
+          <p className="text-xs uppercase tracking-wide text-[#8B8B86]">{HostMessages.lifetimeEarnings}</p>
           <p className="text-2xl font-semibold text-[#171717]">{formatNaira(hostEarnings)}</p>
         </div>
         <div className="space-y-1">
@@ -105,13 +106,13 @@ const OverviewPanel = ({
           onClick={onOpenListings}
           className="min-h-[44px] px-4 border border-[#0B5D45] text-[#0B5D45] text-sm font-semibold"
         >
-          Manage listings
+          {HostMessages.manageListings}
         </button>
         <Link
           href="/host/onboarding/status"
           className="min-h-[44px] px-4 inline-flex items-center text-sm font-semibold text-[#6B6B67] underline-offset-4 hover:underline"
         >
-          KYC status
+          {HostMessages.identityStatus}
         </Link>
       </div>
 

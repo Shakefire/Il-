@@ -30,7 +30,7 @@ class _HelpScreenState extends State<HelpScreen>
     _HelpTopic(
       title: 'How booking & payment work',
       body:
-          'Tap Book Now to send a request to the host. When they accept, payment opens in Paystack. Your stay is confirmed only after payment is verified. Address and arrival details unlock after confirmation. Refunds on paid stays are handled by Ilé admin only.',
+          'Tap Request to book to send a request to the host. When they accept, proceed to payment. Your stay is confirmed only after payment is verified. Address and arrival details unlock after confirmation. Refunds on paid stays are handled by Ilé admin only.',
       tags: 'booking payment pending confirmed',
     ),
     _HelpTopic(
@@ -57,7 +57,7 @@ class _HelpScreenState extends State<HelpScreen>
     _HelpTopic(
       title: 'Publishing a listing',
       body:
-          'Hosts complete KYC in the Host section of this app (or web). Listings move DRAFT → PUBLISHED when verification is APPROVED. Publish is enforced by the server.',
+          'Hosts complete identity verification in the Host section (or on the web). Listings can publish only after Ilé marks you verified — the server enforces this.',
       tags: 'host listing publish',
     ),
     _HelpTopic(

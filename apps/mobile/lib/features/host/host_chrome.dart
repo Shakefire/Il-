@@ -6,6 +6,7 @@ import '../../app/app_colors.dart';
 import '../../app/app_typography.dart';
 import '../../core/api/ile_api.dart';
 import '../../core/constants/app_routes.dart';
+import '../../core/host_messages.dart';
 import '../../shared/widgets/ile_circular_back_button.dart';
 
 /// Shared host app bar with notifications badge + profile.
@@ -90,10 +91,12 @@ class HostStatusChip extends StatelessWidget {
     super.key,
     required this.label,
     this.tone = HostStatusTone.neutral,
+    this.kind = HostStatusChipKind.raw,
   });
 
   final String label;
   final HostStatusTone tone;
+  final HostStatusChipKind kind;
 
   @override
   Widget build(BuildContext context) {
@@ -116,6 +119,12 @@ class HostStatusChip extends StatelessWidget {
         bg = AppColors.surfaceMuted;
         fg = AppColors.foregroundSecondary;
     }
+    final String display = switch (kind) {
+      HostStatusChipKind.booking => HostMessages.bookingStatusLabel(label),
+      HostStatusChipKind.listing => HostMessages.listingStatusLabel(label),
+      HostStatusChipKind.verification => HostMessages.verificationLabel(label),
+      HostStatusChipKind.raw => label,
+    };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
@@ -123,7 +132,7 @@ class HostStatusChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        label,
+        display,
         style: AppTypography.caption.copyWith(
           color: fg,
           fontWeight: FontWeight.w600,
@@ -132,6 +141,8 @@ class HostStatusChip extends StatelessWidget {
     );
   }
 }
+
+enum HostStatusChipKind { raw, booking, listing, verification }
 
 enum HostStatusTone { neutral, success, warning, critical, info }
 

@@ -184,7 +184,7 @@ class _HostNotificationsScreenState extends State<HostNotificationsScreen>
       return const IleEmptyState(
         title: 'Inbox empty',
         message:
-            'Host booking and KYC messages appear here as real notification records.',
+            'Booking requests and identity verification updates appear here when Ilé sends them.',
         icon: Icons.inbox_outlined,
       );
     }
@@ -227,7 +227,7 @@ class _HostNotificationsScreenState extends State<HostNotificationsScreen>
     if (_alerts.isEmpty) {
       return const IleEmptyState(
         title: 'No operational alerts',
-        message: 'Pending requests and KYC reminders surface here from the dashboard.',
+        message: 'Open booking requests and verification reminders appear here from your host dashboard.',
         icon: Icons.notifications_none,
       );
     }

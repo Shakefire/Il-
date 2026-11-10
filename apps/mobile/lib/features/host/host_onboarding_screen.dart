@@ -17,7 +17,7 @@ import '../../shared/widgets/ile_circular_back_button.dart';
 import '../../shared/widgets/ile_error_state.dart';
 import '../../shared/widgets/ile_loading_indicator.dart';
 
-/// Multi-step host KYC — persists via Fastify onboarding endpoints.
+/// Multi-step host identity verification — persists via Fastify onboarding.
 class HostOnboardingScreen extends StatefulWidget {
   const HostOnboardingScreen({super.key});
 
@@ -503,7 +503,7 @@ class _HostOnboardingScreenState extends State<HostOnboardingScreen> {
     return <Widget>[
       Text('First listing draft', style: AppTypography.sectionHeading),
       Text(
-        'Optional draft title. You can finish the listing after KYC approval.',
+        'Optional draft title. You can finish the listing after identity verification.',
         style: AppTypography.supporting,
       ),
       TextField(
@@ -519,7 +519,7 @@ class _HostOnboardingScreenState extends State<HostOnboardingScreen> {
     return <Widget>[
       Text('Review & submit', style: AppTypography.sectionHeading),
       Text(
-        'Publishing stays blocked until an admin marks your KYC APPROVED.',
+        'Publishing stays blocked until Ilé marks your identity verification approved.',
         style: AppTypography.supporting,
       ),
       const SizedBox(height: AppSpacing.sm),

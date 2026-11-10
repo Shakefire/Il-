@@ -1724,8 +1724,8 @@ export const hostsService = {
           id: `alert_req_${b.id}`,
           type: "HOST_REQUEST_RECEIVED",
           severity: "action",
-          title: "Reservation request awaiting response",
-          body: `${b.guestFirstName || "Guest"} · ${b.referenceCode}. Respond before the host deadline expires.`,
+          title: "Booking request waiting for you",
+          body: `${b.guestFirstName || "Guest"} · ${b.referenceCode}. Accept or decline before the deadline ends.`,
           href: "/host/dashboard?tab=bookings",
           createdAt: (b.createdAt || new Date()).toISOString(),
         });
@@ -1743,12 +1743,26 @@ export const hostsService = {
       .limit(1);
 
     if (profile && profile.verificationStatus !== "APPROVED") {
+      const verificationLabel = (() => {
+        switch ((profile.verificationStatus || "").toUpperCase()) {
+          case "UNDER_REVIEW":
+            return "Identity under review"
+          case "REJECTED":
+          case "NEEDS_MORE_INFO":
+            return "More information needed"
+          case "PROFILE_COMPLETED":
+          case "REGISTERED":
+            return "Identity verification incomplete"
+          default:
+            return "Identity verification incomplete"
+        }
+      })()
       alerts.push({
         id: "alert_kyc",
         type: "KYC_STATUS",
         severity: "warning",
-        title: "Host verification incomplete",
-        body: `Current status: ${profile.verificationStatus || "NOT_STARTED"}. Complete KYC to publish listings.`,
+        title: verificationLabel,
+        body: "Complete identity verification before you can publish listings.",
         href: "/host/onboarding/status",
         createdAt: new Date().toISOString(),
       });
@@ -1759,8 +1773,8 @@ export const hostsService = {
         id: "alert_bank",
         type: "PAYOUT_ACCOUNT",
         severity: "info",
-        title: "Add a verified payout account",
-        body: "Withdrawals require a Paystack-verified Nigerian bank account.",
+        title: "Add a payout bank account",
+        body: "Withdrawals need a verified Nigerian bank account. Saving an account does not send money by itself.",
         href: "/host/dashboard?tab=financials",
         createdAt: new Date().toISOString(),
       });

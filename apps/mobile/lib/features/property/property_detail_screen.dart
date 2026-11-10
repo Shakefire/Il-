@@ -788,7 +788,7 @@ class _ReserveBar extends StatelessWidget {
                 SizedBox(
                   width: 148,
                   child: IleButton(
-                    label: property.isReserved ? 'Unavailable' : 'Book Now',
+                    label: property.isReserved ? 'Unavailable' : 'Request to book',
                     onPressed: property.isReserved ? null : onReserve,
                     isExpanded: true,
                   ),

@@ -74,7 +74,7 @@ export const dispatchLifecycleEmail = (
             userId: extras.userId,
             title: inboxTitle,
             body: inboxBody,
-            deepLink: extras.deepLink || `/bookings/${bookingId}`,
+            deepLink: extras.deepLink || `/trips`,
           }
         : undefined,
       sms:

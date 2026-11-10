@@ -107,10 +107,11 @@ class _HostProfileScreenState extends State<HostProfileScreen> {
                       const SizedBox(height: AppSpacing.md),
                       Row(
                         children: <Widget>[
-                          Text('KYC', style: AppTypography.caption),
+                          Text('Identity', style: AppTypography.caption),
                           const SizedBox(width: 8),
                           HostStatusChip(
                             label: status,
+                            kind: HostStatusChipKind.verification,
                             tone: approved
                                 ? HostStatusTone.success
                                 : HostStatusTone.warning,
@@ -120,14 +121,14 @@ class _HostProfileScreenState extends State<HostProfileScreen> {
                       const SizedBox(height: AppSpacing.sm),
                       Text(
                         approved
-                            ? 'You can publish listings. Server gates still apply.'
-                            : 'Complete onboarding to unlock publishing.',
+                            ? 'You can publish listings. Publish is still checked by the server.'
+                            : 'Complete identity verification before publishing listings.',
                         style: AppTypography.supporting,
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       if (!approved)
                         IleButton(
-                          label: 'Continue KYC onboarding',
+                          label: 'Continue identity verification',
                           onPressed: () =>
                               context.push(AppRoutes.hostOnboarding),
                           isExpanded: true,

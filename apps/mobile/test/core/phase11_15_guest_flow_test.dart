@@ -20,7 +20,8 @@ void main() {
     expect(stay.processingFee, 2000);
     expect(stay.estimatedTotal, 137000);
     expect(stay.isFinalPayable, isFalse);
-    expect(reviewNoPaymentCopy, contains('No payment is required yet'));
+    expect(reviewNoPaymentCopy, contains('No payment yet'));
+    expect(reviewNoPaymentCopy.toLowerCase(), contains('after the host accepts'));
     expect(reviewNoPaymentCopy.toLowerCase(), isNot(contains('do not need to accept')));
   });
 

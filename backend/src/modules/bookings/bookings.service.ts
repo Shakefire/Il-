@@ -369,7 +369,7 @@ export const bookingsService = {
           phone: booking.guestPhone || null,
           inboxTitle: "Booking request sent",
           inboxBody: `Your request for ${property.title} was sent to the host. Reference ${booking.referenceCode}.`,
-          deepLink: `/bookings/${booking.id}`,
+          deepLink: `/trips`,
           smsMessage: booking.guestPhone
             ? `Ilé: Your booking request ${booking.referenceCode} was sent to the host. We'll update you when they respond.`
             : undefined,
@@ -585,10 +585,10 @@ export const bookingsService = {
         {
           userId: booking.guestId,
           phone: booking.guestPhone,
-          inboxTitle: "Host confirmed your stay",
-          inboxBody: `Complete payment for ${property.title} (${booking.referenceCode}) before the deadline.`,
-          deepLink: `/bookings/${booking.id}`,
-          smsMessage: `Ilé: Host accepted ${booking.referenceCode}. Complete payment to confirm your stay.`,
+          inboxTitle: "Host accepted — proceed to payment",
+          inboxBody: `Proceed to payment for ${property.title} (${booking.referenceCode}) before the deadline.`,
+          deepLink: `/trips`,
+          smsMessage: `Ilé: Host accepted ${booking.referenceCode}. Proceed to payment to confirm your stay.`,
         }
       )
 
@@ -700,7 +700,7 @@ export const bookingsService = {
           phone: booking.guestPhone,
           inboxTitle: "Host declined your request",
           inboxBody: `Your request for ${property.title} (${booking.referenceCode}) was declined. Browse similar stays.`,
-          deepLink: `/bookings/${booking.id}`,
+          deepLink: `/trips`,
           smsMessage: `Ilé: Host declined ${booking.referenceCode}. Open the app to see similar stays.`,
         }
       )

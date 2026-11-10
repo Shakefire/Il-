@@ -34,7 +34,7 @@ void main() {
           'guestCount': 1,
           'totalAmount': 1,
         }).statusHeadline,
-        'Payment is waiting for you.',
+        'Payment waiting',
       );
       expect(
         IleBooking.fromJson(<String, dynamic>{

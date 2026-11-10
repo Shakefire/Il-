@@ -44,12 +44,17 @@ export default async function HomePage() {
         <div className="relative z-20 w-full max-w-6xl mx-auto px-6 sm:px-8 lg:px-12 py-16 sm:py-24 text-center flex flex-col items-center">
           {/* White Editorial Headline with Crisp High-Contrast Text Shadows */}
           <div className="max-w-3xl space-y-4">
-            <h1 className="font-display text-[44px] sm:text-[62px] lg:text-[76px] text-white font-semibold leading-[1.02] tracking-tight [text-shadow:0_2px_14px_rgba(0,0,0,0.75),0_1px_4px_rgba(0,0,0,0.9)]">
-              Find somewhere <br className="hidden sm:inline" />
-              worth staying.
+            <p
+              className="font-display text-[52px] sm:text-[72px] lg:text-[88px] text-white font-semibold leading-none tracking-tight [text-shadow:0_2px_14px_rgba(0,0,0,0.75),0_1px_4px_rgba(0,0,0,0.9)]"
+              aria-label="Ilé"
+            >
+              Ilé
+            </p>
+            <h1 className="font-display text-[28px] sm:text-[36px] lg:text-[42px] text-white font-normal leading-[1.15] tracking-tight text-balance [text-shadow:0_2px_12px_rgba(0,0,0,0.7)]">
+              Find somewhere worth staying.
             </h1>
-            <p className="text-[17px] sm:text-[21px] text-white max-w-xl mx-auto font-light leading-relaxed [text-shadow:0_1px_8px_rgba(0,0,0,0.7)]">
-              Thoughtfully selected homes, apartments and shortlets across Nigeria.
+            <p className="text-[16px] sm:text-[19px] text-white/95 max-w-xl mx-auto font-light leading-relaxed text-pretty [text-shadow:0_1px_8px_rgba(0,0,0,0.7)]">
+              Verified boutique stays in Abuja, Lagos, and across Nigeria — with power, water, and arrival details you can trust.
             </p>
           </div>
 

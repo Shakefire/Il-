@@ -8,6 +8,7 @@ import '../../app/app_typography.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/ile_api.dart';
 import '../../core/constants/app_routes.dart';
+import '../../core/host_messages.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/user_role.dart';
 import '../../shared/widgets/ile_button.dart';
@@ -84,7 +85,9 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
             .map(
               (Map<String, dynamic> p) => <String, dynamic>{
                 ...p,
-                'displayStatus': p['status'],
+                'displayStatus': HostMessages.payoutStatusLabel(
+                  p['status']?.toString() ?? '',
+                ),
                 'accountNumberMasked':
                     p['accountNumberMasked'] ?? p['accountNumber'],
               },
@@ -164,9 +167,9 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
           ? const Center(child: IleLoadingIndicator())
           : !_isHost
               ? const IleEmptyState(
-                  title: 'Host wallet unavailable',
+                  title: 'Earnings unavailable',
                   message:
-                      'Earnings and withdrawals are only available on the host dashboard for host accounts.',
+                      'Earnings and withdrawals are only available for verified host accounts.',
                   icon: Icons.account_balance_wallet_outlined,
                 )
               : _error != null
@@ -177,14 +180,14 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                     padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
                     children: [
                       Text(
-                        'Balances come from your payout records — not a separate wallet ledger. Guest payments, Ilé commission, and host payable amounts are calculated server-side.',
+                        'Balances come from your payout records. Guest payments and host amounts are calculated on the server — held funds are not withdrawable yet.',
                         style: AppTypography.supporting,
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       Text(
                         (_wallet?['payoutMode']?.toString() == 'AUTOMATIC')
-                            ? 'Platform payout mode: Automatic — host net may transfer after verified guest payment when your bank is verified (check-in does not block).'
-                            : 'Platform payout mode: Manual — earnings stay pending until check-in settlement and admin disbursement.',
+                            ? 'Payout mode: Automatic — eligible host earnings may transfer after verified guest payment when your bank is verified.'
+                            : 'Payout mode: Manual — earnings stay held until settlement and disbursement. Held amounts are not ready to withdraw.',
                         style: AppTypography.caption,
                       ),
                       const SizedBox(height: AppSpacing.lg),
@@ -193,7 +196,7 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                         hint: (_wallet?['labels']
                                     as Map<String, dynamic>?)?['pending']
                                 ?.toString() ??
-                            'Held until settlement',
+                            HostMessages.pendingHeld,
                         amount: (balances?['pending'] as num?)?.toInt() ?? 0,
                       ),
                       _BalanceTile(
@@ -201,7 +204,7 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                         hint: (_wallet?['labels']
                                     as Map<String, dynamic>?)?['available']
                                 ?.toString() ??
-                            'Ready to withdraw',
+                            HostMessages.readyToWithdraw,
                         amount: (balances?['available'] as num?)?.toInt() ?? 0,
                       ),
                       _BalanceTile(
@@ -209,7 +212,7 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                         hint: (_wallet?['labels']
                                     as Map<String, dynamic>?)?['processing']
                                 ?.toString() ??
-                            'Transfer in flight',
+                            HostMessages.transferring,
                         amount:
                             (balances?['processing'] as num?)?.toInt() ?? 0,
                       ),
@@ -218,7 +221,7 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                         hint: (_wallet?['labels']
                                     as Map<String, dynamic>?)?['paid']
                                 ?.toString() ??
-                            'Sent to your bank',
+                            HostMessages.paidToBank,
                         amount: (balances?['paid'] as num?)?.toInt() ?? 0,
                       ),
                       const SizedBox(height: AppSpacing.md),
@@ -268,9 +271,11 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
                             title: Text(
-                              item['displayStatus']?.toString() ??
-                                  item['status']?.toString() ??
-                                  '',
+                              HostMessages.payoutStatusLabel(
+                                item['status']?.toString() ??
+                                    item['displayStatus']?.toString() ??
+                                    '',
+                              ),
                               style: AppTypography.bodyMedium,
                             ),
                             subtitle: Text(

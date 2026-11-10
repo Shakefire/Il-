@@ -24,6 +24,7 @@ import {
   guestRefundStatusMessage,
 } from "@/lib/phase9-cancel-ui";
 import { guestReservationOutcome } from "@/lib/phase11-guest-outcome";
+import { GuestMessages, guestStatusLabel } from "@/lib/guest-messages";
 import { formatNaira } from "@/lib/utils";
 
 interface BookingItem {
@@ -180,8 +181,8 @@ function TripsPageContent() {
         if (isLateRecon) {
           setPaymentNotice({
             type: "pending",
-            title: "Payment Received — Resolution Pending",
-            message: `Paystack recorded payment (Ref: ${ref}) after this booking was no longer payable. Your stay was NOT confirmed. An admin refund/reconciliation request is open — do not pay again.`,
+            title: "Payment received — stay not confirmed",
+            message: `A payment for reference ${ref} arrived after this booking was no longer payable. Your stay was not confirmed. Ilé is reviewing a refund — do not pay again.`,
             ref,
           });
           if (verifyRes.booking) {
@@ -197,8 +198,8 @@ function TripsPageContent() {
         } else {
           setPaymentNotice({
             type: "success",
-            title: "Payment Confirmed & Stay Secured",
-            message: `Your payment was successfully verified with Paystack (Ref: ${ref})! Your booking is confirmed and access details are unlocked.`,
+            title: "Payment confirmed",
+            message: `Your payment was verified (ref ${ref}). Your stay is confirmed and arrival details are unlocked.`,
             ref,
           });
 
@@ -224,15 +225,15 @@ function TripsPageContent() {
       } else if (verifyRes && (verifyRes.pending || verifyRes.status === "pending")) {
         setPaymentNotice({
           type: "pending",
-          title: "Payment Processing with Paystack",
-          message: `Payment reference ${ref} is currently being verified with Paystack. We are awaiting final settlement confirmation — please do not initiate a second payment.`,
+          title: "Confirming your payment",
+          message: `We're verifying payment reference ${ref}. Do not pay again — refresh in a moment if the status hasn't updated.`,
           ref,
         });
       } else {
         setPaymentNotice({
           type: "error",
-          title: "Payment Unsuccessful",
-          message: verifyRes?.error || `Payment for reference ${ref} could not be confirmed or was declined. Any temporary hold has been released.`,
+          title: "Payment not completed",
+          message: verifyRes?.error || `We couldn't confirm payment ${ref}. If your bank shows a debit, it usually reverses automatically, or write support@ilestays.ng.`,
           ref,
         });
         try {
@@ -245,8 +246,8 @@ function TripsPageContent() {
       console.warn("Payment auto-verification notice:", err);
       setPaymentNotice({
         type: "error",
-        title: "Payment Verification Notice",
-        message: err.message || "Payment was not completed or could not be verified on Paystack. If you were debited, your bank will auto-reverse or contact support@ilestays.ng.",
+        title: "Payment not completed",
+        message: err.message || "We couldn't confirm this payment. If your bank shows a debit, it usually reverses automatically, or write support@ilestays.ng.",
         ref,
       });
     } finally {
@@ -504,25 +505,25 @@ function TripsPageContent() {
       case "PENDING_HOST":
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-orange-100 text-orange-900">
-            Waiting for host
+            {guestStatusLabel("PENDING_HOST")}
           </span>
         );
       case "PAYMENT_PENDING":
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
-            Payment waiting
+            {guestStatusLabel("PAYMENT_PENDING")}
           </span>
         );
       case "PENDING":
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-100 text-stone-800">
-            Pending
+            {guestStatusLabel("PENDING")}
           </span>
         );
       case "CONFIRMED":
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
-            Confirmed
+            {GuestMessages.confirmed}
           </span>
         );
       case "CANCELLED":
@@ -535,13 +536,13 @@ function TripsPageContent() {
       case "COMPLETED":
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-gray-100 text-gray-700">
-            Completed
+            {GuestMessages.completed}
           </span>
         );
       default:
         return (
           <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-100 text-stone-800">
-            {status}
+            {outcome.headline}
           </span>
         );
     }
@@ -579,7 +580,7 @@ function TripsPageContent() {
                 <h4 className="font-bold text-sm tracking-tight">{paymentNotice.title}</h4>
                 <p className="text-xs leading-relaxed opacity-90">{paymentNotice.message}</p>
                 {paymentNotice.ref && (
-                  <p className="text-[11px] font-mono opacity-75">Paystack Reference: {paymentNotice.ref}</p>
+                  <p className="text-[11px] font-mono opacity-75">Payment reference: {paymentNotice.ref}</p>
                 )}
               </div>
             </div>
@@ -637,9 +638,9 @@ function TripsPageContent() {
               <Calendar size={28} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-[#171717]">Find Your Reservation &amp; Access Pass</h2>
+              <h2 className="text-xl font-bold text-[#171717]">{GuestMessages.emptyTripsTitle}</h2>
               <p className="text-xs text-[#6B6B67] leading-relaxed mt-1">
-                Completed a stay booking? Enter your booking reference (e.g. ILE-MVJLECF2...) to view your gate clearance pass and host contact details.
+                When you request a stay, it shows up here. Already booked? Enter your booking reference to open arrival details for a confirmed stay.
               </p>
             </div>
 
@@ -858,7 +859,7 @@ function TripsPageContent() {
                               className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#0B5D45] text-white hover:bg-[#084936] text-xs font-semibold transition-colors shadow-sm min-h-[40px]"
                             >
                               <KeyRound size={14} />
-                              <span>View Access &amp; Gate Pass</span>
+                              <span>View arrival details</span>
                             </button>
                             <button
                               type="button"
@@ -936,7 +937,7 @@ function TripsPageContent() {
                   <ShieldCheck size={22} />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-[#171717]">Gate Pass &amp; Check-In</h3>
+                  <h3 className="text-lg font-bold text-[#171717]">Arrival details &amp; check-in</h3>
                   <p className="text-xs font-mono text-[#6B6B67]">
                     Ref: #{selectedBookingForAccess.referenceCode}
                   </p>
@@ -946,13 +947,13 @@ function TripsPageContent() {
               {loadingAccess ? (
                 <div className="py-8 text-center text-sm text-[#8B8B86] flex flex-col items-center gap-2">
                   <div className="w-6 h-6 rounded-full border-2 border-[#0B5D45] border-t-transparent animate-spin" />
-                  <span>Retrieving secure property clearance...</span>
+                  <span>Loading your arrival details…</span>
                 </div>
               ) : accessError ? (
                 <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm space-y-1">
                   <div className="flex items-center gap-2 font-semibold">
                     <AlertCircle size={16} />
-                    <span>Access Quarantined</span>
+                    <span>Arrival details unavailable</span>
                   </div>
                   <p className="text-xs text-amber-800 leading-relaxed">{accessError}</p>
                 </div>

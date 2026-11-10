@@ -422,7 +422,12 @@ class _ReserveScreenState extends State<ReserveScreen> {
               style: AppTypography.supporting.copyWith(color: AppColors.criticalText),
             ),
           ],
-          const SizedBox(height: AppSpacing.xl),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            reviewNoPaymentCopy,
+            style: AppTypography.caption,
+          ),
+          const SizedBox(height: AppSpacing.lg),
           if (!session.hasDates)
             IleButton(
               label: 'Choose dates',

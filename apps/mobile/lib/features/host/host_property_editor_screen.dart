@@ -388,6 +388,7 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
               child: Center(
                 child: HostStatusChip(
                   label: _status,
+                  kind: HostStatusChipKind.listing,
                   tone: toneForPropertyStatus(_status),
                 ),
               ),
