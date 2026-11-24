@@ -25,12 +25,15 @@ class HostReservationsScreen extends StatefulWidget {
   State<HostReservationsScreen> createState() => _HostReservationsScreenState();
 }
 
-class _HostReservationsScreenState extends State<HostReservationsScreen> {
+class _HostReservationsScreenState extends State<HostReservationsScreen>
+    with WidgetsBindingObserver {
   bool _loading = true;
   String? _error;
   String? _notice;
   List<Map<String, dynamic>> _bookings = <Map<String, dynamic>>[];
   Timer? _tick;
+  final ValueNotifier<DateTime> _clockNotifier =
+      ValueNotifier<DateTime>(DateTime.now());
   String? _busyId;
   String _filter = 'PENDING_HOST';
 
@@ -44,16 +47,43 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
-    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _tick?.cancel();
+    _clockNotifier.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _load();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _tick?.cancel();
+    }
+  }
+
+  void _syncTick() {
+    _tick?.cancel();
+    final bool hasPending = _bookings.any((Map<String, dynamic> b) {
+      final String s = _statusOf(b);
+      if (s != 'PENDING_HOST') return false;
+      final int secs = _remainingSeconds(b['hostResponseDeadlineAt']?.toString());
+      return secs > 0;
+    });
+
+    if (hasPending) {
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) return;
+        _clockNotifier.value = DateTime.now();
+      });
+    }
   }
 
   Future<void> _load() async {
@@ -69,6 +99,7 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
         _bookings = rows;
         _loading = false;
       });
+      _syncTick();
     } on ApiException catch (err) {
       if (!mounted) return;
       setState(() {
@@ -236,40 +267,62 @@ class _HostReservationsScreenState extends State<HostReservationsScreen> {
                                       style: AppTypography.caption,
                                     ),
                                   if (status == 'PENDING_HOST')
-                                    Text(
-                                      secs > 0
-                                          ? 'Respond in ${secs}s'
-                                          : 'Deadline passed — this request will expire',
-                                      style: AppTypography.caption.copyWith(
-                                        color: secs > 0
-                                            ? AppColors.warningText
-                                            : AppColors.criticalText,
-                                      ),
+                                    ValueListenableBuilder<DateTime>(
+                                      valueListenable: _clockNotifier,
+                                      builder: (BuildContext context, DateTime _,
+                                          Widget? __) {
+                                        final int liveSecs = _remainingSeconds(
+                                          b['hostResponseDeadlineAt']?.toString(),
+                                        );
+                                        return Text(
+                                          liveSecs > 0
+                                              ? 'Respond in ${liveSecs}s'
+                                              : 'Deadline passed — this request will expire',
+                                          style: AppTypography.caption.copyWith(
+                                            color: liveSecs > 0
+                                                ? AppColors.warningText
+                                                : AppColors.criticalText,
+                                          ),
+                                        );
+                                      },
                                     ),
                                   const SizedBox(height: AppSpacing.sm),
                                   if (status == 'PENDING_HOST')
-                                    Row(
-                                      children: <Widget>[
-                                        Expanded(
-                                          child: IleButton(
-                                            label: 'Accept',
-                                            onPressed:
-                                                busy ? null : () => _accept(id),
-                                            isLoading: busy,
-                                          ),
-                                        ),
-                                        const SizedBox(width: AppSpacing.sm),
-                                        Expanded(
-                                          child: IleButton(
-                                            label: 'Decline',
-                                            onPressed: busy
-                                                ? null
-                                                : () => _decline(id),
-                                            variant: IleButtonVariant.secondary,
-                                          ),
-                                        ),
-                                      ],
-                                    )
+                                    secs > 0
+                                        ? Row(
+                                            children: <Widget>[
+                                              Expanded(
+                                                child: IleButton(
+                                                  label: 'Accept',
+                                                  onPressed:
+                                                      busy ? null : () => _accept(id),
+                                                  isLoading: busy,
+                                                ),
+                                              ),
+                                              const SizedBox(width: AppSpacing.sm),
+                                              Expanded(
+                                                child: IleButton(
+                                                  label: 'Decline',
+                                                  onPressed: busy
+                                                      ? null
+                                                      : () => _decline(id),
+                                                  variant: IleButtonVariant.secondary,
+                                                ),
+                                              ),
+                                            ],
+                                          )
+                                        : SizedBox(
+                                            width: double.infinity,
+                                            child: OutlinedButton.icon(
+                                              onPressed: _load,
+                                              icon: const Icon(Icons.refresh_rounded, size: 16),
+                                              label: const Text('Window expired · Refresh list'),
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor: AppColors.criticalText,
+                                                side: const BorderSide(color: AppColors.border),
+                                              ),
+                                            ),
+                                          )
                                   else
                                     TextButton(
                                       onPressed: () => context.push(

@@ -29,6 +29,11 @@ void main() {
       expect(PaystackCheckout.isPaymentReturnUrl(mock), isTrue);
       expect(PaystackCheckout.extractReference(mock), 'ref_1');
 
+      final Uri mockOnProd = Uri.parse(
+        'https://ilestays.ng/trips?payment=mock&ref=ref_evil',
+      );
+      expect(PaystackCheckout.isPaymentReturnUrl(mockOnProd), isFalse);
+
       final Uri unrelated = Uri.parse('https://checkout.paystack.com/pay/xyz');
       expect(PaystackCheckout.isPaymentReturnUrl(unrelated), isFalse);
     });

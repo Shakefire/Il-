@@ -20,8 +20,8 @@ class IleApi {
     }
     final List<dynamic> data = (body['data'] as List<dynamic>?) ?? <dynamic>[];
     return data
-        .whereType<Map<String, dynamic>>()
-        .map(LocationResult.fromJson)
+        .whereType<Map>()
+        .map((Map e) => LocationResult.fromJson(Map<String, dynamic>.from(e)))
         .toList();
   }
 
@@ -122,16 +122,16 @@ class IleApi {
         (body is Map ? body['properties'] as List<dynamic>? : null) ??
         <dynamic>[];
     return raw
-        .whereType<Map<String, dynamic>>()
-        .map(IleProperty.fromJson)
+        .whereType<Map>()
+        .map((Map e) => IleProperty.fromJson(Map<String, dynamic>.from(e)))
         .toList();
   }
 
   Future<IleProperty?> getProperty(String slug) async {
     try {
       final dynamic body = await _client.get('/api/properties/$slug');
-      if (body is Map && body['property'] is Map<String, dynamic>) {
-        return IleProperty.fromJson(body['property'] as Map<String, dynamic>);
+      if (body is Map && body['property'] is Map) {
+        return IleProperty.fromJson(Map<String, dynamic>.from(body['property'] as Map));
       }
       return null;
     } on ApiException catch (err) {
@@ -192,9 +192,70 @@ class IleApi {
               <dynamic>[])
         : <dynamic>[];
     return raw
-        .whereType<Map<String, dynamic>>()
-        .map(IleBooking.fromJson)
+        .whereType<Map>()
+        .map((Map e) => IleBooking.fromJson(Map<String, dynamic>.from(e)))
         .toList();
+  }
+
+  Future<Map<String, dynamic>> getStayDetails(String bookingId) async {
+    final dynamic body = await _client.get('/api/bookings/$bookingId/contact');
+    if (body is Map<String, dynamic>) return body;
+    if (body is Map) return Map<String, dynamic>.from(body);
+    return <String, dynamic>{};
+  }
+
+  Future<void> createReview({
+    required String bookingId,
+    required int overallRating,
+    String? body,
+  }) async {
+    await _client.post(
+      '/api/reviews',
+      body: <String, dynamic>{
+        'bookingId': bookingId,
+        'overallRating': overallRating,
+        if (body != null && body.isNotEmpty) 'body': body,
+      },
+    );
+  }
+
+  Future<void> createSupportCase({
+    required String category,
+    required String subject,
+    required String message,
+    String? bookingId,
+  }) async {
+    await _client.post(
+      '/api/support/cases',
+      body: <String, dynamic>{
+        'category': category,
+        'subject': subject,
+        'message': message,
+        if (bookingId != null) 'bookingId': bookingId,
+      },
+    );
+  }
+
+  Future<List<IleProperty>> listFavourites() async {
+    final dynamic body = await _client.get('/api/favourites');
+    final List<dynamic> raw = body is Map
+        ? (body['favourites'] as List<dynamic>? ?? <dynamic>[])
+        : <dynamic>[];
+    return raw
+        .whereType<Map>()
+        .map((Map item) => IleProperty.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  Future<void> addFavourite(String propertyId) async {
+    await _client.post(
+      '/api/favourites',
+      body: <String, dynamic>{'propertyId': propertyId},
+    );
+  }
+
+  Future<void> removeFavourite(String propertyId) async {
+    await _client.delete('/api/favourites/$propertyId');
   }
 
   Future<IleBooking> getBooking(String id, {String? accessToken}) async {
@@ -399,6 +460,21 @@ class IleApi {
         .toList();
   }
 
+  Future<Map<String, dynamic>> resolveBankAccount({
+    required String bankCode,
+    required String accountNumber,
+  }) async {
+    final dynamic body = await _client.post(
+      '/api/bank-accounts/resolve',
+      body: <String, dynamic>{
+        'bankCode': bankCode,
+        'accountNumber': accountNumber,
+      },
+    );
+    if (body is Map<String, dynamic>) return body;
+    return <String, dynamic>{};
+  }
+
   Future<List<Map<String, dynamic>>> getHostPayouts() async {
     final dynamic body = await _client.get('/api/host/payouts');
     final List<dynamic> raw = body is Map
@@ -542,7 +618,7 @@ class IleApi {
     final dynamic body = await _client.get(
       '/api/bookings/$bookingId/similar?limit=$limit',
     );
-    if (body is Map<String, dynamic>) return body;
+    if (body is Map) return Map<String, dynamic>.from(body);
     return <String, dynamic>{'properties': <dynamic>[], 'autoBook': false};
   }
 
@@ -574,6 +650,36 @@ class IleApi {
         'email': email,
         'password': password,
         if (phone != null && phone.isNotEmpty) 'phone': phone,
+      },
+    );
+    return body is Map<String, dynamic>
+        ? body
+        : <String, dynamic>{'success': true};
+  }
+
+  Future<Map<String, dynamic>> registerOwner({
+    required String firstName,
+    required String lastName,
+    required String email,
+    required String password,
+    String? phone,
+    String? hostType,
+    String? companyName,
+    String? operatingCity,
+  }) async {
+    final dynamic body = await _client.post(
+      '/api/auth/register-owner',
+      body: <String, dynamic>{
+        'firstName': firstName,
+        'lastName': lastName,
+        'email': email,
+        'password': password,
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        if (hostType != null && hostType.isNotEmpty) 'hostType': hostType,
+        if (companyName != null && companyName.isNotEmpty)
+          'companyName': companyName,
+        if (operatingCity != null && operatingCity.isNotEmpty)
+          'operatingCity': operatingCity,
       },
     );
     return body is Map<String, dynamic>

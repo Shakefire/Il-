@@ -24,7 +24,6 @@ export default function Navbar() {
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
-  const [favCount, setFavCount] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
   // Prevent hydration mismatch: auth state is only known after mount
   const [mounted, setMounted] = useState(false);
@@ -183,6 +182,15 @@ export default function Navbar() {
                 )}
               </Link>
 
+              <Link
+                href="/support"
+                className={`transition-colors py-2 relative hover:text-white ${
+                  pathname === "/support" ? "text-white font-semibold" : ""
+                }`}
+              >
+                <span>Support</span>
+              </Link>
+
               {/* Partner link routes directly to Host Account Creation page, NOT admin login */}
               <Link
                 href="/signup"
@@ -215,17 +223,16 @@ export default function Navbar() {
               )}
             </Link>
 
-            <button
-              type="button"
-              onClick={() => setFavCount((c) => (c === 0 ? 1 : 0))}
-              className="p-2 rounded-lg hover:text-white hover:bg-white/10 transition-colors relative"
-              aria-label="Saved favorites"
+            <Link
+              href="/saved"
+              className="p-2 rounded-lg hover:text-white hover:bg-white/10 transition-colors relative inline-flex"
+              aria-label="Saved stays"
             >
               <Heart
                 size={18}
-                className={favCount > 0 ? "fill-[#0B5D45] text-[#0B5D45]" : "text-white/90 hover:text-white"}
+                className="text-white/90 hover:text-white"
               />
-            </button>
+            </Link>
           </div>
 
           {/* Dynamic Auth Actions / User Menu */}
@@ -389,6 +396,13 @@ export default function Navbar() {
                 <span className="text-xs bg-[#0B5D45] text-white px-2 py-0.5 rounded font-semibold">
                   Browse
                 </span>
+              </Link>
+              <Link
+                href="/support"
+                onClick={() => setMobileMenuOpen(false)}
+                className="block py-2 text-white font-medium hover:text-[#0B5D45]"
+              >
+                Support
               </Link>
               <Link
                 href="/signup"

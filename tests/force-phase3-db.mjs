@@ -1,0 +1,8 @@
+process.env.DATABASE_URL = ""
+process.env.ILE_PGLITE_DIR = ".data/phase3-platform-test"
+process.env.NODE_ENV = "test"
+process.env.EMAIL_PROVIDER = "console"
+process.env.SMS_PROVIDER = "console"
+process.env.PUSH_PROVIDER = "console"
+process.env.WEB_PUSH_PROVIDER = "console"
+process.env.PAYSTACK_SECRET_KEY = "sk_test_phase3_local_only_not_live"

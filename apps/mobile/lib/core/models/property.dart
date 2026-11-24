@@ -1,5 +1,125 @@
 import 'amenity.dart';
 
+class IleThingsToKnow {
+  const IleThingsToKnow({
+    this.checkInAfter = '2:00 PM',
+    this.checkOutBefore = '12:00 PM',
+    this.checkInMethod = 'Smart lock',
+    this.maxOvernightGuests,
+    this.petsAllowed = false,
+    this.smokingAllowed = false,
+    this.partiesAllowed = false,
+    this.quietHours = '10:00 PM - 7:00 AM',
+    this.customRules = const <String>[
+      'Visitor gate pass requires 2hr notice',
+      'No commercial photography without prior approval',
+      'Keep air conditioners off when stepping out of the apartment',
+    ],
+    this.hasSolarInverter = true,
+    this.hasBackupGenerator = true,
+    this.hasExteriorCCTV = true,
+    this.hasSmokeAlarm = true,
+    this.hasArmedEstateSecurity = true,
+    this.powerScheduleNote =
+        'Continuous 24/7 power supply with automatic inverter switchover during grid cuts.',
+    this.cautionFeeNgn = 0,
+    this.cancellationPolicy = 'FLEXIBLE_48H',
+  });
+
+  final String checkInAfter;
+  final String checkOutBefore;
+  final String checkInMethod;
+  final int? maxOvernightGuests;
+  final bool petsAllowed;
+  final bool smokingAllowed;
+  final bool partiesAllowed;
+  final String quietHours;
+  final List<String> customRules;
+  final bool hasSolarInverter;
+  final bool hasBackupGenerator;
+  final bool hasExteriorCCTV;
+  final bool hasSmokeAlarm;
+  final bool hasArmedEstateSecurity;
+  final String powerScheduleNote;
+  final int cautionFeeNgn;
+  final String cancellationPolicy;
+
+  factory IleThingsToKnow.fromJson(
+    Map<String, dynamic>? json, {
+    int? fallbackMaxGuests,
+    String? fallbackPowerNote,
+  }) {
+    if (json == null) {
+      return IleThingsToKnow(
+        maxOvernightGuests: fallbackMaxGuests,
+        powerScheduleNote: fallbackPowerNote ??
+            'Continuous 24/7 power supply with automatic inverter switchover during grid cuts.',
+      );
+    }
+    final dynamic sp = json['safetyAndPower'];
+    final Map<String, dynamic> safety = sp is Map<String, dynamic>
+        ? sp
+        : (sp is Map ? Map<String, dynamic>.from(sp) : <String, dynamic>{});
+    final List<dynamic> rawRules =
+        (json['customRules'] as List<dynamic>?) ?? <dynamic>[];
+
+    return IleThingsToKnow(
+      checkInAfter: (json['checkInAfter'] as String?) ?? '2:00 PM',
+      checkOutBefore: (json['checkOutBefore'] as String?) ?? '12:00 PM',
+      checkInMethod: (json['checkInMethod'] as String?) ?? 'Smart lock',
+      maxOvernightGuests:
+          (json['maxOvernightGuests'] as num?)?.toInt() ?? fallbackMaxGuests,
+      petsAllowed: json['petsAllowed'] == true,
+      smokingAllowed: json['smokingAllowed'] == true,
+      partiesAllowed: json['partiesAllowed'] == true,
+      quietHours: (json['quietHours'] as String?) ?? '10:00 PM - 7:00 AM',
+      customRules: rawRules.isNotEmpty
+          ? rawRules.map((dynamic r) => r.toString()).toList()
+          : const <String>[
+              'Visitor gate pass requires 2hr notice',
+              'No commercial photography without prior approval',
+              'Keep air conditioners off when stepping out of the apartment',
+            ],
+      hasSolarInverter: safety['hasSolarInverter'] != false,
+      hasBackupGenerator: safety['hasBackupGenerator'] != false,
+      hasExteriorCCTV: safety['hasExteriorCCTV'] != false,
+      hasSmokeAlarm: safety['hasSmokeAlarm'] != false,
+      hasArmedEstateSecurity: safety['hasArmedEstateSecurity'] != false,
+      powerScheduleNote: (safety['powerScheduleNote'] as String?) ??
+          fallbackPowerNote ??
+          'Continuous 24/7 power supply with automatic inverter switchover during grid cuts.',
+      cautionFeeNgn: (json['cautionFeeNgn'] as num?)?.toInt() ?? 0,
+      cancellationPolicy:
+          (json['cancellationPolicy'] as String?) ?? 'FLEXIBLE_48H',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'checkInAfter': checkInAfter,
+      'checkOutBefore': checkOutBefore,
+      'checkInMethod': checkInMethod,
+      'maxOvernightGuests': maxOvernightGuests,
+      'petsAllowed': petsAllowed,
+      'smokingAllowed': smokingAllowed,
+      'partiesAllowed': partiesAllowed,
+      'quietHours': quietHours,
+      'customRules': customRules,
+      'safetyAndPower': <String, dynamic>{
+        'hasSolarInverter': hasSolarInverter,
+        'hasBackupGenerator': hasBackupGenerator,
+        'hasExteriorCCTV': hasExteriorCCTV,
+        'hasSmokeAlarm': hasSmokeAlarm,
+        'hasArmedEstateSecurity': hasArmedEstateSecurity,
+        'powerScheduleNote': powerScheduleNote,
+      },
+      'cautionFeeNgn': cautionFeeNgn,
+      'cancellationPolicy': cancellationPolicy,
+    };
+  }
+}
+
+
 /// Property shape aligned with backend `enrichProperty`.
 class IleProperty {
   const IleProperty({
@@ -34,6 +154,7 @@ class IleProperty {
     this.isReserved = false,
     this.infrastructure = const <String, String>{},
     this.minimumNights = 1,
+    this.thingsToKnow = const IleThingsToKnow(),
   });
 
   final String id;
@@ -67,6 +188,7 @@ class IleProperty {
   final bool isReserved;
   final Map<String, String> infrastructure;
   final int minimumNights;
+  final IleThingsToKnow thingsToKnow;
 
   /// Display names only — derived from host-configured amenities.
   List<String> get amenities => amenityItems
@@ -148,6 +270,11 @@ class IleProperty {
         (String k, dynamic v) => MapEntry<String, String>(k, '$v'),
       ),
       minimumNights: (json['minimumNights'] as num?)?.toInt() ?? 1,
+      thingsToKnow: IleThingsToKnow.fromJson(
+        json['thingsToKnow'] is Map ? Map<String, dynamic>.from(json['thingsToKnow'] as Map) : null,
+        fallbackMaxGuests: (json['maxGuests'] as num?)?.toInt() ?? 2,
+        fallbackPowerNote: infra['power'] ?? (json['powerDescription'] as String?),
+      ),
     );
   }
 }

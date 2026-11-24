@@ -2,6 +2,19 @@ import '../models/property.dart';
 
 /// Guest-facing stay copy. Never surfaces raw record ids or invented amenities.
 abstract final class StayDisplay {
+  /// Trailing / whole-string DB id fragments (`p3a_179…`, `prop_44`, …).
+  static final RegExp _idToken = RegExp(
+    r'(?:^|[\s\-_])(?:p3a_|prop[_-]?|property_)[a-z0-9_\-]+$',
+    caseSensitive: false,
+  );
+
+  static final RegExp _embeddedId = RegExp(
+    r'\s*(?:p3a_|prop[_-]?|property_)[a-z0-9_\-]+\s*',
+    caseSensitive: false,
+  );
+
+  static final RegExp _compactId = RegExp(r'^[a-z0-9]+_[a-z0-9_]+$');
+
   static bool looksLikeRecordId(String value) {
     final String trimmed = value.trim();
     if (trimmed.isEmpty) return true;
@@ -13,15 +26,26 @@ abstract final class StayDisplay {
       return true;
     }
     final bool compactId =
-        RegExp(r'^[a-z0-9]+_[a-z0-9_]+$').hasMatch(lower) && !lower.contains(' ');
+        _compactId.hasMatch(lower) && !lower.contains(' ');
     return compactId && lower.length >= 8;
   }
 
+  /// Strip raw DB id suffixes so only a clean human title remains.
+  static String sanitizeTitle(String raw) {
+    String cleaned = raw.trim();
+    if (cleaned.isEmpty) return cleaned;
+    cleaned = cleaned.replaceAll(_embeddedId, ' ').trim();
+    cleaned = cleaned.replaceAll(_idToken, '').trim();
+    cleaned = cleaned.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+    if (looksLikeRecordId(cleaned)) return '';
+    return cleaned;
+  }
+
   static String title(IleProperty property) {
-    final String raw = property.title.trim();
-    if (!looksLikeRecordId(raw) && raw != 'Stay') return raw;
-    final String tagline = property.tagline.trim();
-    if (tagline.isNotEmpty && !looksLikeRecordId(tagline)) return tagline;
+    final String cleaned = sanitizeTitle(property.title);
+    if (cleaned.isNotEmpty && cleaned != 'Stay') return cleaned;
+    final String tagline = sanitizeTitle(property.tagline);
+    if (tagline.isNotEmpty) return tagline;
     if (property.neighborhood.isNotEmpty && property.city.isNotEmpty) {
       return '${property.neighborhood}, ${property.city}';
     }
@@ -50,6 +74,25 @@ abstract final class StayDisplay {
       if (keys.any(lower.contains)) return name;
     }
     return null;
+  }
+
+  /// Compact trust chips from real amenity labels (security / power).
+  static List<String> trustBadges(IleProperty property) {
+    final List<String> badges = <String>[];
+    for (final String name in property.amenities) {
+      final String lower = name.toLowerCase();
+      final bool isSecurity = lower.contains('security') ||
+          lower.contains('guard') ||
+          lower.contains('gated');
+      final bool isPower = lower.contains('power') ||
+          lower.contains('inverter') ||
+          lower.contains('solar');
+      if (!isSecurity && !isPower) continue;
+      if (badges.contains(name)) continue;
+      badges.add(name);
+      if (badges.length >= 2) break;
+    }
+    return badges;
   }
 
   static List<String> gallery(IleProperty property) {

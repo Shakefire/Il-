@@ -1,22 +1,21 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 
 import '../../app/app_colors.dart';
 import '../../app/app_radius.dart';
 import '../../app/app_spacing.dart';
 import '../../app/app_typography.dart';
-import 'package:provider/provider.dart';
-
 import '../../core/api/api_client.dart';
-import '../../core/api/ile_api.dart';
 import '../../core/constants/app_routes.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/state/session_store.dart';
 import '../../core/utils/validators.dart';
 import '../../shared/widgets/widgets.dart';
 import 'widgets/auth_hero_scaffold.dart';
 
-/// Guest registration screen matching the compact reference composition.
+/// Registration screen matching the web platform with Guest and Host / Partner roles.
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key, this.returnTo});
 
@@ -27,9 +26,16 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
+  bool _isHostMode = false;
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _companyController = TextEditingController();
+
+  String _hostType = 'individual_owner';
+  String _operatingCity = 'Abuja';
+
   final TapGestureRecognizer _termsRecognizer = TapGestureRecognizer();
   final TapGestureRecognizer _privacyRecognizer = TapGestureRecognizer();
   String? _nameError;
@@ -43,18 +49,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   void initState() {
     super.initState();
     _termsRecognizer.onTap = () {
-      IleAlert.showSnackBar(
-        context: context,
-        message: 'Terms preview — UI only.',
-        tone: IleAlertTone.info,
-      );
+      context.push(AppRoutes.terms);
     };
     _privacyRecognizer.onTap = () {
-      IleAlert.showSnackBar(
-        context: context,
-        message: 'Privacy policy preview — UI only.',
-        tone: IleAlertTone.info,
-      );
+      context.push(AppRoutes.privacy);
     };
   }
 
@@ -63,6 +61,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _phoneController.dispose();
+    _companyController.dispose();
     _termsRecognizer.dispose();
     _privacyRecognizer.dispose();
     super.dispose();
@@ -91,8 +91,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   (String firstName, String lastName) _splitName(String fullName) {
     final List<String> parts =
         fullName.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-    if (parts.isEmpty) return ('Guest', 'User');
-    if (parts.length == 1) return (parts.first, 'Guest');
+    if (parts.isEmpty) return ('Partner', 'Owner');
+    if (parts.length == 1) return (parts.first, 'Owner');
     return (parts.first, parts.sublist(1).join(' '));
   }
 
@@ -103,17 +103,43 @@ class _RegisterScreenState extends State<RegisterScreen> {
     setState(() => _isSubmitting = true);
     final (String firstName, String lastName) =
         _splitName(_nameController.text);
+    final String email = _emailController.text.trim().toLowerCase();
+
     try {
-      await context.read<IleApi>().registerGuest(
-            firstName: firstName,
-            lastName: lastName,
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-          );
+      final SessionStore session = context.read<SessionStore>();
+      if (_isHostMode) {
+        await session.registerOwner(
+          firstName: firstName,
+          lastName: lastName,
+          email: email,
+          password: _passwordController.text,
+          phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+          hostType: _hostType,
+          companyName: _companyController.text.trim().isEmpty ? null : _companyController.text.trim(),
+          operatingCity: _operatingCity,
+        );
+      } else {
+        await session.registerGuest(
+          firstName: firstName,
+          lastName: lastName,
+          email: email,
+          password: _passwordController.text,
+          phone: _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        );
+      }
+
       if (!mounted) return;
       setState(() => _isSubmitting = false);
-      context.push(
-        AppRoutes.otpPath(email: _emailController.text.trim()),
+
+      // Navigate to OTP with replacement so back-button cannot bypass verification
+      context.go(
+        AppRoutes.otpPath(
+          email: email,
+          maskedPhone: _phoneController.text.trim().isNotEmpty
+              ? _phoneController.text.trim()
+              : null,
+          role: _isHostMode ? 'host' : 'guest',
+        ),
       );
     } on ApiException catch (err) {
       if (!mounted) return;
@@ -148,15 +174,104 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return AuthHeroScaffold(
-      supportingText: AppStrings.authSupportingRegister,
+      supportingText: _isHostMode
+          ? 'Partner with Ilé to host verified stays across Nigeria.'
+          : AppStrings.authSupportingRegister,
       cardTopFraction: AppSpacing.authCardTopFractionSignup,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Section 1: Full Name Input
+          // Role Selection Tabs: Guest vs Host Partner
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () => setState(() => _isHostMode = false),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: !_isHostMode ? Colors.white : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: !_isHostMode
+                            ? [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Text(
+                        'Guest',
+                        style: AppTypography.supporting.copyWith(
+                          fontWeight: !_isHostMode ? FontWeight.w700 : FontWeight.w500,
+                          color: !_isHostMode ? AppColors.charcoal : const Color(0xFF8B8B86),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: InkWell(
+                    onTap: () => setState(() => _isHostMode = true),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: _isHostMode ? Colors.white : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: _isHostMode
+                            ? [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.villa_outlined,
+                            size: 15,
+                            color: _isHostMode ? const Color(0xFF073B2E) : const Color(0xFF8B8B86),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Host / Partner',
+                            style: AppTypography.supporting.copyWith(
+                              fontWeight: _isHostMode ? FontWeight.w700 : FontWeight.w500,
+                              color: _isHostMode ? const Color(0xFF073B2E) : const Color(0xFF8B8B86),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.authFieldGap),
+
+          // Section 1: Full Legal Name Input
           IleInput(
-            label: AppStrings.fullNameLabel,
-            hintText: AppStrings.fullNameHint,
+            label: _isHostMode ? 'Legal Representative Name' : AppStrings.fullNameLabel,
+            hintText: _isHostMode ? 'e.g. Chukwuma Adebayo' : AppStrings.fullNameHint,
             controller: _nameController,
             errorText: _nameError,
             textInputAction: TextInputAction.next,
@@ -190,6 +305,98 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
           const SizedBox(height: AppSpacing.authFieldGap),
 
+          // Section 2B (Host Mode): Operating City & Host Type
+          if (_isHostMode) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Operating City',
+                        style: AppTypography.caption.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.charcoal,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _operatingCity,
+                            isExpanded: true,
+                            items: [
+                              const DropdownMenuItem(value: 'Abuja', child: Text('Abuja (FCT)')),
+                              const DropdownMenuItem(value: 'Lagos', child: Text('Lagos State')),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) setState(() => _operatingCity = val);
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Host Type',
+                        style: AppTypography.caption.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.charcoal,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          border: Border.all(color: const Color(0xFFCBD5E1)),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _hostType,
+                            isExpanded: true,
+                            items: [
+                              const DropdownMenuItem(
+                                value: 'individual_owner',
+                                child: Text('Owner', overflow: TextOverflow.ellipsis),
+                              ),
+                              const DropdownMenuItem(
+                                value: 'property_manager',
+                                child: Text('Manager', overflow: TextOverflow.ellipsis),
+                              ),
+                              const DropdownMenuItem(
+                                value: 'company',
+                                child: Text('Company', overflow: TextOverflow.ellipsis),
+                              ),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) setState(() => _hostType = val);
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.authFieldGap),
+          ],
+
           // Section 3: Password Input
           IleInput(
             label: AppStrings.passwordLabel,
@@ -209,7 +416,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
           const SizedBox(height: AppSpacing.authFieldGap),
 
-          // Section 4: Terms & Conditions Checkbox (Compact, aligned with text)
+          // Section 4: Terms & Conditions Checkbox
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -287,9 +494,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ],
           const SizedBox(height: AppSpacing.authSectionGap),
 
-          // Section 5: Main Submit Button
+          // Primary CTA Button
           IleButton(
-            label: AppStrings.signUp,
+            label: _isHostMode ? 'Register as Property Partner' : AppStrings.signUp,
             isExpanded: true,
             compact: true,
             borderRadius: AppRadius.authButtonAll,
@@ -298,15 +505,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
           const SizedBox(height: AppSpacing.authSectionGap),
 
-          // Section 6: OR Divider
-          const IleOrDivider(),
-          const SizedBox(height: AppSpacing.authSectionGap),
-
-          // Section 7: Social Logins (Google & Apple)
-          const IleSocialButtons(),
-          const SizedBox(height: AppSpacing.authSectionGap),
-
-          // Section 8: Bottom Navigation Link
+          // Bottom Sign In Prompt Link
           Wrap(
             alignment: WrapAlignment.center,
             crossAxisAlignment: WrapCrossAlignment.center,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateNextRequest } from "@/lib/serverAuth";
-import { bookingsService } from "@/../backend/src/modules/bookings/bookings.service";
+import { bookingsService, presentGuestCreateResult } from "@/../backend/src/modules/bookings/bookings.service";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const result = await bookingsService.createBooking(body, session || undefined);
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(presentGuestCreateResult(result), { status: 201 });
   } catch (err: any) {
     return NextResponse.json(
       { error: err.message || "Failed to create booking" },

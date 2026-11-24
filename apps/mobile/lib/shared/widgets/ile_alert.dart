@@ -8,7 +8,7 @@ import 'ile_button.dart';
 
 enum IleAlertTone { success, info, warning, critical }
 
-/// Reusable success / info dialog used across mock auth flows.
+/// Reusable success / info dialog used across auth flows.
 abstract final class IleAlert {
   static Future<void> show({
     required BuildContext context,

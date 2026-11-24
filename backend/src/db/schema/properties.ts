@@ -1,11 +1,11 @@
-import { pgTable, varchar, text, timestamp, boolean, integer, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, varchar, text, timestamp, boolean, integer, doublePrecision, jsonb } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
 export const properties = pgTable("properties", {
   id: varchar("id", { length: 100 }).primaryKey(),
   hostId: varchar("host_id", { length: 100 })
     .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+    .references(() => users.id, { onDelete: "restrict" }),
   slug: varchar("slug", { length: 255 }).notNull().unique(),
   title: varchar("title", { length: 255 }).notNull(),
   tagline: text("tagline"),
@@ -51,6 +51,7 @@ export const properties = pgTable("properties", {
   reviewCount: integer("review_count").notNull().default(0),
   verified: boolean("verified").notNull().default(true),
   featured: boolean("featured").notNull().default(false),
+  thingsToKnow: jsonb("things_to_know"),
 
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

@@ -7,6 +7,7 @@ import '../core/api/ile_api.dart';
 import '../core/push/device_token_registrar.dart';
 import '../core/push/push_messaging_service.dart';
 import '../core/state/search_session.dart';
+import '../core/state/session_store.dart';
 import '../core/state/wishlist_store.dart';
 import 'app_router.dart';
 import 'app_theme.dart';
@@ -33,9 +34,10 @@ class IleApp extends StatefulWidget {
 class _IleAppState extends State<IleApp> {
   final GlobalKey<ScaffoldMessengerState> _scaffoldMessengerKey =
       GlobalKey<ScaffoldMessengerState>();
-  late final GoRouter _router =
-      widget._injectedRouter ?? createAppRouter();
   late final IleApi _api = IleApi(widget._apiClient);
+  late final SessionStore _sessionStore = SessionStore(_api);
+  late final GoRouter _router =
+      widget._injectedRouter ?? createAppRouter(sessionStore: _sessionStore);
   late final DeviceTokenRegistrar _deviceTokenRegistrar =
       DeviceTokenRegistrar(_api);
   late final PushMessagingService _pushMessaging = widget._injectedPush ??
@@ -49,6 +51,7 @@ class _IleAppState extends State<IleApp> {
   @override
   void initState() {
     super.initState();
+    _wishlistStore.attachApi(_api);
     _wishlistStore.load();
     // Cold start: init Firebase if configured; never request permission here.
     _pushMessaging.initialize();
@@ -57,6 +60,7 @@ class _IleAppState extends State<IleApp> {
   @override
   void dispose() {
     _pushMessaging.dispose();
+    _sessionStore.dispose();
     widget._apiClient.dispose();
     _searchSession.dispose();
     _wishlistStore.dispose();
@@ -69,6 +73,7 @@ class _IleAppState extends State<IleApp> {
       providers: [
         Provider<ApiClient>.value(value: widget._apiClient),
         Provider<IleApi>.value(value: _api),
+        ChangeNotifierProvider<SessionStore>.value(value: _sessionStore),
         Provider<DeviceTokenRegistrar>.value(value: _deviceTokenRegistrar),
         Provider<PushMessagingService>.value(value: _pushMessaging),
         ChangeNotifierProvider<SearchSession>.value(value: _searchSession),

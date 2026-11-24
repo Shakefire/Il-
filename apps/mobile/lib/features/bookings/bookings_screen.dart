@@ -222,9 +222,10 @@ class _BookingsScreenState extends State<BookingsScreen> {
                 : _needsAuth
                 ? const GuestSignInGate(
                     returnPath: AppRoutes.bookings,
-                    preview: SampleStayPass(),
+                    title: 'No bookings yet',
                     message:
-                        'Sign in to see requests and confirmed stays. The card above is a sample of check-in details — gate codes, Wi-Fi, and concierge notes appear only after a host confirms.',
+                        'Sign in to see requests and confirmed stays. Gate codes, Wi-Fi, and concierge notes appear only after a host confirms.',
+                    icon: Icons.luggage_outlined,
                   )
                 : _error != null
                 ? IleErrorState(

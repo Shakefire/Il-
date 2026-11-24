@@ -54,13 +54,41 @@ abstract final class AppShadows {
     ),
   ];
 
-  /// `0 12px 32px -4px rgba(10, 46, 36, 0.06)`.
+  /// `0 12px 32px -4px rgba(7, 59, 46, 0.06)`.
   static const List<BoxShadow> editorialCard = [
     BoxShadow(
-      color: Color(0x0F0A2E24),
+      color: Color(0x0F073B2E),
       offset: Offset(0, 12),
       blurRadius: 32,
       spreadRadius: -4,
+    ),
+  ];
+
+  /// Map pill `0 8px 20px rgba(7, 59, 46, 0.25)`.
+  static const List<BoxShadow> mapPill = [
+    BoxShadow(
+      color: Color(0x40073B2E),
+      offset: Offset(0, 8),
+      blurRadius: 20,
+    ),
+  ];
+
+  /// Floating dock `0 12px 32px rgba(7, 59, 46, 0.10)`.
+  static const List<BoxShadow> dock = [
+    BoxShadow(
+      color: Color(0x1A073B2E),
+      offset: Offset(0, 12),
+      blurRadius: 32,
+    ),
+  ];
+
+  /// Search bar soft lift.
+  static const List<BoxShadow> searchBar = [
+    BoxShadow(
+      color: Color(0x0F073B2E),
+      offset: Offset(0, 8),
+      blurRadius: 20,
+      spreadRadius: -6,
     ),
   ];
 

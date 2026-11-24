@@ -17,7 +17,7 @@ export async function POST(
   try {
     const body = await req.json().catch(() => ({}))
     const result = await FinanceService.approvePayout(session.userId, id, body?.notes)
-    return NextResponse.json({ success: true, ...result })
+    return NextResponse.json({ ...result, success: true })
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 400 })
   }

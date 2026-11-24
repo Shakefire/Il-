@@ -2,9 +2,24 @@ import { z } from "zod";
 import dotenv from "dotenv";
 import path from "path";
 
-// Load .env from project root or parent directory
+/**
+ * Write process.env without dot access on keys Next/webpack may inline
+ * (especially NODE_ENV → `"development" = "..."` SyntaxError).
+ */
+const setProcessEnv = (key: string, value: string): void => {
+  process.env[key] = value;
+};
+
+const getProcessEnv = (key: string): string | undefined => process.env[key];
+
+// Load .env from project root or parent directory.
+// Preserve an explicit NODE_ENV=test so suites are not flipped to production by .env.
+const priorNodeEnv = getProcessEnv("NODE" + "_ENV");
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 dotenv.config({ path: path.resolve(process.cwd(), "../.env") });
+if (priorNodeEnv === "test") {
+  setProcessEnv("NODE" + "_ENV", "test");
+}
 
 const envSchema = z.object({
   // ─── Core ───
@@ -50,6 +65,7 @@ const envSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().optional(),
   FIREBASE_CLIENT_EMAIL: z.string().optional(),
   FIREBASE_PRIVATE_KEY: z.string().optional(),
+  FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(),
 
   // ─── Web Push (VAPID) ───
   WEB_PUSH_PROVIDER: z.enum(["webpush", "console"]).default("console"),
@@ -76,10 +92,10 @@ export type Env = z.infer<typeof envSchema>;
 
 function validateEnv(): Env {
   // Support both RESEND_API_KEY and EMAIL_API_KEY aliases
-  const resendKey = process.env.RESEND_API_KEY || process.env.EMAIL_API_KEY;
+  const resendKey = getProcessEnv("RESEND_API_KEY") || getProcessEnv("EMAIL_API_KEY");
   if (resendKey) {
-    if (!process.env.RESEND_API_KEY) process.env.RESEND_API_KEY = resendKey;
-    if (!process.env.EMAIL_API_KEY) process.env.EMAIL_API_KEY = resendKey;
+    if (!getProcessEnv("RESEND_API_KEY")) setProcessEnv("RESEND_API_KEY", resendKey);
+    if (!getProcessEnv("EMAIL_API_KEY")) setProcessEnv("EMAIL_API_KEY", resendKey);
   }
 
   const result = envSchema.safeParse(process.env);
@@ -87,29 +103,49 @@ function validateEnv(): Env {
   if (!result.success) {
     console.warn("\n⚠️ [Ilé] Environment configuration warning:\n");
     for (const issue of result.error.issues) {
-      const path = issue.path.join(".");
-      console.warn(`   • ${path}: ${issue.message}`);
+      const issuePath = issue.path.join(".");
+      console.warn(`   • ${issuePath}: ${issue.message}`);
     }
     // Return parsed defaults / process.env fallback instead of exiting in serverless
     return (process.env as unknown) as Env;
   }
 
-  const env = result.data;
+  let validated: Env = result.data;
 
-  // Production safety checks (non-fatal warnings to prevent deploy rollback)
-  if (env.NODE_ENV === "production") {
-    if (!env.DATABASE_URL) {
+  // Production safety: never allow mock payment mode; fail closed at call sites
+  if (validated.NODE_ENV === "production") {
+    if (validated.PAYSTACK_MOCK_TRANSFERS === true) {
+      console.error(
+        "❌ [Ilé] PAYSTACK_MOCK_TRANSFERS was set under NODE_ENV=production — forcing OFF. Mock Paystack transfers/refunds are forbidden."
+      );
+      // Immutable override (no const/property mutation); sync process.env via bracket key
+      validated = { ...validated, PAYSTACK_MOCK_TRANSFERS: false };
+      setProcessEnv("PAYSTACK_MOCK_TRANSFERS", "false");
+    }
+    if (!validated.DATABASE_URL) {
       console.warn("⚠️ [Ilé] DATABASE_URL not set in production. Ensure remote DB is configured.");
     }
-    if (env.SESSION_SECRET.includes("not_for_production")) {
+    if (validated.SESSION_SECRET.includes("not_for_production")) {
       console.warn("⚠️ [Ilé] Running in production with default SESSION_SECRET. Consider setting a custom secret in production.");
     }
-    if (!env.PAYSTACK_SECRET_KEY) {
-      console.warn("⚠️ [Ilé] PAYSTACK_SECRET_KEY not set. Using test mode payments.");
+    if (!validated.PAYSTACK_SECRET_KEY) {
+      console.error(
+        "❌ [Ilé] PAYSTACK_SECRET_KEY not set in production. Payment init/verify will fail closed (no MOCK_DEV)."
+      );
+    }
+    if (validated.EMAIL_PROVIDER === "console") {
+      console.error(
+        "❌ [Ilé] EMAIL_PROVIDER=console in production — transactional email will fail closed (no silent mock success)."
+      );
+    }
+    if (validated.SMS_PROVIDER === "console") {
+      console.error(
+        "❌ [Ilé] SMS_PROVIDER=console in production — SMS OTP delivery will fail closed (no silent mock success)."
+      );
     }
   }
 
-  return env;
+  return validated;
 }
 
 /** Validated environment — safe to use anywhere after import */

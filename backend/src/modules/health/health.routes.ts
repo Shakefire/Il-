@@ -1,4 +1,5 @@
 import { FastifyInstance } from "fastify";
+import { env } from "../../config/env";
 import { checkSystemHealth } from "./health.service";
 import { sendEmail } from "../notifications/notifications.service";
 
@@ -25,8 +26,12 @@ export async function healthRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // Safe developer email verification endpoint (does NOT leak API keys)
+  // Developer-only email probe — blocked in production
   fastify.post("/test-email", async (request, reply) => {
+    if (env.NODE_ENV === "production") {
+      return reply.status(404).send({ success: false, error: "Not found" });
+    }
+
     const body = request.body as { to?: string };
     const to = body?.to || "delivered@resend.dev";
 

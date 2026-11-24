@@ -7,9 +7,10 @@ import '../../app/app_radius.dart';
 import '../../app/app_spacing.dart';
 import '../../app/app_typography.dart';
 import '../../core/api/api_client.dart';
-import '../../core/api/ile_api.dart';
 import '../../core/constants/app_routes.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/models/user.dart';
+import '../../core/state/session_store.dart';
 import '../../core/utils/validators.dart';
 import '../../shared/widgets/widgets.dart';
 import 'widgets/auth_hero_scaffold.dart';
@@ -54,29 +55,56 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     setState(() => _isSubmitting = true);
+    final String cleanEmail = _emailController.text.trim().toLowerCase();
+
     try {
-      await context.read<IleApi>().login(
-            email: _emailController.text.trim(),
-            password: _passwordController.text,
-          );
+      final SessionStore session = context.read<SessionStore>();
+      final User user = await session.login(
+        email: cleanEmail,
+        password: _passwordController.text,
+      );
+
       if (!mounted) return;
       setState(() => _isSubmitting = false);
-      await IleAlert.show(
+
+      // Determine authoritative destination based on account role
+      final String target;
+      if (user.isHost) {
+        target = user.profile?.onboardingCompleted == true
+            ? AppRoutes.hostDashboard
+            : AppRoutes.hostOnboarding;
+      } else if (user.isAdmin) {
+        target = AppRoutes.hostDashboard;
+      } else {
+        target = widget.returnTo?.isNotEmpty == true
+            ? widget.returnTo!
+            : AppRoutes.explore;
+      }
+
+      IleAlert.showSnackBar(
         context: context,
-        title: AppStrings.loginSuccessTitle,
-        message: AppStrings.loginSuccessBody,
-        confirmLabel: AppStrings.continueLabel,
-        onConfirm: () {
-          if (!mounted) return;
-          final String target = widget.returnTo?.isNotEmpty == true
-              ? widget.returnTo!
-              : AppRoutes.home;
-          context.go(target);
-        },
+        message: user.isHost
+            ? 'Signed in successfully. Welcome to your host dashboard.'
+            : 'Signed in successfully.',
+        tone: IleAlertTone.info,
       );
+      context.go(target);
     } on ApiException catch (err) {
       if (!mounted) return;
       setState(() => _isSubmitting = false);
+
+      // Check for unverified email error
+      final String msg = err.message.toLowerCase();
+      if (msg.contains('verify your email') || msg.contains('unverified')) {
+        context.go(AppRoutes.otpPath(email: cleanEmail));
+        IleAlert.showSnackBar(
+          context: context,
+          message: 'Please enter the 6-digit verification code sent to $cleanEmail.',
+          tone: IleAlertTone.info,
+        );
+        return;
+      }
+
       IleAlert.showSnackBar(
         context: context,
         message: err.message,

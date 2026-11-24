@@ -145,22 +145,46 @@ abstract final class AuthColors {
   static const Color forgotPassword = primary;
 }
 
-/// Afro-luxe guest surfaces. Gold is for verified marks and ratings only.
+/// Afro-luxe guest surfaces (Fixed Editorial Style 1). Gold = verified / stars only.
 abstract final class EditorialColors {
+  /// Warm alabaster canvas `#FAF8F5`.
   static const Color background = Color(0xFFFAF8F5);
   static const Color card = Color(0xFFFFFFFF);
+  /// Elevated card / divider hairline `#EFECE6`.
   static const Color hairline = Color(0xFFEFECE6);
+  /// Quiet stroke for pills & search `#E6E2D8`.
+  static const Color stroke = Color(0xFFE6E2D8);
+  /// Soft rule under price row `#F0EDE6`.
+  static const Color rule = Color(0xFFF0EDE6);
+  /// Sticky header bottom border `#EAE4D7`.
+  static const Color headerRule = Color(0xFFEAE4D7);
+  /// Explore-back pill fill `#F0EDE6`.
+  static const Color explorePillFill = Color(0xFFF0EDE6);
+  /// Active tint / avatar wash `#EBF3F0`.
+  static const Color tint = Color(0xFFEBF3F0);
+  /// Primary brand emerald `#073B2E`.
   static const Color brand = Color(0xFF073B2E);
   static const Color brandPressed = Color(0xFF05281F);
+  /// Verified / star gold `#D4AF37`.
   static const Color gold = Color(0xFFD4AF37);
-  /// Spec swatch `#78756E` is about 4.4:1 on alabaster. This deeper mute clears WCAG AA for 13px copy.
-  static const Color inkMuted = Color(0xFF5C5952);
-  static const Color ink = Color(0xFF1C1A17);
-  static const Color glass = Color(0xD1FAF8F5);
+  /// Primary text `#141917`.
+  static const Color ink = Color(0xFF141917);
+  /// Secondary muted text `#6E6B64`.
+  static const Color inkMuted = Color(0xFF6E6B64);
+  /// Frosted sticky chrome `rgba(250, 248, 245, 0.86)`.
+  static const Color glass = Color(0xDBFAF8F5);
+  /// Floating dock fill `rgba(255, 255, 255, 0.90)`.
+  static const Color dockGlass = Color(0xE6FFFFFF);
   static const Color glassBorder = Color(0x99FFFFFF);
+  /// Dock / glass stroke `rgba(7, 59, 46, 0.10)`.
+  static const Color glassStroke = Color(0x1A073B2E);
+  /// Trust badge scrim `rgba(20, 25, 23, 0.72)`.
+  static const Color trustScrim = Color(0xB8141917);
   static const Color heart = Color(0xFFE11D48);
   static const Color shimmerStart = Color(0xFFF3EFE6);
   static const Color shimmerMid = Color(0xFFFAF8F5);
   static const Color shimmerEnd = Color(0xFFEAE4D7);
-  static const Color onBrand = Color(0xFFFAF8F5);
+  static const Color onBrand = Color(0xFFFFFFFF);
+  /// Outlined secondary CTA border `#D5D0C5`.
+  static const Color outlineButton = Color(0xFFD5D0C5);
 }

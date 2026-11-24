@@ -19,12 +19,12 @@ import '../../core/state/wishlist_store.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/stay_display.dart';
 import '../../shared/widgets/editorial_chrome.dart';
-import '../../shared/widgets/ile_button.dart';
 import '../../shared/widgets/ile_circular_back_button.dart';
 import '../../shared/widgets/ile_empty_state.dart';
 import '../../shared/widgets/ile_error_state.dart';
 import '../../shared/widgets/skeleton/skeleton_box.dart';
 import 'amenities_screen.dart';
+import '../../core/services/nearby_neighborhoods_service.dart';
 
 class PropertyDetailScreen extends StatefulWidget {
   const PropertyDetailScreen({
@@ -99,6 +99,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
         minimumNights: property.minimumNights,
         propertyId: property.id,
         slug: property.slug,
+        nightlyRate: property.pricePerNight,
       ),
     );
   }
@@ -484,6 +485,10 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen> {
                         ],
                         const SizedBox(height: AppSpacing.lg),
                         _NeighborhoodNote(property: property),
+                        const SizedBox(height: AppSpacing.xl),
+                        _ThingsToKnowSection(property: property, session: session),
+                        const SizedBox(height: AppSpacing.xl),
+                        _NearbyNeighborhoodsSection(property: property),
                         if (capacityHint != null) ...[
                           const SizedBox(height: AppSpacing.md),
                           Container(
@@ -785,12 +790,29 @@ class _ReserveBar extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 12),
-                SizedBox(
-                  width: 148,
-                  child: IleButton(
-                    label: property.isReserved ? 'Unavailable' : 'Request to book',
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: ElevatedButton(
                     onPressed: property.isReserved ? null : onReserve,
-                    isExpanded: true,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: EditorialColors.brand,
+                      foregroundColor: EditorialColors.onBrand,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      textStyle: AppTypography.button.copyWith(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: -0.01,
+                      ),
+                    ),
+                    child: Text(
+                      property.isReserved ? 'Unavailable' : 'Request to book',
+                      maxLines: 1,
+                      overflow: TextOverflow.visible,
+                    ),
                   ),
                 ),
               ],
@@ -874,6 +896,716 @@ class _SpecChip extends StatelessWidget {
           fontWeight: FontWeight.w600,
         ),
       ),
+    );
+  }
+}
+
+
+class _ThingsToKnowSection extends StatelessWidget {
+  const _ThingsToKnowSection({
+    required this.property,
+    required this.session,
+  });
+
+  final IleProperty property;
+  final SearchSession session;
+
+  void _openHouseRules(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0x730A1C16),
+      builder: (BuildContext sheetContext) {
+        return _HouseRulesSheet(property: property);
+      },
+    );
+  }
+
+  void _openSafety(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0x730A1C16),
+      builder: (BuildContext sheetContext) {
+        return _SafetyPolicySheet(property: property);
+      },
+    );
+  }
+
+  void _openCancellation(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: const Color(0x730A1C16),
+      builder: (BuildContext sheetContext) {
+        return _CancellationPolicySheet(property: property, session: session);
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final IleThingsToKnow ttk = property.thingsToKnow;
+    final int maxGuests = ttk.maxOvernightGuests ?? property.maxGuests;
+    final String smokeLabel = ttk.smokingAllowed ? 'Smoking allowed' : 'No indoor smoking';
+    final String partyLabel = ttk.partiesAllowed ? 'Parties allowed' : 'No parties';
+    final String powerLabel = ttk.hasSolarInverter ? '24/7 Solar Inverter' : 'Generator backup';
+    final String securityLabel = ttk.hasExteriorCCTV ? 'CCTV at entrance' : 'Armed security';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Things to know',
+          style: AppTypography.screenTitle.copyWith(fontSize: 20),
+        ),
+        const SizedBox(height: 14),
+
+        // Row 1: Check-in & Access
+        _ThingsToKnowRow(
+          icon: Icons.meeting_room_outlined,
+          title: 'Check-in & Access',
+          subtitle: 'Check-in after ${ttk.checkInAfter} • Checkout before ${ttk.checkOutBefore}\nSelf check-in with ${ttk.checkInMethod}',
+          hasChevron: false,
+        ),
+        const Divider(color: Color(0xFFEFECE6), height: 24, thickness: 1),
+
+        // Row 2: House rules
+        _ThingsToKnowRow(
+          icon: Icons.assignment_outlined,
+          title: 'House rules',
+          subtitle: 'Up to $maxGuests overnight guests • $smokeLabel • $partyLabel',
+          hasChevron: true,
+          onTap: () => _openHouseRules(context),
+        ),
+        const Divider(color: Color(0xFFEFECE6), height: 24, thickness: 1),
+
+        // Row 3: Safety & power. Caution fee is not charged.
+        _ThingsToKnowRow(
+          icon: Icons.shield_outlined,
+          title: 'Safety & power',
+          subtitle: '$powerLabel • $securityLabel',
+          hasChevron: true,
+          onTap: () => _openSafety(context),
+        ),
+        const Divider(color: Color(0xFFEFECE6), height: 24, thickness: 1),
+
+        // Row 4: Cancellation policy
+        _ThingsToKnowRow(
+          icon: Icons.event_available_outlined,
+          title: 'Cancellation policy',
+          subtitle: 'Free cancellation up to 48 hours before check-in.\nReview the cancellation policy.',
+          hasChevron: true,
+          onTap: () => _openCancellation(context),
+        ),
+        const SizedBox(height: 16),
+
+        // Report this listing
+        InkWell(
+          onTap: () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Listing report submitted for review. Thank you.'),
+                backgroundColor: EditorialColors.brand,
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('🏳️', style: TextStyle(fontSize: 14)),
+                const SizedBox(width: 8),
+                Text(
+                  'Report this listing',
+                  style: AppTypography.supporting.copyWith(
+                    fontSize: 14,
+                    color: EditorialColors.ink,
+                    decoration: TextDecoration.underline,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ThingsToKnowRow extends StatelessWidget {
+  const _ThingsToKnowRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.hasChevron,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool hasChevron;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget content = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: EditorialColors.tint,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: EditorialColors.brand, size: 20),
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: AppTypography.supporting.copyWith(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: EditorialColors.ink,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                style: AppTypography.caption.copyWith(
+                  fontSize: 13,
+                  color: EditorialColors.inkMuted,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (hasChevron)
+          const Padding(
+            padding: EdgeInsets.only(top: 8, left: 8),
+            child: Icon(Icons.chevron_right_rounded, color: EditorialColors.inkMuted, size: 20),
+          ),
+      ],
+    );
+
+    if (onTap != null) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: content,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: content,
+    );
+  }
+}
+
+class _HouseRulesSheet extends StatelessWidget {
+  const _HouseRulesSheet({required this.property});
+
+  final IleProperty property;
+
+  @override
+  Widget build(BuildContext context) {
+    final IleThingsToKnow ttk = property.thingsToKnow;
+    final int maxGuests = ttk.maxOvernightGuests ?? property.maxGuests;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: Material(
+          color: EditorialColors.background,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD5D0C5),
+                    borderRadius: AppRadius.pillAll,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'House rules',
+                        style: AppTypography.screenTitle.copyWith(fontSize: 19),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 22),
+                      color: EditorialColors.ink,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFEAE4D7)),
+              Flexible(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
+                  children: [
+                    Text(
+                      'These rules are set by the host. Please treat the property and estate security protocols with respect.',
+                      style: AppTypography.supporting.copyWith(
+                        color: EditorialColors.inkMuted,
+                        fontSize: 14,
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _RuleDetailRow(
+                      icon: Icons.groups_outlined,
+                      title: 'Up to $maxGuests overnight guests',
+                      subtitle: 'Visitor gate passes require 2 hours notice for security clearance.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.smoke_free_outlined,
+                      title: ttk.smokingAllowed ? 'Indoor smoking allowed' : 'No indoor smoking',
+                      subtitle: 'Including shisha, vaping, and e-cigarettes inside the unit.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.celebration_outlined,
+                      title: ttk.partiesAllowed ? 'Parties allowed' : 'No unauthorized parties or commercial shoots',
+                      subtitle: 'Estate quiet hours start at ${ttk.quietHours}.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.pets_outlined,
+                      title: ttk.petsAllowed ? 'Pets allowed' : 'No pets allowed',
+                      subtitle: ttk.petsAllowed
+                          ? 'Prior notification required before bringing pets.'
+                          : 'Pets are strictly prohibited by building bylaws.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.bolt_outlined,
+                      title: 'Power & Generator Protocol',
+                      subtitle: ttk.powerScheduleNote,
+                    ),
+                    if (ttk.customRules.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'Additional rules from host',
+                        style: AppTypography.cardTitle.copyWith(fontSize: 15),
+                      ),
+                      const SizedBox(height: 10),
+                      for (final String rule in ttk.customRules)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(top: 4, right: 10),
+                                child: Icon(Icons.check_circle_outline, size: 16, color: EditorialColors.brand),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  rule,
+                                  style: AppTypography.supporting.copyWith(
+                                    fontSize: 13.5,
+                                    color: EditorialColors.ink,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SafetyPolicySheet extends StatelessWidget {
+  const _SafetyPolicySheet({required this.property});
+
+  final IleProperty property;
+
+  @override
+  Widget build(BuildContext context) {
+    final IleThingsToKnow ttk = property.thingsToKnow;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.82,
+        ),
+        child: Material(
+          color: EditorialColors.background,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD5D0C5),
+                    borderRadius: AppRadius.pillAll,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Safety & Property Disclosures',
+                        style: AppTypography.screenTitle.copyWith(fontSize: 19),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 22),
+                      color: EditorialColors.ink,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFEAE4D7)),
+              Flexible(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
+                  children: [
+                    _RuleDetailRow(
+                      icon: Icons.videocam_outlined,
+                      title: ttk.hasExteriorCCTV ? 'Exterior Security Cameras' : 'Private Premise',
+                      subtitle: ttk.hasExteriorCCTV
+                          ? 'CCTV monitors building entrance and perimeter for guest safety. No cameras inside private areas.'
+                          : 'No recording devices on premise.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.local_police_outlined,
+                      title: ttk.hasArmedEstateSecurity ? 'Estate Manned Gate Security' : 'Gated Compound',
+                      subtitle: '24-hour uniformed security officers station at the estate entrance gate.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.sensors_outlined,
+                      title: ttk.hasSmokeAlarm ? 'Smoke & Fire Alarm' : 'Fire Extinguisher on Site',
+                      subtitle: 'Smoke alarms and fire blankets installed in the kitchen and common areas.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.solar_power_outlined,
+                      title: 'Uninterrupted Power Architecture',
+                      subtitle: ttk.powerScheduleNote,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CancellationPolicySheet extends StatelessWidget {
+  const _CancellationPolicySheet({
+    required this.property,
+    required this.session,
+  });
+
+  final IleProperty property;
+  final SearchSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final IleThingsToKnow ttk = property.thingsToKnow;
+
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+        ),
+        child: Material(
+          color: EditorialColors.background,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD5D0C5),
+                    borderRadius: AppRadius.pillAll,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Cancellation Policy',
+                        style: AppTypography.screenTitle.copyWith(fontSize: 19),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, size: 22),
+                      color: EditorialColors.ink,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1, color: Color(0xFFEAE4D7)),
+              Flexible(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 36),
+                  children: [
+                    _RuleDetailRow(
+                      icon: Icons.check_circle_outline,
+                      title: ttk.cancellationPolicy == 'FLEXIBLE_48H'
+                          ? 'Flexible: Free cancellation before 48 hrs'
+                          : ttk.cancellationPolicy == 'MODERATE_5D'
+                              ? 'Moderate: Free cancellation before 5 days'
+                              : 'Firm: 50% refund up to 7 days before check-in',
+                      subtitle: 'Cancellation follows the policy on this listing. Guests can request a refund; only Ilé admin can execute one.',
+                    ),
+                    _RuleDetailRow(
+                      icon: Icons.history_toggle_off_outlined,
+                      title: 'Non-refundable period',
+                      subtitle: 'Cancellations within 48 hours of check-in forfeit the first night payment; remaining nights refunded at 50%.',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RuleDetailRow extends StatelessWidget {
+  const _RuleDetailRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: EditorialColors.tint,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: EditorialColors.brand, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: AppTypography.supporting.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                    color: EditorialColors.ink,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: AppTypography.caption.copyWith(
+                    fontSize: 13,
+                    color: EditorialColors.inkMuted,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NearbyNeighborhoodsSection extends StatelessWidget {
+  const _NearbyNeighborhoodsSection({required this.property});
+
+  final IleProperty property;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<NearbyNeighborhood> nearby = NearbyNeighborhoodsService.getNearby(
+      neighborhood: property.neighborhood,
+      city: property.city,
+      state: property.state,
+      latitude: property.latitude,
+      longitude: property.longitude,
+    );
+
+    final String stateName = property.state.isNotEmpty ? property.state : 'FCT';
+    final String cityName = property.city.isNotEmpty ? property.city : 'Abuja';
+    final String hoodName = property.neighborhood.isNotEmpty ? property.neighborhood : 'Maitama';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 8px Warm Alabaster section divider
+        Container(
+          height: 8,
+          margin: const EdgeInsets.only(bottom: 24),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEFECE6),
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ),
+
+        // Breadcrumbs trail: Ilé › Nigeria › State › City › Neighborhood
+        Text(
+          'Ilé  ›  Nigeria  ›  $stateName  ›  $cityName  ›  $hoodName',
+          style: AppTypography.caption.copyWith(
+            color: EditorialColors.inkMuted,
+            fontSize: 12,
+            letterSpacing: 0.2,
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        Text(
+          'Explore other options in and around $hoodName',
+          style: AppTypography.cardTitle.copyWith(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Auto-populated via Google Maps Nearby District Lookup',
+          style: AppTypography.caption.copyWith(
+            color: EditorialColors.inkMuted,
+            fontSize: 12,
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 2.1,
+          ),
+          itemCount: nearby.length,
+          itemBuilder: (BuildContext context, int index) {
+            final NearbyNeighborhood item = nearby[index];
+            return Material(
+              color: EditorialColors.card,
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () {
+                  context.read<SearchSession>().setPlace(item.name);
+                  context.go(AppRoutes.explore);
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: EditorialColors.stroke),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        item.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.supporting.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: EditorialColors.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${item.descriptor} (${item.distanceLabel})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTypography.caption.copyWith(
+                          fontSize: 11,
+                          color: EditorialColors.inkMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 }

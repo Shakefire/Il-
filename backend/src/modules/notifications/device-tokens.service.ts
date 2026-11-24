@@ -1,6 +1,7 @@
 import crypto from "crypto"
 import { and, eq, isNull } from "drizzle-orm"
 import { getDb, schema } from "../../db/client"
+import { validateDeviceToken, validateUserId } from "./recipient-validator"
 
 export const deviceTokensService = {
   async register(params: {
@@ -11,9 +12,19 @@ export const deviceTokensService = {
     appVersion?: string
     userAgent?: string
   }) {
+    const userValidation = validateUserId(params.userId)
+    if (!userValidation.valid) {
+      throw new Error(`Invalid user ID: ${userValidation.error}`)
+    }
+
+    const provider = params.provider || (params.platform === "web" ? "web_push" : "fcm")
+    const tokenValidation = validateDeviceToken(params.token, provider)
+    if (!tokenValidation.valid) {
+      throw new Error(`Invalid device token: ${tokenValidation.error}`)
+    }
+
     const db = getDb()
-    const token = params.token.trim()
-    if (!token) throw new Error("Device token is required")
+    const token = tokenValidation.value
 
     const [existing] = await db
       .select()
@@ -27,7 +38,7 @@ export const deviceTokensService = {
         .set({
           userId: params.userId,
           platform: params.platform,
-          provider: params.provider || existing.provider,
+          provider,
           appVersion: params.appVersion || existing.appVersion,
           userAgent: params.userAgent || existing.userAgent,
           lastSeenAt: new Date(),
@@ -46,7 +57,7 @@ export const deviceTokensService = {
         userId: params.userId,
         token,
         platform: params.platform,
-        provider: params.provider || (params.platform === "web" ? "web_push" : "fcm"),
+        provider,
         appVersion: params.appVersion || null,
         userAgent: params.userAgent || null,
       })

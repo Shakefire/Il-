@@ -43,15 +43,15 @@ export default function StayDetailClient({ slug }: { slug: string }) {
             slug: raw.slug,
             title: raw.title,
             tagline: raw.tagline || "",
-            description: raw.description || "Spacious, curated accommodation on Ilé.",
-            city: raw.city || "Abuja",
+            description: raw.description || "",
+            city: (raw.city || "") as Property["city"],
             neighborhood: raw.neighborhood || "",
-            state: raw.state || "FCT",
-            pricePerNight: Number(raw.pricePerNight) || 50000,
+            state: (raw.state || "") as Property["state"],
+            pricePerNight: Number(raw.pricePerNight) || 0,
             currency: raw.currency || "NGN",
-            rating: Number(raw.rating) || 5.0,
+            rating: Number(raw.rating) || 0,
             reviewCount: Number(raw.reviewCount) || 0,
-            verified: raw.verified ?? true,
+            verified: raw.verified === true,
             bedrooms: Number(raw.bedrooms) || 1,
             bathrooms: Number(raw.bathrooms) || 1,
             maxGuests: Number(raw.maxGuests) || 2,
@@ -60,28 +60,44 @@ export default function StayDetailClient({ slug }: { slug: string }) {
             images: Array.isArray(raw.images) && raw.images.length > 0 ? raw.images : [raw.coverImage || "/images/placeholder-property.jpg"],
             propertyType: raw.propertyType || "Serviced Apartment",
             infrastructure: raw.infrastructure || {
-              power: raw.powerDescription || "24/7 dedicated power supply with solar & inverter backup",
-              powerType: raw.powerType || "Solar + Inverter",
-              internet: raw.internetDescription || "High-speed fiber optic Wi-Fi throughout the apartment",
-              security: raw.securityDescription || "24-hour gated estate security with manned access control",
-              water: raw.waterDescription || "Continuous treated borehole water supply",
-              parking: raw.parkingDescription || "Free secure on-premises parking",
+              power: raw.powerDescription || "",
+              powerType: raw.powerType || "",
+              internet: raw.internetDescription || "",
+              security: raw.securityDescription || "",
+              water: raw.waterDescription || "",
+              parking: raw.parkingDescription || "",
             },
             amenities: Array.isArray(raw.amenities) ? raw.amenities : [],
             host: raw.host || {
               name: "Host",
               role: "Property Host",
-              joinedYear: 2026,
+              joinedYear: new Date().getFullYear(),
               avatar: "/images/default-avatar.png",
-              responseRate: "100%",
-              responseTime: "Within an hour",
-              bio: "Verified property host on Ilé.",
+              responseRate: "",
+              responseTime: "",
+              bio: "",
             },
-            coordinates: raw.coordinates || { lat: 9.0765, lng: 7.3986 },
+            coordinates:
+              raw.coordinates && Number.isFinite(Number(raw.coordinates.lat)) && Number.isFinite(Number(raw.coordinates.lng))
+                ? { lat: Number(raw.coordinates.lat), lng: Number(raw.coordinates.lng) }
+                : { lat: 0, lng: 0 },
             reviews: Array.isArray(raw.reviews) ? raw.reviews : [],
             isReserved: raw.isReserved ?? false,
             status: raw.status || "PUBLISHED",
           };
+          try {
+            const reviewRes = await api.getPropertyReviews(raw.id);
+            normalized.reviews = (reviewRes.reviews || []).map((rev: any) => ({
+              id: rev.id,
+              author: [rev.guestFirstName, rev.guestLastName].filter(Boolean).join(" ") || "Guest",
+              location: "",
+              date: rev.createdAt ? new Date(rev.createdAt).toLocaleDateString() : "",
+              rating: rev.overallRating,
+              comment: rev.body || rev.title || "",
+            }));
+          } catch {
+            normalized.reviews = [];
+          }
           setProperty(normalized);
         } else if (active) {
           setProperty(null);
@@ -282,7 +298,7 @@ export default function StayDetailClient({ slug }: { slug: string }) {
                       Reliable power
                     </h4>
                     <p className="text-[14px] text-[#6B6B67] leading-relaxed mt-0.5">
-                      {property.infrastructure?.power || "24/7 dedicated power setup"}
+                      {property.infrastructure?.power || "Power details are added by the host."}
                     </p>
                   </div>
                 </div>
@@ -296,7 +312,7 @@ export default function StayDetailClient({ slug }: { slug: string }) {
                       Stay connected
                     </h4>
                     <p className="text-[14px] text-[#6B6B67] leading-relaxed mt-0.5">
-                      {property.infrastructure?.internet || "High-speed Wi-Fi available"}
+                      {property.infrastructure?.internet || "Wi-Fi details appear here when the host adds them."}
                     </p>
                   </div>
                 </div>
@@ -384,10 +400,10 @@ export default function StayDetailClient({ slug }: { slug: string }) {
                 Location &amp; neighborhood
               </h3>
               <p className="text-[15px] text-[#6B6B67] leading-relaxed">
-                {property.neighborhood} is one of {property.city}&apos;s most desirable and peaceful residential enclaves. Quiet streets, mature trees, and proximity to grocery markets, pharmacies, and diplomatic/commercial centers.
+                {[property.neighborhood, property.city].filter(Boolean).join(", ")}. The public map uses the listing area only.
               </p>
               <div className="p-4 rounded-xl bg-white border border-[#E7E5E0] text-[14px] text-[#6B6B67]">
-                Exact estate gate address and driver directions are provided immediately upon booking confirmation.
+                After payment is confirmed, your stay details (dates and any host arrival notes) appear in Trips.
               </div>
             </section>
 
@@ -417,9 +433,9 @@ export default function StayDetailClient({ slug }: { slug: string }) {
                           {rev.date}
                         </span>
                       </div>
-                      <div className="text-[12px] text-[#6B6B67]">
-                        Visiting from {rev.location}
-                      </div>
+                      {rev.location ? (
+                        <div className="text-[12px] text-[#6B6B67]">Visiting from {rev.location}</div>
+                      ) : null}
                       <p className="text-[15px] text-[#171717] pt-1 leading-relaxed">
                         &ldquo;{rev.comment}&rdquo;
                       </p>

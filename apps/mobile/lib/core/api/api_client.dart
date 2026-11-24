@@ -126,9 +126,14 @@ class ApiClient {
   }
 
   dynamic _decode(http.Response response) {
-    final dynamic body = response.body.isEmpty
-        ? <String, dynamic>{}
-        : jsonDecode(response.body);
+    dynamic body;
+    try {
+      body = response.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body);
+    } catch (_) {
+      body = <String, dynamic>{'error': response.body};
+    }
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return body;
     }

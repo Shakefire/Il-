@@ -338,15 +338,29 @@ class _HostCalendarScreenState extends State<HostCalendarScreen> {
                             ],
                           ),
                           const SizedBox(height: AppSpacing.md),
-                          if (_rangeStart != null)
-                            Text(
-                              _rangeEnd == null
-                                  ? 'Selected: ${_ymd(_rangeStart!)} (tap end date)'
-                                  : 'Block ${_ymd(_rangeStart!)} → ${_ymd(_rangeEnd!)}',
-                              style: AppTypography.supporting,
+                          if (_rangeStart != null) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  _rangeEnd == null
+                                      ? 'Selected: ${_ymd(_rangeStart!)} (tap end date)'
+                                      : 'Block ${_ymd(_rangeStart!)} → ${_ymd(_rangeEnd!)}',
+                                  style: AppTypography.supporting.copyWith(fontWeight: FontWeight.w600),
+                                ),
+                                TextButton(
+                                  onPressed: () => setState(() {
+                                    _rangeStart = null;
+                                    _rangeEnd = null;
+                                  }),
+                                  child: const Text('Cancel selection'),
+                                ),
+                              ],
                             ),
+                            const SizedBox(height: AppSpacing.xs),
+                          ],
                           IleButton(
-                            label: _blocking ? 'Blocking…' : 'Block selected dates',
+                            label: _blocking ? 'Blocking…' : 'Confirm & Block Dates',
                             onPressed: (_rangeStart == null || _blocking)
                                 ? null
                                 : _block,

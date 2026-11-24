@@ -1,37 +1,70 @@
 import { env } from "../../config/env"
+import { validateAndNormalizePhone } from "./recipient-validator"
+import type { ChannelSendResult } from "./delivery-ledger"
 
-export type SmsSendResult = {
-  ok: boolean
-  mock: boolean
-  providerMessageId?: string
-  error?: string
-}
+export type SmsSendResult = ChannelSendResult
 
 /**
- * Termii SMS adapter. Without TERMII_API_KEY or when SMS_PROVIDER=console,
- * logs the message and returns mock success. Never throws to callers.
+ * Termii SMS adapter.
+ * Enforces international E.164 normalization, strictly rejects emails and invalid numbers,
+ * distinguishes acceptance vs delivery, and never throws to callers.
  */
 export async function sendSms(params: {
   to: string
   message: string
+  countryContext?: string
 }): Promise<SmsSendResult> {
-  const to = normalizeNgPhone(params.to)
+  // 1. Strict recipient validation & E.164 normalization
+  const phoneValidation = validateAndNormalizePhone(params.to, params.countryContext || "NG")
+  if (!phoneValidation.valid) {
+    return {
+      ok: false,
+      mock: false,
+      skipped: true,
+      error: phoneValidation.error,
+    }
+  }
+
+  const normalizedPhone = phoneValidation.value
   const provider = env.SMS_PROVIDER
   const apiKey = env.TERMII_API_KEY
 
+  // 2. Unconfigured / Console Provider handling
   if (provider === "console" || !apiKey) {
+    if (env.NODE_ENV === "production") {
+      console.log(
+        `ℹ [SMS] Termii not configured in production (provider=${provider}, key=${apiKey ? "set" : "missing"}) — skipping SMS channel.`
+      )
+      return {
+        ok: false,
+        mock: false,
+        notConfigured: true,
+        skipped: true,
+        error: "SMS provider not configured (optional in current environment)",
+      }
+    }
     console.log(
-      `📱 [SMS Mock/Termii] To: ${to} | ${params.message.slice(0, 120)}${params.message.length > 120 ? "…" : ""}`
+      `📱 [SMS Mock/Termii] To: ${normalizedPhone} | ${params.message.slice(0, 120)}${params.message.length > 120 ? "…" : ""}`
     )
-    return { ok: true, mock: true, providerMessageId: `sms_mock_${Date.now()}` }
+    return {
+      ok: true,
+      mock: true,
+      accepted: true,
+      providerMessageId: `sms_mock_${Date.now()}`,
+    }
   }
 
+  // 3. Live Termii API dispatch
   try {
+    // Termii accepts format without leading plus (e.g. 2348031234567) or standard international
+    const termiiTo = normalizedPhone.startsWith("+") ? normalizedPhone.slice(1) : normalizedPhone
+
     const res = await fetch(`${env.TERMII_BASE_URL}/api/sms/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(10000),
       body: JSON.stringify({
-        to,
+        to: termiiTo,
         from: env.TERMII_SENDER_ID,
         sms: params.message,
         type: "plain",
@@ -54,6 +87,7 @@ export async function sendSms(params: {
     return {
       ok: true,
       mock: false,
+      accepted: true,
       providerMessageId: data.message_id || data.code || `termii_${Date.now()}`,
     }
   } catch (err: any) {
@@ -65,11 +99,12 @@ export async function sendSms(params: {
   }
 }
 
-/** Normalize local NG numbers to E.164-ish digits Termii accepts. */
+/** Re-export phone normalizer for backwards compatibility */
 export function normalizeNgPhone(raw: string): string {
-  const digits = raw.replace(/\D/g, "")
-  if (digits.startsWith("234") && digits.length >= 13) return digits
-  if (digits.startsWith("0") && digits.length === 11) return `234${digits.slice(1)}`
-  if (digits.length === 10) return `234${digits}`
-  return digits || raw.trim()
+  const result = validateAndNormalizePhone(raw, "NG")
+  if (result.valid) {
+    // Strip leading '+' for legacy NG format tests expecting 2348...
+    return result.value.startsWith("+") ? result.value.slice(1) : result.value
+  }
+  return raw.replace(/\D/g, "")
 }

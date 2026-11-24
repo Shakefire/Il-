@@ -110,28 +110,8 @@ export async function reconcileHistoricalLedger() {
         }
       }
 
-      // 3. Reconcile Cancelled Bookings
-      if (b.status === "CANCELLED") {
-        const [existingRefund] = await tx
-          .select({ id: schema.refunds.id })
-          .from(schema.refunds)
-          .where(eq(schema.refunds.bookingId, b.id))
-          .limit(1);
-
-        if (!existingRefund) {
-          await LedgerService.recordBookingRefund(tx, {
-            bookingId: b.id,
-            guestId: b.guestId,
-            grossPaid: b.totalAmount,
-            refundableAmount: accommodationSubtotal,
-            nonRefundableProcessingFee: paystackFee,
-            adminId: b.hostId, // Recorded as authorized refund
-            reason: "Historical reservation cancellation",
-            adminNotes: "Reconciled from legacy booking cancellation record",
-          });
-          refundsReconciled++;
-        }
-      }
+      // Cancelled bookings are not auto-refunded here. Admin refunds are funded
+      // only from commission account 1040 and are not invented by this script.
     });
   }
 

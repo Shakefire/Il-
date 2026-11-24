@@ -37,6 +37,12 @@ interface BookingModalProps {
   checkIn: string
   checkOut: string
   guests: number
+  searchCriteria?: {
+    destination?: string
+    apartmentType?: string
+    powerPreference?: string
+    bedrooms?: number
+  }
 }
 
 interface ConfirmedBookingDetails {
@@ -80,6 +86,7 @@ export default function BookingModal({
   checkIn,
   checkOut,
   guests,
+  searchCriteria,
 }: BookingModalProps) {
   const { user } = useAuth()
   const [step, setStep] = useState<FlowStep>("review")
@@ -95,6 +102,8 @@ export default function BookingModal({
   const [paymentDeadlineAt, setPaymentDeadlineAt] = useState<string | null>(null)
   const [hostSecondsLeft, setHostSecondsLeft] = useState(0)
   const [paySecondsLeft, setPaySecondsLeft] = useState(0)
+  const [similarProperties, setSimilarProperties] = useState<any[]>([])
+  const [loadingSimilar, setLoadingSimilar] = useState(false)
   const [confirmedData, setConfirmedData] = useState<ConfirmedBookingDetails | null>(null)
   const pollCountRef = useRef(0)
   const abandonedRef = useRef(false)
@@ -163,6 +172,16 @@ export default function BookingModal({
       })
       setTerminalMessage(`${outcome.headline}. ${outcome.body}`)
       setStep("terminal")
+      if (booking?.id) {
+        setLoadingSimilar(true)
+        api
+          .getSimilarProperties(booking.id, 4)
+          .then((res: any) => {
+            setSimilarProperties(res?.properties || [])
+          })
+          .catch(() => {})
+          .finally(() => setLoadingSimilar(false))
+      }
     }
   }, [accessToken, hostDeadlineAt, paymentDeadlineAt])
 
@@ -524,6 +543,33 @@ export default function BookingModal({
                     {property.maxGuests ? ` / ${property.maxGuests} max` : ""}
                   </span>
                 </div>
+                {searchCriteria?.destination && (
+                  <div className="pt-3 flex justify-between items-center text-[14px]">
+                    <span className="text-[#6B6B67]">Search destination</span>
+                    <span className="font-medium text-[#0B5D45] flex items-center gap-1">
+                      <span>{searchCriteria.destination}</span>
+                      <span className="text-[11px] bg-[#EDF3F0] px-2 py-0.5 rounded-full border border-[#0B5D45]/20">
+                        Match
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {searchCriteria?.apartmentType && (
+                  <div className="pt-3 flex justify-between items-center text-[14px]">
+                    <span className="text-[#6B6B67]">Property type</span>
+                    <span className="font-medium text-[#171717]">
+                      {property.propertyType}
+                    </span>
+                  </div>
+                )}
+                {property.infrastructure?.powerType ? (
+                  <div className="pt-3 flex justify-between items-center text-[14px]">
+                    <span className="text-[#6B6B67]">Power</span>
+                    <span className="font-medium text-[#0B5D45]">
+                      {property.infrastructure.powerType}
+                    </span>
+                  </div>
+                ) : null}
               </div>
 
               {nights < minNights && (
@@ -836,19 +882,85 @@ export default function BookingModal({
           )}
 
           {step === "terminal" && (
-            <div className="text-center py-6 space-y-4">
-              <AlertCircle size={28} className="mx-auto text-[#8B8B86]" />
-              <p className="text-[15px] text-[#6B6B67]">{terminalMessage}</p>
-              <button
-                type="button"
-                onClick={() => {
-                  resetLocal()
-                  onClose()
-                }}
-                className="w-full py-3 bg-[#171717] text-white rounded-xl font-medium min-h-[44px]"
-              >
-                Close
-              </button>
+            <div className="py-4 space-y-5">
+              <div className="text-center space-y-2">
+                <AlertCircle size={32} className="mx-auto text-amber-600" />
+                <p className="text-[15px] font-medium text-[#171717]">{terminalMessage}</p>
+              </div>
+
+              {loadingSimilar ? (
+                <div className="text-center py-4 text-sm text-[#8B8B86]">
+                  Checking live availability for similar stays nearby…
+                </div>
+              ) : similarProperties.length > 0 ? (
+                <div className="space-y-3 pt-2 border-t border-[#E7E5E0]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-[#171717]">
+                      Similar available stays nearby
+                    </span>
+                    <span className="text-xs text-[#8B8B86]">
+                      {checkIn && checkOut ? `${checkIn} → ${checkOut}` : "Your dates"} · {guests} {guests === 1 ? "guest" : "guests"}
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {similarProperties.map((p: any) => (
+                      <a
+                        key={p.id}
+                        href={`/stay/${p.slug}?checkIn=${encodeURIComponent(checkIn)}&checkOut=${encodeURIComponent(checkOut)}&guests=${guests}`}
+                        className="flex items-center gap-3 p-2.5 rounded-xl border border-[#E7E5E0] hover:border-[#065F46] hover:bg-[#FAFAF8] transition-all group"
+                      >
+                        <div className="relative w-14 h-14 rounded-lg overflow-hidden shrink-0 bg-[#E7E5E0]">
+                          {p.coverImage ? (
+                            <Image
+                              src={p.coverImage}
+                              alt={p.title}
+                              fill
+                              className="object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-xs text-[#8B8B86]">
+                              Ilé
+                            </div>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h5 className="text-[13px] font-medium text-[#171717] truncate group-hover:text-[#065F46]">
+                            {p.title}
+                          </h5>
+                          <p className="text-[12px] text-[#6B6B67] truncate">
+                            {p.neighborhood ? `${p.neighborhood}, ` : ""}{p.city}
+                          </p>
+                          <p className="text-[12px] font-semibold text-[#065F46]">
+                            ₦{Number(p.pricePerNight).toLocaleString()} / night
+                          </p>
+                        </div>
+                        <span className="text-xs font-medium text-[#065F46] shrink-0">
+                          View →
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-2 pt-2">
+                <a
+                  href={`/search?destination=${encodeURIComponent(property.city)}&checkIn=${encodeURIComponent(checkIn)}&checkOut=${encodeURIComponent(checkOut)}&guests=${guests}`}
+                  className="w-full py-3 bg-[#065F46] text-white text-center rounded-xl font-medium text-[14px] hover:bg-[#073B2E] transition-all"
+                >
+                  Explore all stays in {property.city}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetLocal()
+                    onClose()
+                  }}
+                  className="w-full py-2.5 border border-[#D1D5DB] rounded-xl text-[14px] font-medium text-[#6B6B67] hover:bg-[#FAFAF8]"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           )}
         </div>

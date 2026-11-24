@@ -14,10 +14,11 @@ import {
   processSuccessfulPayment,
 } from "../backend/src/modules/payments/payments.service"
 import { FinanceService } from "../backend/src/modules/finance/finance.service"
-import { LedgerService } from "../backend/src/modules/finance/ledger.service"
+import { ensurePhase2Accounts, LedgerService } from "../backend/src/modules/finance/ledger.service"
 
 process.env.PAYSTACK_MOCK_TRANSFERS = "true"
-process.env.NODE_ENV = process.env.NODE_ENV || "test"
+const testEnv = process.env as Record<string, string | undefined>
+if (!testEnv.NODE_ENV) testEnv.NODE_ENV = "test"
 
 describe("Phase 9: Cancellation, refund request, reconciliation", async () => {
   const db = getDb()
@@ -300,17 +301,33 @@ describe("Phase 9: Cancellation, refund request, reconciliation", async () => {
 
     // Avoid live Paystack: clear secret for this process step if set — use processApprovedRefund
     // which posts ledger when key absent for payment without gateway ref handling.
-    const processed = await FinanceService.processApprovedRefund(adminId, refund.id, {
-      paystackRefundId: `mock_ref_${ts}`,
+    await assert.rejects(
+      () => FinanceService.processApprovedRefund(adminId, refund.id, {}),
+      (err: any) => err.code === "INSUFFICIENT_COMMISSION"
+    )
+
+    await db.transaction(async (tx) => {
+      await ensurePhase2Accounts(tx)
+      await LedgerService.postJournalEntry(tx, {
+        reference: `p9_fund_${ts}`,
+        eventType: "COMMISSION_ALLOCATION",
+        narration: "Test-only funding of commission account 1040",
+        entries: [
+          { accountCode: "1040", entryType: "DEBIT", amount: 5000000 },
+          { accountCode: "4010", entryType: "CREDIT", amount: 5000000 },
+        ],
+      })
     })
-    assert.ok(processed)
+
+    const processed = await FinanceService.processApprovedRefund(adminId, refund.id, {})
+    assert.equal(processed.status, "SUCCESSFUL")
 
     const [refundDone] = await db
       .select()
       .from(schema.refunds)
       .where(eq(schema.refunds.id, refund.id))
       .limit(1)
-    assert.equal(refundDone.status, "PROCESSED")
+    assert.equal(refundDone.status, "SUCCESSFUL")
 
     const allRefundsForBooking = await db
       .select()
@@ -329,8 +346,10 @@ describe("Phase 9: Cancellation, refund request, reconciliation", async () => {
       .where(eq(schema.payouts.bookingId, created.booking.id))
       .limit(1)
     if (payout) {
-      assert.equal(payout.status, "CANCELLED")
+      assert.notEqual(payout.status, "CANCELLED")
     }
+    const [stay] = await db.select().from(schema.bookings).where(eq(schema.bookings.id, created.booking.id)).limit(1)
+    assert.equal(stay.status, "CONFIRMED")
 
     const tb = await LedgerService.getTrialBalance()
     assert.equal(tb.totals.isBalanced, true)

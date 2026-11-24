@@ -23,6 +23,7 @@ class IleButton extends StatefulWidget {
     this.semanticLabel,
     this.compact = false,
     this.borderRadius,
+    this.height,
   });
 
   final String label;
@@ -35,6 +36,7 @@ class IleButton extends StatefulWidget {
   final String? semanticLabel;
   final bool compact;
   final BorderRadius? borderRadius;
+  final double? height;
 
   @override
   State<IleButton> createState() => _IleButtonState();
@@ -65,8 +67,8 @@ class _IleButtonState extends State<IleButton> {
     final Color background = _resolveBackground();
     final Color foreground = _resolveForeground();
     final Border? border = _resolveBorder();
-    final double height =
-        widget.compact ? AppSpacing.authButtonHeight : AppSpacing.touchTarget;
+    final double height = widget.height ??
+        (widget.compact ? AppSpacing.authButtonHeight : AppSpacing.touchTarget);
     final BorderRadius radius = widget.borderRadius ??
         (widget.compact ? AppRadius.authButtonAll : AppRadius.buttonAll);
     final TextStyle labelStyle = widget.compact

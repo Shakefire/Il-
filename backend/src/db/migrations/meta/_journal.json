@@ -50,6 +50,41 @@
       "when": 1762700000000,
       "tag": "0006_host_payout_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1762800000000,
+      "tag": "0007_things_to_know_and_booking_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1762900000000,
+      "tag": "0008_phase1_financial_retention",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1762950000000,
+      "tag": "0009_phase2_commission_account",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1763000000000,
+      "tag": "0010_phase3_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1763100000000,
+      "tag": "0011_phase4_house_pass_removal",
+      "breakpoints": true
     }
   ]
 }

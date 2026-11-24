@@ -21,7 +21,17 @@ abstract final class AppSpacing {
   static const double dockHeight = 68;
   static const double dockRadius = 34;
   static const double dockMarginH = 16;
-  static const double dockMarginBottom = 20;
+  static const double dockMarginBottom = 16;
+  /// Feed clearance above Map pill + dock (Style 1).
+  static const double exploreFeedBottom = 120;
+  /// Viewport-locked Map pill from bottom edge.
+  static const double mapPillBottom = 96;
+  static const double mapPillHeight = 42;
+  static const double categoryPillHeight = 38;
+  static const double topNavHeight = 60;
+  static const double searchBarHeight = 54;
+  static const double guestGateIcon = 64;
+  static const double guestCtaHeight = 50;
 
   /// Compact auth form metrics (login / register / OTP).
   static const double authInputHeight = 35;

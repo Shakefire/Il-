@@ -1,6 +1,12 @@
+plugins {
+    id("com.google.gms.google-services") version "4.6.0" apply false
+}
+
 allprojects {
     repositories {
         google()
+        maven { url = uri("https://repo1.maven.org/maven2/") }
+        maven { url = uri("https://maven-central.storage-download.googleapis.com/maven2/") }
         mavenCentral()
     }
 }

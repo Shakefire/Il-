@@ -61,10 +61,10 @@ class _HelpScreenState extends State<HelpScreen>
       tags: 'host listing publish',
     ),
     _HelpTopic(
-      title: 'Payouts & commission',
+      title: 'Payouts',
       body:
-          'Guest payment confirms the booking. Host earnings and platform commission are calculated server-side at booking time. Manage payouts from Profile → Host dashboard → Earnings in this app.',
-      tags: 'payout commission host',
+          'Guest payment confirms the booking. Earnings shows the amount you can withdraw. Manage payouts from Profile → Host dashboard → Earnings in this app.',
+      tags: 'payout host earnings',
     ),
   ];
 

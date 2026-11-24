@@ -6,7 +6,7 @@ export const payments = pgTable("payments", {
   id: varchar("id", { length: 100 }).primaryKey(),
   bookingId: varchar("booking_id", { length: 100 })
     .notNull()
-    .references(() => bookings.id, { onDelete: "cascade" }),
+    .references(() => bookings.id, { onDelete: "restrict" }),
   reference: varchar("reference", { length: 100 }).notNull().unique(),
   amount: integer("amount").notNull(),
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
@@ -23,11 +23,11 @@ export const hostEarnings = pgTable("host_earnings", {
   id: varchar("id", { length: 100 }).primaryKey(),
   hostId: varchar("host_id", { length: 100 })
     .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+    .references(() => users.id, { onDelete: "restrict" }),
   bookingId: varchar("booking_id", { length: 100 })
     .notNull()
     .unique()
-    .references(() => bookings.id, { onDelete: "cascade" }),
+    .references(() => bookings.id, { onDelete: "restrict" }),
   grossAmount: integer("gross_amount").notNull(),
   commissionAmount: integer("commission_amount").notNull(),
   netAmount: integer("net_amount").notNull(),

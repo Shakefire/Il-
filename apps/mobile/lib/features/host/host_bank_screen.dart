@@ -27,6 +27,7 @@ class _HostBankScreenState extends State<HostBankScreen> {
   List<Map<String, dynamic>> _banks = <Map<String, dynamic>>[];
   String? _bankCode;
   final TextEditingController _accountCtrl = TextEditingController();
+  final TextEditingController _bankSearchCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -37,6 +38,7 @@ class _HostBankScreenState extends State<HostBankScreen> {
   @override
   void dispose() {
     _accountCtrl.dispose();
+    _bankSearchCtrl.dispose();
     super.dispose();
   }
 
@@ -119,8 +121,15 @@ class _HostBankScreenState extends State<HostBankScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final String bankQuery = _bankSearchCtrl.text.trim().toLowerCase();
+    final List<Map<String, dynamic>> visibleBanks = _banks.where((Map<String, dynamic> b) {
+      if (bankQuery.isEmpty) return true;
+      final String name = (b['name']?.toString() ?? '').toLowerCase();
+      final String code = (b['code']?.toString() ?? '').toLowerCase();
+      return name.contains(bankQuery) || code.contains(bankQuery);
+    }).toList();
     final bool codeInList =
-        _banks.any((Map<String, dynamic> b) => b['code']?.toString() == _bankCode);
+        visibleBanks.any((Map<String, dynamic> b) => b['code']?.toString() == _bankCode);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -157,10 +166,18 @@ class _HostBankScreenState extends State<HostBankScreen> {
                       ),
                       const SizedBox(height: AppSpacing.lg),
                     ],
+                    TextField(
+                      controller: _bankSearchCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Search banks',
+                      ),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
                     DropdownButtonFormField<String>(
                       initialValue: codeInList ? _bankCode : null,
                       isExpanded: true,
-                      items: _banks
+                      items: visibleBanks
                           .map(
                             (Map<String, dynamic> b) => DropdownMenuItem<String>(
                               value: b['code']?.toString(),

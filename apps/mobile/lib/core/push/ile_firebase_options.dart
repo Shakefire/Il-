@@ -9,14 +9,26 @@ import 'package:flutter/foundation.dart';
 class IleFirebaseOptions {
   const IleFirebaseOptions._();
 
-  static const String _apiKey = String.fromEnvironment('FIREBASE_API_KEY');
-  static const String _appId = String.fromEnvironment('FIREBASE_APP_ID');
-  static const String _messagingSenderId =
-      String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID');
-  static const String _projectId =
-      String.fromEnvironment('FIREBASE_PROJECT_ID');
-  static const String _storageBucket =
-      String.fromEnvironment('FIREBASE_STORAGE_BUCKET');
+  static const String _apiKey = String.fromEnvironment(
+    'FIREBASE_API_KEY',
+    defaultValue: 'AIzaSyAscxCsNQ6P39dWNMmnVT0necS_N_uuqP4',
+  );
+  static const String _appId = String.fromEnvironment(
+    'FIREBASE_APP_ID',
+    defaultValue: '1:575445946361:android:d08bb201445528a2133728',
+  );
+  static const String _messagingSenderId = String.fromEnvironment(
+    'FIREBASE_MESSAGING_SENDER_ID',
+    defaultValue: '575445946361',
+  );
+  static const String _projectId = String.fromEnvironment(
+    'FIREBASE_PROJECT_ID',
+    defaultValue: 'ilestays',
+  );
+  static const String _storageBucket = String.fromEnvironment(
+    'FIREBASE_STORAGE_BUCKET',
+    defaultValue: 'ilestays.firebasestorage.app',
+  );
 
   static bool get isConfigured =>
       _apiKey.isNotEmpty &&

@@ -26,6 +26,7 @@ import {
 import { guestReservationOutcome } from "@/lib/phase11-guest-outcome";
 import { GuestMessages, guestStatusLabel } from "@/lib/guest-messages";
 import { formatNaira } from "@/lib/utils";
+import { StayFollowUp } from "@/components/StayFollowUp";
 
 interface BookingItem {
   id: string;
@@ -57,14 +58,15 @@ interface BookingItem {
 }
 
 interface PrivateAccessDetails {
-  bookingReference: string;
-  exactAddress: string;
-  unitNumber?: string;
-  contactName: string;
-  contactPhone: string;
-  contactEmail: string;
-  checkInInstructions?: string;
-  accessGateCode?: string;
+  bookingReference?: string;
+  propertyName?: string;
+  reference?: string;
+  neighborhood?: string | null;
+  city?: string | null;
+  checkInInstructions?: string | null;
+  arrivalNotes?: string | null;
+  checkIn?: { date?: string; after?: string | null };
+  checkOut?: { date?: string; before?: string | null };
 }
 
 function TripsPageContent() {
@@ -173,10 +175,13 @@ function TripsPageContent() {
       const verifyRes = await api.verifyPayment(ref);
 
       if (verifyRes && verifyRes.verified) {
+        const stayConfirmed =
+          verifyRes.bookingConfirmed === true || verifyRes.booking?.status === "CONFIRMED";
         const isLateRecon =
-          !!verifyRes.reconciliationRequired ||
-          !!verifyRes.resolutionPending ||
-          verifyRes.bookingConfirmed === false;
+          !stayConfirmed &&
+          (!!verifyRes.reconciliationRequired ||
+            !!verifyRes.resolutionPending ||
+            verifyRes.bookingConfirmed === false);
 
         if (isLateRecon) {
           setPaymentNotice({
@@ -199,7 +204,9 @@ function TripsPageContent() {
           setPaymentNotice({
             type: "success",
             title: "Payment confirmed",
-            message: `Your payment was verified (ref ${ref}). Your stay is confirmed and arrival details are unlocked.`,
+            message: verifyRes.reconciliationRequired
+              ? `Your stay is confirmed. An extra charge on reference ${ref} is queued for review and does not change this booking.`
+              : `Your payment was verified (ref ${ref}). Your stay is confirmed and arrival details are unlocked.`,
             ref,
           });
 
@@ -214,10 +221,25 @@ function TripsPageContent() {
             setBookings((prev) => [confirmedB, ...prev.filter((b) => b.id !== confirmedB.id)]);
             setLoadingBookings(false);
 
-            if (confirmedB.privateDetails) {
-              setAccessDetails(confirmedB.privateDetails);
+            const storedToken =
+              confirmedB.accessToken ||
+              (() => {
+                try {
+                  const stored = JSON.parse(localStorage.getItem("ile_guest_bookings") || "[]");
+                  return stored.find((b: BookingItem) => b.id === confirmedB.id)?.accessToken;
+                } catch {
+                  return undefined;
+                }
+              })();
+            if (storedToken) {
+              try {
+                const contact = await api.getBookingContact(confirmedB.id, storedToken);
+                setAccessDetails(contact.contact || contact);
+              } catch {
+                setAccessDetails(null);
+              }
             }
-            setSelectedBookingForAccess(confirmedB);
+            setSelectedBookingForAccess({ ...confirmedB, accessToken: storedToken });
           }
 
           await loadBookings();
@@ -688,7 +710,7 @@ function TripsPageContent() {
                 ) : (
                   <>
                     <KeyRound size={14} />
-                    <span>View Stay &amp; Access Pass</span>
+                    <span>View stay details</span>
                   </>
                 )}
               </button>
@@ -901,17 +923,20 @@ function TripsPageContent() {
                   {pastBookings.map((b) => (
                     <div
                       key={b.id}
-                      className="bg-white border border-[#E7E5E0] rounded-xl p-4 sm:p-5 flex items-center justify-between gap-4 text-sm"
+                      className="bg-white border border-[#E7E5E0] rounded-xl p-4 sm:p-5 flex flex-col gap-3 text-sm"
                     >
-                      <div>
-                        <p className="font-semibold text-[#171717]">
-                          {b.property?.title || `Stay #${b.referenceCode}`}
-                        </p>
-                        <p className="text-xs text-[#6B6B67]">
-                          {b.checkInDate} — {b.checkOutDate} · {formatNaira(b.totalAmount)}
-                        </p>
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <p className="font-semibold text-[#171717]">
+                            {b.property?.title || `Stay #${b.referenceCode}`}
+                          </p>
+                          <p className="text-xs text-[#6B6B67]">
+                            {b.checkInDate} — {b.checkOutDate} · {formatNaira(b.totalAmount)}
+                          </p>
+                        </div>
+                        {renderBookingStatusBadge(b)}
                       </div>
-                      {renderBookingStatusBadge(b)}
+                      <StayFollowUp booking={b} />
                     </div>
                   ))}
                 </div>
@@ -961,50 +986,39 @@ function TripsPageContent() {
                 <div className="space-y-4 text-sm divide-y divide-[#F2F0EB]">
                   <div className="pt-2 space-y-1">
                     <span className="text-xs font-semibold uppercase tracking-wider text-[#8B8B86]">
-                      Exact Property Address
+                      Stay
                     </span>
                     <p className="text-base font-semibold text-[#171717]">
-                      {accessDetails.exactAddress}
+                      {accessDetails.propertyName || selectedBookingForAccess.property?.title || "Confirmed stay"}
                     </p>
-                    {accessDetails.unitNumber && (
-                      <p className="text-xs text-[#6B6B67]">Unit / Apt: {accessDetails.unitNumber}</p>
-                    )}
+                    <p className="text-xs text-[#6B6B67]">
+                      {[accessDetails.neighborhood, accessDetails.city].filter(Boolean).join(", ") ||
+                        [selectedBookingForAccess.property?.neighborhood, selectedBookingForAccess.property?.city]
+                          .filter(Boolean)
+                          .join(", ")}
+                    </p>
                   </div>
 
-                  {accessDetails.accessGateCode && (
-                    <div className="pt-3 space-y-1">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-[#8B8B86]">
-                        Estate Gate Clearance Pass
-                      </span>
-                      <div className="p-3 bg-[#EDF3F0] border border-[#0B5D45]/20 rounded-xl flex items-center justify-between">
-                        <span className="font-mono text-lg font-bold text-[#0B5D45] tracking-wider">
-                          {accessDetails.accessGateCode}
-                        </span>
-                        <span className="text-xs text-[#0B5D45] font-medium">Show at security gate</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="pt-3 space-y-2">
+                  <div className="pt-3 space-y-1">
                     <span className="text-xs font-semibold uppercase tracking-wider text-[#8B8B86]">
-                      Host Contact on Arrival
+                      Check-in / Check-out
                     </span>
-                    <p className="font-semibold text-[#171717]">{accessDetails.contactName}</p>
-                    <p className="text-xs text-[#6B6B67] flex items-center gap-1.5">
-                      <span>Phone:</span>
-                      <a href={`tel:${accessDetails.contactPhone}`} className="text-[#0B5D45] font-semibold underline">
-                        {accessDetails.contactPhone}
-                      </a>
+                    <p className="text-sm text-[#171717]">
+                      {accessDetails.checkIn?.date || selectedBookingForAccess.checkInDate}
+                      {accessDetails.checkIn?.after ? ` after ${accessDetails.checkIn.after}` : ""}
+                      {" → "}
+                      {accessDetails.checkOut?.date || selectedBookingForAccess.checkOutDate}
+                      {accessDetails.checkOut?.before ? ` before ${accessDetails.checkOut.before}` : ""}
                     </p>
                   </div>
 
-                  {accessDetails.checkInInstructions && (
+                  {(accessDetails.checkInInstructions || accessDetails.arrivalNotes) && (
                     <div className="pt-3 space-y-1">
                       <span className="text-xs font-semibold uppercase tracking-wider text-[#8B8B86]">
-                        Check-in Instructions
+                        Arrival notes
                       </span>
                       <p className="text-xs text-[#4A4A45] leading-relaxed whitespace-pre-wrap">
-                        {accessDetails.checkInInstructions}
+                        {accessDetails.checkInInstructions || accessDetails.arrivalNotes}
                       </p>
                     </div>
                   )}
@@ -1017,7 +1031,7 @@ function TripsPageContent() {
                   onClick={() => setSelectedBookingForAccess(null)}
                   className="w-full py-2.5 rounded-xl border border-[#E7E5E0] bg-[#F7F6F2] hover:bg-[#EFECE6] text-sm font-semibold text-[#171717] transition-colors"
                 >
-                  Close Pass
+                  Close
                 </button>
               </div>
             </div>

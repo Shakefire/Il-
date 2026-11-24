@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/constants/app_routes.dart';
+import '../core/state/session_store.dart';
+import '../features/auth/app_splash_screen.dart';
 import '../features/auth/forgot_password_screen.dart';
 import '../features/auth/login_screen.dart';
 import '../features/auth/otp_verification_screen.dart';
@@ -36,10 +38,75 @@ import '../features/shell/marketplace_shell.dart';
 import '../features/wishlist/wishlist_screen.dart';
 
 /// go_router shell for auth + guest marketplace.
-GoRouter createAppRouter() {
+final GlobalKey<NavigatorState> rootNavigatorKey =
+    GlobalKey<NavigatorState>(debugLabel: 'root');
+
+GoRouter createAppRouter({SessionStore? sessionStore}) {
   return GoRouter(
-    initialLocation: AppRoutes.welcome,
+    navigatorKey: rootNavigatorKey,
+    initialLocation: AppRoutes.splash,
+    refreshListenable: sessionStore,
+    redirect: (BuildContext context, GoRouterState state) {
+      if (sessionStore == null) return null;
+      final String loc = state.uri.path;
+
+      // During initial cold-start session restoration: stay on splash screen
+      if (sessionStore.isRestoringSession) {
+        if (loc != AppRoutes.splash) {
+          return AppRoutes.splash;
+        }
+        return null;
+      }
+
+      // Completed restoration and currently on splash screen: redirect to destination
+      if (loc == AppRoutes.splash) {
+        if (sessionStore.isAuthenticated) {
+          if (sessionStore.isHost) {
+            return sessionStore.isOnboardingComplete
+                ? AppRoutes.hostDashboard
+                : AppRoutes.hostOnboarding;
+          }
+          return AppRoutes.explore;
+        }
+        return AppRoutes.welcome;
+      }
+
+      final bool isAuthRoute =
+          loc == AppRoutes.login ||
+          loc == AppRoutes.register ||
+          loc == AppRoutes.welcome ||
+          loc == AppRoutes.otp;
+      final bool isHostRoute = loc.startsWith('/host');
+
+      // Unauthenticated user trying to access protected host routes
+      if (!sessionStore.isAuthenticated && isHostRoute) {
+        return '${AppRoutes.login}?returnTo=${Uri.encodeComponent(state.uri.toString())}';
+      }
+
+      // Authenticated user landing on login, register, welcome, or otp: redirect based on authoritative role
+      if (sessionStore.isAuthenticated && isAuthRoute) {
+        final String? returnTo = state.uri.queryParameters['returnTo'];
+        if (returnTo != null && returnTo.isNotEmpty && !returnTo.startsWith('/auth')) {
+          return returnTo;
+        }
+        if (sessionStore.isHost) {
+          return sessionStore.isOnboardingComplete
+              ? AppRoutes.hostDashboard
+              : AppRoutes.hostOnboarding;
+        }
+        return AppRoutes.explore;
+      }
+
+      return null;
+    },
     routes: <RouteBase>[
+      GoRoute(
+        path: AppRoutes.splash,
+        name: 'splash',
+        builder: (BuildContext context, GoRouterState state) {
+          return const AppSplashScreen();
+        },
+      ),
       GoRoute(
         path: AppRoutes.welcome,
         name: 'welcome',
@@ -73,7 +140,7 @@ GoRouter createAppRouter() {
               AppRoutesDefaults.maskedPhone;
           return OtpVerificationScreen(
             email: email,
-            maskedPhone: Uri.decodeComponent(phone),
+            maskedPhone: phone,
           );
         },
       ),
@@ -100,13 +167,23 @@ GoRouter createAppRouter() {
           return const DesignSystemPreviewScreen();
         },
       ),
-      StatefulShellRoute.indexedStack(
+      StatefulShellRoute(
         builder: (
           BuildContext context,
           GoRouterState state,
           StatefulNavigationShell navigationShell,
         ) {
           return MarketplaceShell(navigationShell: navigationShell);
+        },
+        navigatorContainerBuilder: (
+          BuildContext context,
+          StatefulNavigationShell navigationShell,
+          List<Widget> children,
+        ) {
+          return MarketplaceBranchPager(
+            navigationShell: navigationShell,
+            children: children,
+          );
         },
         branches: <StatefulShellBranch>[
           StatefulShellBranch(
@@ -183,6 +260,7 @@ GoRouter createAppRouter() {
             maxGuests: int.tryParse(q['maxGuests'] ?? ''),
             minimumNights: int.tryParse(q['minNights'] ?? '') ?? 1,
             propertyId: q['propertyId'],
+            nightlyRate: int.tryParse(q['nightlyRate'] ?? ''),
           );
         },
       ),

@@ -39,6 +39,7 @@ export const HostPropertyDraftSchema = z.object({
   checkInInstructions: z.string().optional(),
   accessGateCode: z.string().optional(),
   status: z.string().optional(),
+  thingsToKnow: z.any().optional(),
 });
 
 export const UpdateHostPropertySchema = HostPropertyDraftSchema.partial();
@@ -102,6 +103,7 @@ export const hostsService = {
         parkingDescription: parsed.parkingDescription || null,
         coverImage: parsed.coverImage || "/images/placeholder-property.jpg",
         status: "DRAFT",
+        thingsToKnow: parsed.thingsToKnow || null,
       })
       .returning();
 
@@ -351,28 +353,46 @@ export const hostsService = {
       .where(eq(schema.properties.id, propertyId))
       .returning();
 
-    // Trigger host publication confirmation email via Resend
-    import("../notifications/notifications.service").then(async ({ sendEmail, listingPublishedEmail }) => {
+    // Trigger host publication confirmation across in-app, email, and push
+    Promise.all([
+      import("../notifications/notifications.service"),
+      import("../notifications/orchestrator"),
+    ]).then(async ([{ listingPublishedEmail }, { notifyUserEvent }]) => {
       const [host] = await db
-        .select({ email: schema.users.email, firstName: schema.users.firstName })
+        .select({ email: schema.users.email, firstName: schema.users.firstName, phone: schema.users.phone })
         .from(schema.users)
         .where(eq(schema.users.id, userId))
         .limit(1);
       if (host) {
-        sendEmail(
-          listingPublishedEmail({
-            hostName: host.firstName,
-            hostEmail: host.email,
-            propertyTitle: updated.title,
-            propertyId: updated.id,
-            nightlyPrice: updated.pricePerNight,
-            city: updated.city,
-            neighborhood: updated.neighborhood,
-            currency: updated.currency,
-          })
-        ).catch((e) => console.warn("[Host] Failed to send publication email:", e));
+        notifyUserEvent({
+          userId,
+          event: "LISTING_PUBLISHED",
+          entityType: "property",
+          entityId: updated.id,
+          category: "listing",
+          channels: {
+            category: "listing",
+            email: listingPublishedEmail({
+              hostName: host.firstName,
+              hostEmail: host.email,
+              propertyTitle: updated.title,
+              propertyId: updated.id,
+              nightlyPrice: updated.pricePerNight,
+              city: updated.city,
+              neighborhood: updated.neighborhood,
+              currency: updated.currency,
+            }),
+            inbox: {
+              userId,
+              title: "Listing is live!",
+              body: `${updated.title} is now published on the Ilé marketplace.`,
+              deepLink: `/host/listings`,
+            },
+            push: true,
+          },
+        });
       }
-    });
+    }).catch((e) => console.warn("[Host] Failed to dispatch publication notification:", e));
 
     return {
       success: true,
@@ -564,7 +584,10 @@ export const hostsService = {
         };
       });
 
-      recentBookings = allBookings.slice(0, 10);
+      recentBookings = allBookings.slice(0, 10).map((booking) => {
+        const { hostCommissionPct: _pct, hostCommissionAmount: _amount, ...visible } = booking;
+        return visible;
+      });
     }
 
     const { FinanceService } = await import("../finance/finance.service");
@@ -585,7 +608,6 @@ export const hostsService = {
         totalGross: lifetimeGross,
         /** Lifetime host earnings (hostNetAmount snapshots). */
         totalNet: lifetimeHostEarnings,
-        totalCommission: lifetimeGross - lifetimeHostEarnings,
         lifetimeGross,
         lifetimeHostEarnings,
         period: {
@@ -598,7 +620,6 @@ export const hostsService = {
         labels: {
           totalGross: "Guest accommodation (host base × nights)",
           totalNet: "Your earnings from confirmed stays",
-          totalCommission: "Platform share on accommodation",
           walletPending: wallet.labels.pending,
           walletAvailable: wallet.labels.available,
           walletProcessing: wallet.labels.processing,
@@ -611,6 +632,7 @@ export const hostsService = {
   },
 
   async getHostBookings(userId: string) {
+    // Global expiration is owned by the worker/cron — not host list reads.
     const db = getDb();
 
     // 1. Fetch properties owned by this host
@@ -666,12 +688,17 @@ export const hostsService = {
       const net = b.hostNetAmount && b.hostNetAmount > 0
         ? b.hostNetAmount
         : subtotal - commission;
+      const {
+        hostCommissionPct: _pct,
+        hostCommissionAmount: _amount,
+        paystackFeeAmount: _fee,
+        ...visible
+      } = b;
 
       return {
-        ...b,
+        ...visible,
         bookingStatus: b.status,
         accommodationSubtotal: subtotal,
-        hostCommissionAmount: commission,
         hostNetAmount: net,
         propertyTitle: prop?.title || "Property",
         propertyCity: prop?.city || "Nigeria",
@@ -695,6 +722,8 @@ export const hostsService = {
         accountNumber: schema.payouts.accountNumber,
         accountName: schema.payouts.accountName,
         status: schema.payouts.status,
+        transferStatus: schema.payouts.transferStatus,
+        transferFailureReason: schema.payouts.transferFailureReason,
         scheduledFor: schema.payouts.scheduledFor,
         disbursedAt: schema.payouts.disbursedAt,
         paystackTransferRef: schema.payouts.paystackTransferRef,
@@ -711,7 +740,12 @@ export const hostsService = {
       .where(eq(schema.payouts.hostId, userId))
       .orderBy(desc(schema.payouts.createdAt));
 
-    return { payouts: list };
+    return {
+      payouts: list.map((row) => ({
+        ...row,
+        accountNumber: maskAccountNumber(row.accountNumber),
+      })),
+    };
   },
 
   async getHostProfile(userId: string) {
@@ -1121,14 +1155,33 @@ export const hostsService = {
       notes: "Host submitted complete onboarding and KYC dossier for admin review.",
     });
 
-    // Send confirmation email to host
-    const { sendEmail, hostApplicationSubmittedEmail } = await import("../notifications/notifications.service");
-    sendEmail(
-      hostApplicationSubmittedEmail({
-        hostName: user.firstName,
-        hostEmail: user.email,
-      })
-    ).catch((e) => console.warn("[Host] Failed to send onboarding submission confirmation:", e));
+    // Send confirmation across in-app, email, and push to host
+    Promise.all([
+      import("../notifications/notifications.service"),
+      import("../notifications/orchestrator"),
+    ]).then(([{ hostApplicationSubmittedEmail }, { notifyUserEvent }]) => {
+      notifyUserEvent({
+        userId,
+        event: "HOST_KYC_SUBMITTED",
+        entityType: "host",
+        entityId: userId,
+        category: "kyc",
+        channels: {
+          category: "kyc",
+          email: hostApplicationSubmittedEmail({
+            hostName: user.firstName,
+            hostEmail: user.email,
+          }),
+          inbox: {
+            userId,
+            title: "KYC credentials under review",
+            body: "Your identity documents were submitted and are now being verified by our compliance team.",
+            deepLink: `/host/dashboard`,
+          },
+          push: true,
+        },
+      });
+    }).catch((e) => console.warn("[Host] Failed to send onboarding submission confirmation:", e));
 
     return {
       success: true,

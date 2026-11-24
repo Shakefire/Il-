@@ -3,8 +3,33 @@ import { adminService } from "./admin.service";
 import { requireRole } from "../../lib/security";
 import { parsePagination } from "../../lib/pagination";
 import { FinanceService } from "../finance/finance.service";
+import { financeControlHttp } from "../finance/admin-refund.service";
 import { LedgerService } from "../finance/ledger.service";
 import { PaystackTransferService } from "../payments/paystack-transfer.service";
+import { clientIp, consumeRateLimitAsync } from "../../lib/rate-limit";
+
+const limitAdmin = async (request: any, reply: any, bucket: string, limit = 30) => {
+  const result = await consumeRateLimitAsync(
+    `admin:${bucket}:${clientIp(request)}`,
+    limit,
+    10 * 60 * 1000,
+    "strict"
+  );
+  if (!result.ok) {
+    const status = result.backend === "reject" ? 503 : 429;
+    reply.header("Retry-After", String(result.retryAfterSec || 30));
+    reply.status(status).send({
+      error:
+        status === 503
+          ? "Security checks temporarily unavailable. Try again shortly."
+          : "Too many admin requests. Try again shortly.",
+      retryAfterSec: result.retryAfterSec,
+      retryable: true,
+    });
+    return false;
+  }
+  return true;
+};
 
 export async function adminRoutes(fastify: FastifyInstance) {
   // GET /api/admin/stats
@@ -104,6 +129,26 @@ export async function adminRoutes(fastify: FastifyInstance) {
     const pagination = parsePagination(request.query as Record<string, any>);
     const result = await adminService.getAuditLogs(pagination);
     return reply.send({ success: true, ...result });
+  });
+
+  fastify.route({
+    method: ["PUT", "PATCH", "DELETE"],
+    url: "/audit-logs",
+    handler: async (request, reply) => {
+      const session = await requireRole(request, reply, ["admin"]);
+      if (!session) return;
+      return reply.status(405).send({ error: "Audit logs are append-only." });
+    },
+  });
+
+  fastify.route({
+    method: ["PUT", "PATCH", "DELETE"],
+    url: "/audit-logs/:id",
+    handler: async (request, reply) => {
+      const session = await requireRole(request, reply, ["admin"]);
+      if (!session) return;
+      return reply.status(405).send({ error: "Audit logs are append-only." });
+    },
   });
 
   // GET /api/admin/hosts — List host applications with optional status filter
@@ -392,6 +437,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   // POST /api/admin/finance/refunds — Admin process booking refund
   fastify.post("/finance/refunds", async (request, reply) => {
+    if (!(await limitAdmin(request, reply, "refund", 10))) return;
     const session = await requireRole(request, reply, ["admin"]);
     if (!session) return;
 
@@ -400,6 +446,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       reason?: string;
       adminNotes?: string;
       paystackRefundId?: string;
+      amountNaira?: number;
     };
 
     if (!body?.bookingId) {
@@ -408,9 +455,19 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
     try {
       const result = await FinanceService.processRefund(session.userId, body);
-      return reply.send({ message: "Booking refund successfully executed.", ...result });
+      if (!result.success) {
+        return reply.status(409).send({
+          error: `Refund is ${result.status}. It is not successful until the Paystack result is reconciled.`,
+          ...result,
+        });
+      }
+      return reply.send({
+        message: "Refund settled from commission account 1040. Host wallets were not debited.",
+        ...result,
+      });
     } catch (err: any) {
-      return reply.status(400).send({ error: err.message });
+      const mapped = financeControlHttp(err);
+      return reply.status(mapped.status).send(mapped.body);
     }
   });
 
@@ -473,15 +530,32 @@ export async function adminRoutes(fastify: FastifyInstance) {
 
   // POST /api/admin/finance/refunds/:id/process
   fastify.post("/finance/refunds/:id/process", async (request, reply) => {
+    if (!(await limitAdmin(request, reply, "refund-process", 10))) return;
     const session = await requireRole(request, reply, ["admin"]);
     if (!session) return;
     const { id } = request.params as { id: string };
-    const body = (request.body || {}) as { paystackRefundId?: string };
+    const body = (request.body || {}) as { paystackRefundId?: string; amountNaira?: number };
     try {
-      const result = await FinanceService.processApprovedRefund(session.userId, id, { paystackRefundId: body.paystackRefundId });
-      return reply.send({ success: true, message: "Refund processed.", refundId: result.refundId, paystackRefundId: result.paystackRefundId });
+      const result = await FinanceService.processApprovedRefund(session.userId, id, {
+        paystackRefundId: body.paystackRefundId,
+        amountNaira: body.amountNaira,
+      });
+      if (!result.success) {
+        return reply.status(409).send({
+          error: `Refund is ${result.status}. It is not successful until the Paystack result is reconciled.`,
+          ...result,
+        });
+      }
+      return reply.send({
+        success: true,
+        message: "Refund settled from commission account 1040. Host wallets were not debited.",
+        refundId: result.refundId,
+        paystackRefundId: result.paystackRefundId,
+        status: result.status,
+      });
     } catch (err: any) {
-      return reply.status(400).send({ error: err.message });
+      const mapped = financeControlHttp(err);
+      return reply.status(mapped.status).send(mapped.body);
     }
   });
 
@@ -506,7 +580,7 @@ export async function adminRoutes(fastify: FastifyInstance) {
       };
       return [[...headers].map(esc).join(","), ...rows.map(r => r.map(esc).join(","))].join("\n");
     }
-    const naira = (k: number | null | undefined) => ((k ?? 0) / 100).toFixed(2);
+    const naira = (amount: number | null | undefined) => String(Math.round(amount ?? 0));
 
     try {
       switch (type) {

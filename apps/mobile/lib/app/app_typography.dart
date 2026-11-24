@@ -2,48 +2,59 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 
-/// Ilé typography — DM Serif Display + Plus Jakarta Sans.
-/// Mobile sizes from `brand.md` §3.2.
-/// Auth screens use [Auth] tokens only (Plus Jakarta Sans — no DM Serif).
+/// Ilé typography — Playfair Display (bundled as DM Serif stand-in until
+/// Playfair assets ship) + Plus Jakarta Sans. Editorial headings use
+/// weight 600 and `-0.02em` tracking per Style 1.
+/// Auth screens use [Auth] tokens only (Plus Jakarta Sans — no display serif).
 abstract final class AppTypography {
+  /// High-contrast serif for greetings / page titles (Style 1 display).
   static const String displayFamily = 'DM Serif Display';
   static const String sansFamily = 'Plus Jakarta Sans';
   static const String authFamily = sansFamily;
 
   static const TextStyle display = TextStyle(
     fontFamily: displayFamily,
-    fontWeight: FontWeight.w400,
+    fontWeight: FontWeight.w600,
     fontSize: 40,
     height: 1.1,
     letterSpacing: -0.8,
-    color: AppColors.foreground,
+    color: EditorialColors.ink,
   );
 
   static const TextStyle displayXl = TextStyle(
     fontFamily: displayFamily,
-    fontWeight: FontWeight.w400,
+    fontWeight: FontWeight.w600,
     fontSize: 30,
     height: 1.15,
     letterSpacing: -0.6,
-    color: AppColors.foreground,
+    color: EditorialColors.ink,
   );
 
   static const TextStyle screenTitle = TextStyle(
     fontFamily: displayFamily,
-    fontWeight: FontWeight.w400,
-    fontSize: 24,
+    fontWeight: FontWeight.w600,
+    fontSize: 18,
     height: 1.2,
     letterSpacing: -0.36,
-    color: AppColors.foreground,
+    color: EditorialColors.ink,
   );
 
   static const TextStyle sectionHeading = TextStyle(
     fontFamily: displayFamily,
-    fontWeight: FontWeight.w400,
+    fontWeight: FontWeight.w600,
     fontSize: 24,
     height: 1.2,
-    letterSpacing: -0.36,
-    color: AppColors.foreground,
+    letterSpacing: -0.48,
+    color: EditorialColors.ink,
+  );
+
+  static const TextStyle greeting = TextStyle(
+    fontFamily: displayFamily,
+    fontWeight: FontWeight.w600,
+    fontSize: 24,
+    height: 1.15,
+    letterSpacing: -0.48,
+    color: EditorialColors.ink,
   );
 
   static const TextStyle cardTitle = TextStyle(
@@ -52,7 +63,7 @@ abstract final class AppTypography {
     fontSize: 17,
     height: 1.3,
     letterSpacing: -0.17,
-    color: AppColors.foreground,
+    color: EditorialColors.ink,
   );
 
   static const TextStyle body = TextStyle(

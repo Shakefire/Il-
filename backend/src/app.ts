@@ -1,6 +1,7 @@
 import Fastify, { FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
+import rateLimit from "@fastify/rate-limit";
 import { env } from "./config/env";
 import { closeDb } from "./db/client";
 
@@ -17,6 +18,9 @@ import { uploadsRoutes } from "./modules/uploads/uploads.routes";
 import { paymentsRoutes } from "./modules/payments/payments.routes";
 import { healthRoutes } from "./modules/health/health.routes";
 import { notificationsRoutes } from "./modules/notifications/notifications.routes";
+import { supportRoutes } from "./modules/support/support.routes";
+import { favouritesRoutes } from "./modules/favourites/favourites.routes";
+import { clientIp, consumeRateLimitAsync, isGlobalRateLimitExempt } from "./lib/rate-limit";
 
 /**
  * Build and configure the Fastify application instance.
@@ -24,6 +28,8 @@ import { notificationsRoutes } from "./modules/notifications/notifications.route
 export async function buildApp(): Promise<FastifyInstance> {
   const fastify = Fastify({
     bodyLimit: 25 * 1024 * 1024, // 25 MB to accommodate 15MB binary files encoded in base64
+    // Honor X-Forwarded-For / X-Real-IP from the trusted reverse proxy edge.
+    trustProxy: true,
     logger: {
       level: env.LOG_LEVEL,
     },
@@ -46,6 +52,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   );
 
   // ─── CORS ───
+  // Flutter web often runs on 127.0.0.1 (not localhost). Local NODE_ENV may be
+  // "production", so do not rely on the development permissive fallback alone.
   await fastify.register(cors, {
     origin: (origin, cb) => {
       if (!origin) return cb(null, true);
@@ -57,8 +65,13 @@ export async function buildApp(): Promise<FastifyInstance> {
         "http://127.0.0.1:3000",
         "http://localhost:4000",
         "http://127.0.0.1:4000",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
       ];
-      if (allowedOrigins.includes(origin) || origin.startsWith("http://localhost:")) {
+      const isLocalDevOrigin =
+        origin.startsWith("http://localhost:") ||
+        origin.startsWith("http://127.0.0.1:");
+      if (allowedOrigins.includes(origin) || isLocalDevOrigin) {
         return cb(null, true);
       }
       // Permissive in dev, strict in prod
@@ -66,13 +79,43 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Cookie", "X-Access-Token", "x-paystack-signature"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Cookie",
+      "X-Access-Token",
+      "x-paystack-signature",
+      "Accept",
+    ],
   });
 
   // ─── Cookies ───
   await fastify.register(cookie, {
     secret: env.SESSION_SECRET,
     hook: "onRequest",
+  });
+
+  // ─── Fastify Rate Limiting ───
+  await fastify.register(rateLimit, {
+    global: false,
+  });
+
+  fastify.addHook("onRequest", async (request, reply) => {
+    if (isGlobalRateLimitExempt(request.url, request.method)) return;
+    const decision = await consumeRateLimitAsync(
+      `global:${clientIp(request)}`,
+      240,
+      60_000,
+      "standard"
+    );
+    if (!decision.ok) {
+      reply.header("Retry-After", String(decision.retryAfterSec));
+      return reply.status(429).send({
+        error: "Too many requests. Try again shortly.",
+        retryAfterSec: decision.retryAfterSec,
+        retryable: true,
+      });
+    }
   });
 
   // ─── Health Checks ───
@@ -96,7 +139,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await fastify.register(locationsRoutes, { prefix: "/api/locations" });
   await fastify.register(uploadsRoutes, { prefix: "/api/uploads" });
   await fastify.register(paymentsRoutes, { prefix: "/api/payments" });
-  // Public bank list — parity with Next `/api/banks` for Flutter when Fastify is sole origin
+  // Public bank list & resolution — parity with Next `/api/banks` for Flutter when Fastify is sole origin
   fastify.get("/api/banks", async (_request, reply) => {
     try {
       const { BankResolutionService } = await import("./modules/payments/bank-resolution.service");
@@ -106,7 +149,50 @@ export async function buildApp(): Promise<FastifyInstance> {
       return reply.status(500).send({ error: err.message || "Failed to retrieve Nigerian banks" });
     }
   });
+
+  fastify.post("/api/bank-accounts/resolve", async (request, reply) => {
+    try {
+      const { BankResolutionService } = await import("./modules/payments/bank-resolution.service");
+      const body = request.body as any;
+      const accountNumber = body?.accountNumber || body?.account_number;
+      const bankCode = body?.bankCode || body?.bank_code;
+      if (!accountNumber || !bankCode) {
+        return reply.status(400).send({ resolved: false, error: "Both accountNumber and bankCode are required." });
+      }
+      const ip = (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || request.ip || "unknown-ip";
+      const result = await BankResolutionService.resolveBankAccount(String(accountNumber), String(bankCode), ip);
+      if (!result.resolved) {
+        return reply.status(422).send(result);
+      }
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(500).send({ resolved: false, error: err.message || "Failed to resolve bank account" });
+    }
+  });
+
+  fastify.all("/api/banks/resolve", async (request, reply) => {
+    try {
+      const { BankResolutionService } = await import("./modules/payments/bank-resolution.service");
+      const query = (request.query || {}) as any;
+      const body = (request.body || {}) as any;
+      const accountNumber = query.account_number || query.accountNumber || body.account_number || body.accountNumber;
+      const bankCode = query.bank_code || query.bankCode || body.bank_code || body.bankCode;
+      if (!accountNumber || !bankCode) {
+        return reply.status(400).send({ resolved: false, error: "Both accountNumber and bankCode are required." });
+      }
+      const ip = (request.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || request.ip || "unknown-ip";
+      const result = await BankResolutionService.resolveBankAccount(String(accountNumber), String(bankCode), ip);
+      if (!result.resolved) {
+        return reply.status(422).send(result);
+      }
+      return reply.send(result);
+    } catch (err: any) {
+      return reply.status(500).send({ resolved: false, error: err.message || "Failed to resolve bank account" });
+    }
+  });
   await fastify.register(notificationsRoutes, { prefix: "/api/notifications" });
+  await fastify.register(supportRoutes, { prefix: "/api/support" });
+  await fastify.register(favouritesRoutes, { prefix: "/api/favourites" });
 
   // ─── Graceful Shutdown ───
   const shutdown = async () => {

@@ -8,9 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ile_mobile/app/app_theme.dart';
 import 'package:ile_mobile/core/constants/app_assets.dart';
-import 'package:ile_mobile/core/constants/app_routes.dart';
 import 'package:ile_mobile/features/auth/login_screen.dart';
-import 'package:ile_mobile/features/auth/otp_verification_screen.dart';
 import 'package:ile_mobile/features/auth/register_screen.dart';
 
 const Size _phone = Size(390, 844);

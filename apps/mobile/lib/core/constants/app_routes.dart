@@ -1,6 +1,7 @@
 /// Route paths for the Ilé mobile shell.
 abstract final class AppRoutes {
   static const String welcome = '/';
+  static const String splash = '/splash';
   static const String designSystem = '/design-system';
   static const String login = '/auth/login';
   static const String register = '/auth/register';
@@ -68,6 +69,7 @@ abstract final class AppRoutes {
     int? minimumNights,
     String? propertyId,
     String? slug,
+    int? nightlyRate,
   }) {
     final Map<String, String> q = <String, String>{
       if (editMode) 'edit': '1',
@@ -75,6 +77,7 @@ abstract final class AppRoutes {
       if (minimumNights != null) 'minNights': '$minimumNights',
       if (propertyId != null && propertyId.isNotEmpty) 'propertyId': propertyId,
       if (slug != null && slug.isNotEmpty) 'slug': slug,
+      if (nightlyRate != null && nightlyRate > 0) 'nightlyRate': '$nightlyRate',
     };
     if (q.isEmpty) return dateGuestPicker;
     return '$dateGuestPicker?${Uri(queryParameters: q).query}';
@@ -89,11 +92,14 @@ abstract final class AppRoutes {
   static String otpPath({
     required String email,
     String? maskedPhone,
+    String? role,
   }) {
-    final String phone = Uri.encodeComponent(
-      maskedPhone ?? AppRoutesDefaults.maskedPhone,
-    );
-    return '$otp?email=${Uri.encodeComponent(email)}&phone=$phone';
+    final Map<String, String> q = <String, String>{
+      'email': email,
+      'phone': maskedPhone ?? AppRoutesDefaults.maskedPhone,
+      if (role != null && role.isNotEmpty) 'role': role,
+    };
+    return '$otp?${Uri(queryParameters: q).query}';
   }
 }
 

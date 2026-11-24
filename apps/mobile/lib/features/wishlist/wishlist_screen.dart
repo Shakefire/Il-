@@ -13,7 +13,7 @@ import '../../shared/widgets/ile_empty_state.dart';
 import '../../shared/widgets/skeleton/property_card_skeleton.dart';
 import '../explore/widgets/marketplace_property_card.dart';
 
-/// Local wishlist — no backend favourites API exists yet.
+/// Saved stays. Signed-in accounts sync with /api/favourites.
 class WishlistScreen extends StatelessWidget {
   const WishlistScreen({super.key});
 
@@ -25,14 +25,14 @@ class WishlistScreen extends StatelessWidget {
         .toList();
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        title: Text('Saved', style: AppTypography.screenTitle),
-      ),
-      body: !store.isLoaded
+      backgroundColor: EditorialColors.background,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            const EditorialToolbar(title: 'Saved', explorePill: true),
+            Expanded(
+              child: !store.isLoaded
           ? ListView.builder(
               padding: EdgeInsets.fromLTRB(
                 AppSpacing.screenHorizontal,
@@ -91,6 +91,10 @@ class WishlistScreen extends StatelessWidget {
                     );
                   },
                 ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

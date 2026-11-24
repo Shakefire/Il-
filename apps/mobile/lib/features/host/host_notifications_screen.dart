@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/app_colors.dart';
@@ -6,6 +7,7 @@ import '../../app/app_spacing.dart';
 import '../../app/app_typography.dart';
 import '../../core/api/api_client.dart';
 import '../../core/api/ile_api.dart';
+import '../../core/constants/app_routes.dart';
 import '../../shared/widgets/ile_circular_back_button.dart';
 import '../../shared/widgets/ile_empty_state.dart';
 import '../../shared/widgets/ile_error_state.dart';
@@ -105,6 +107,24 @@ class _HostNotificationsScreenState extends State<HostNotificationsScreen>
     }
   }
 
+  void _openHostNotification(Map<String, dynamic> n) async {
+    final String id = n['id']?.toString() ?? '';
+    final bool unread = n['readAt'] == null && n['isRead'] != true;
+    if (unread && id.isNotEmpty) {
+      await _markRead(id);
+    }
+    final String? deepLink = n['deepLink']?.toString();
+    final String? bookingId = n['bookingId']?.toString() ??
+        (n['metadata'] is Map ? n['metadata']['bookingId']?.toString() : null);
+    if (!mounted) return;
+    if (bookingId != null && bookingId.isNotEmpty) {
+      context.push(AppRoutes.hostReservationDetailPath(bookingId));
+    } else if (deepLink != null && deepLink.contains('/reservations/')) {
+      final String bId = deepLink.split('/').last;
+      context.push(AppRoutes.hostReservationDetailPath(bId));
+    }
+  }
+
   Future<void> _markAll() async {
     try {
       await context.read<IleApi>().markAllNotificationsRead();
@@ -197,7 +217,6 @@ class _HostNotificationsScreenState extends State<HostNotificationsScreen>
         itemBuilder: (BuildContext context, int index) {
           final Map<String, dynamic> n = _notifications[index];
           final bool unread = n['readAt'] == null && n['isRead'] != true;
-          final String id = n['id']?.toString() ?? '';
           return ListTile(
             contentPadding: EdgeInsets.zero,
             leading: Icon(
@@ -216,7 +235,8 @@ class _HostNotificationsScreenState extends State<HostNotificationsScreen>
               n['body']?.toString() ?? n['message']?.toString() ?? '',
               style: AppTypography.supporting,
             ),
-            onTap: unread && id.isNotEmpty ? () => _markRead(id) : null,
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () => _openHostNotification(n),
           );
         },
       ),
@@ -249,6 +269,15 @@ class _HostNotificationsScreenState extends State<HostNotificationsScreen>
               a['body']?.toString() ?? '',
               style: AppTypography.supporting,
             ),
+            trailing: const Icon(Icons.chevron_right, size: 18),
+            onTap: () {
+              final String? bookingId = a['bookingId']?.toString();
+              if (bookingId != null && bookingId.isNotEmpty) {
+                context.push(AppRoutes.hostReservationDetailPath(bookingId));
+              } else {
+                context.push(AppRoutes.hostDashboard);
+              }
+            },
           );
         },
       ),

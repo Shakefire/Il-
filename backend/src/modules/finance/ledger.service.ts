@@ -5,13 +5,49 @@ import crypto from "crypto";
 export const ACCOUNT_CODES = {
   PAYSTACK_CLEARING: "1010",
   OPERATING_BANK: "1020",
+  COMMISSION_FUNDS: "1040",
+  COMMISSION_FUNDS_RESERVED: "1050",
   ADVANCE_DEPOSITS: "2010",
   HOST_PAYABLE: "2020",
   PAYSTACK_FEE_ESCROW: "2030",
   COMMISSION_REVENUE: "4010",
   PROCESSING_EXPENSE: "5010",
   PAYOUT_TRANSFER_FEE: "5020",
+  REFUND_FROM_COMMISSION: "5030",
 } as const;
+
+export const PHASE2_LEDGER_ACCOUNTS = [
+  {
+    id: "acc_1040",
+    code: "1040",
+    name: "Platform Commission Funds",
+    type: "ASSET",
+    description:
+      "Reconcilable commission cash. The only account that may fund an admin guest refund.",
+  },
+  {
+    id: "acc_1050",
+    code: "1050",
+    name: "Commission Funds Reserved",
+    type: "ASSET",
+    description: "Commission cash reserved for an in-flight admin refund. Not available to spend twice.",
+  },
+  {
+    id: "acc_5030",
+    code: "5030",
+    name: "Guest Refunds From Commission",
+    type: "EXPENSE",
+    description: "Guest refunds settled from platform commission funds. Host payable is not used.",
+  },
+] as const;
+
+/** Inserts phase-2 accounts if missing. Safe to call inside the caller's transaction. */
+export async function ensurePhase2Accounts(tx: any): Promise<void> {
+  for (const account of PHASE2_LEDGER_ACCOUNTS) {
+    await tx.insert(schema.ledgerAccounts).values(account).onConflictDoNothing();
+  }
+  LedgerService.clearAccountCache();
+}
 
 export type AccountCode = (typeof ACCOUNT_CODES)[keyof typeof ACCOUNT_CODES];
 
@@ -32,6 +68,10 @@ export interface PostJournalOptions {
 
 export class LedgerService {
   private static accountCache: Map<string, string> = new Map();
+
+  static clearAccountCache(): void {
+    this.accountCache.clear();
+  }
 
   /**
    * Resolves internal account ID by account code (e.g. "1010" -> account.id)
@@ -293,6 +333,7 @@ export class LedgerService {
       .limit(1);
 
     if (existing.length > 0) {
+      await this.allocateCommissionCash(tx, bookingId, hostCommissionAmount);
       return { alreadyRecorded: true as const, journalId: existing[0].id };
     }
 
@@ -340,10 +381,42 @@ export class LedgerService {
       .set({ status: "READY" })
       .where(and(eq(schema.hostEarnings.bookingId, bookingId), eq(schema.hostEarnings.status, "PENDING")));
 
+    await this.allocateCommissionCash(tx, bookingId, hostCommissionAmount);
+
     return {
       ...result,
       alreadyRecorded: false as const,
     };
+  }
+
+  /**
+   * Moves recognized commission out of Paystack clearing into account 1040.
+   * Runs at the existing earnings-release moment (check-in settlement or the
+   * already-approved automatic release). It does not change that timing.
+   */
+  private static async allocateCommissionCash(tx: any, bookingId: string, amount: number) {
+    if (!Number.isInteger(amount) || amount <= 0) return;
+    await ensurePhase2Accounts(tx);
+    const existing = await tx
+      .select({ id: schema.ledgerJournals.id })
+      .from(schema.ledgerJournals)
+      .where(
+        and(
+          eq(schema.ledgerJournals.reference, bookingId),
+          eq(schema.ledgerJournals.eventType, "COMMISSION_ALLOCATION")
+        )
+      )
+      .limit(1);
+    if (existing.length > 0) return;
+    await this.postJournalEntry(tx, {
+      reference: bookingId,
+      eventType: "COMMISSION_ALLOCATION",
+      narration: `Allocated ₦${amount.toLocaleString()} commission cash to account 1040 for booking ${bookingId}. Host payable was not reduced.`,
+      entries: [
+        { accountCode: ACCOUNT_CODES.COMMISSION_FUNDS, entryType: "DEBIT", amount },
+        { accountCode: ACCOUNT_CODES.PAYSTACK_CLEARING, entryType: "CREDIT", amount },
+      ],
+    });
   }
 
   /**
@@ -417,10 +490,22 @@ export class LedgerService {
       })
       .where(eq(schema.payouts.id, payoutId));
 
-    // Update host earnings status
+    const paidRows = await tx
+      .select({ amount: schema.payouts.amount, status: schema.payouts.status })
+      .from(schema.payouts)
+      .where(eq(schema.payouts.bookingId, bookingId));
+    const paidSum = paidRows
+      .filter((row: { status: string; amount: number }) => row.status === "PAID")
+      .reduce((sum: number, row: { amount: number }) => sum + row.amount, 0);
+    const [bookingRow] = await tx
+      .select({ hostNetAmount: schema.bookings.hostNetAmount })
+      .from(schema.bookings)
+      .where(eq(schema.bookings.id, bookingId))
+      .limit(1);
+    const target = bookingRow?.hostNetAmount && bookingRow.hostNetAmount > 0 ? bookingRow.hostNetAmount : amount;
     await tx
       .update(schema.hostEarnings)
-      .set({ status: "PAID" })
+      .set({ status: paidSum >= target ? "PAID" : "PARTIALLY_PAID" })
       .where(eq(schema.hostEarnings.bookingId, bookingId));
 
     return {
@@ -449,6 +534,8 @@ export class LedgerService {
       paystackRefundId?: string | null;
       /** When set (Phase 9 approve→process), update this row instead of inserting a duplicate PROCESSED refund. */
       existingRefundId?: string | null;
+      /** Disabled. Phase 2 refunds must use the commission-account executor. */
+      allowLegacyGuestDepositFunding?: boolean;
     }
   ) {
     const {
@@ -463,6 +550,12 @@ export class LedgerService {
       paystackRefundId = null,
       existingRefundId = null,
     } = params;
+
+    if (!params.allowLegacyGuestDepositFunding) {
+      throw new Error(
+        "Guest refunds are funded only from platform commission account 1040. Legacy guest-deposit refund posting is disabled."
+      );
+    }
 
     const entries: JournalEntryInput[] = [
       {

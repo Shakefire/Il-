@@ -201,7 +201,10 @@ export default function AdminPortalPage() {
   const [refundBookingId, setRefundBookingId] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundNotes, setRefundNotes] = useState("");
+  const [refundAmount, setRefundAmount] = useState("");
   const [refundSearch, setRefundSearch] = useState("");
+  const [refundPreview, setRefundPreview] = useState<any>(null);
+  const [refundPreviewError, setRefundPreviewError] = useState<string | null>(null);
   const [isProcessingRefund, setIsProcessingRefund] = useState(false);
   const [financeActionFeedback, setFinanceActionFeedback] = useState<string | null>(null);
 
@@ -474,16 +477,27 @@ export default function AdminPortalPage() {
     setIsProcessingRefund(true);
     setFinanceActionFeedback(null);
     try {
+      const parsedAmount = refundAmount.trim() ? Math.floor(Number(refundAmount)) : undefined;
       const res = await api.processAdminRefund({
         bookingId: refundBookingId,
         reason: refundReason || "Guest requested cancellation",
         adminNotes: refundNotes || undefined,
+        amountNaira: parsedAmount,
       });
-      setFinanceActionFeedback(`Refund processed successfully: ${formatNaira(res.refundableAmount)} returned to guest (domestic fee retained).`);
+      if (!res.success) {
+        setFinanceActionFeedback(
+          res.error || `Refund is ${res.status || "unreconciled"}. It was not marked successful.`
+        );
+        return;
+      }
+      setFinanceActionFeedback(
+        `Refund ${res.status}: ${formatNaira(res.refundedAmount || 0)} settled from commission account 1040. Host wallet was not debited.`
+      );
       setShowRefundModal(false);
       setRefundBookingId("");
       setRefundReason("");
       setRefundNotes("");
+      setRefundAmount("");
       loadFinanceData();
     } catch (err: any) {
       alert(err.message || "Failed to process refund");
@@ -516,6 +530,29 @@ export default function AdminPortalPage() {
       loadFinanceData();
     }
   }, [activeModule, loadFinanceData]);
+
+  useEffect(() => {
+    if (!showRefundModal || !refundBookingId) {
+      setRefundPreview(null);
+      setRefundPreviewError(null);
+      return;
+    }
+    let cancelled = false;
+    setRefundPreviewError(null);
+    api.getAdminRefundPreview(refundBookingId)
+      .then((preview) => {
+        if (!cancelled) setRefundPreview(preview);
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setRefundPreview(null);
+          setRefundPreviewError(err.message || "Could not load refund context");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showRefundModal, refundBookingId]);
 
   // ── Open Split-View Workspace ──
   const openHostSplitView = async (host: any) => {
@@ -2192,10 +2229,13 @@ export default function AdminPortalPage() {
                         <DollarSign size={15} className="text-emerald-600" />
                       </div>
                       <div className="text-2xl font-bold text-emerald-800 tabular-nums">
-                        {formatNaira(Math.round((stats?.totalRevenue || 0) * ((platformCommissionPct || 10) / 100)))}
+                        {formatNaira(financialSummary?.metrics?.platformCommissionRevenue || 0)}
                       </div>
                       <p className="text-[11px] text-primary-secondary">
-                        {platformCommissionPct || 10}% Ilé platform revenue
+                        Ledger commission revenue (4010). Not gross booking volume.
+                      </p>
+                      <p className="text-[11px] text-primary-secondary">
+                        Available to fund refunds (1040): {formatNaira(financialSummary?.metrics?.commissionFundsAvailable || 0)}
                       </p>
                     </div>
 
@@ -3152,8 +3192,7 @@ export default function AdminPortalPage() {
                     <div>
                       <span className="font-bold text-primary">Paystack Direct Reversal System: </span>
                       <span className="text-primary-secondary">
-                        Processing a refund triggers an official reversal directly to the guest&apos;s debit card or bank account via Paystack,
-                        automatically cancels the reservation, frees up property calendar dates for fresh bookings, and sends an automated notification email.
+                        Only an admin can execute a refund. Funds come from the commission account (1040). If that balance is short, execution stops and shows the shortfall. Host wallets are not debited, and the booking status is not changed.
                       </span>
                     </div>
                   </div>
@@ -3581,6 +3620,16 @@ export default function AdminPortalPage() {
                         </div>
                         {reconciliationData.ledger&&<div className="text-xs text-primary-muted mt-1 ml-5">Debits: {formatNaira(reconciliationData.ledger.totalDebits||0)} | Credits: {formatNaira(reconciliationData.ledger.totalCredits||0)}</div>}
                       </div>
+                      {(reconciliationData.discrepancies || []).length > 0 && (
+                        <div className="p-4 rounded-xl border border-rose-300 bg-rose-50 space-y-2" role="alert">
+                          <p className="text-xs font-bold text-rose-800">Reconciliation discrepancies</p>
+                          {reconciliationData.discrepancies.map((item: { code: string; detail: string; difference: number }) => (
+                            <p key={item.code} className="text-xs text-rose-800">
+                              {item.code}: {item.detail} Difference {formatNaira(Math.abs(item.difference || 0))}.
+                            </p>
+                          ))}
+                        </div>
+                      )}
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                         {[
                           {label:"Payments",data:reconciliationData.payments},
@@ -5186,7 +5235,7 @@ export default function AdminPortalPage() {
             <div className="p-3 bg-surface-muted rounded-2xl text-[11px] text-primary flex items-start gap-2 border border-border">
               <Receipt size={15} className="text-accent shrink-0 mt-0.5" />
               <span>
-                <strong>Paystack Official Reversal:</strong> Processing a refund returns the accommodation amount directly to the guest via Paystack, marks the reservation refunded, frees up calendar dates, and dispatches an automated notification email.
+                <strong>Commission-funded refund:</strong> Funds come only from commission account 1040. A short balance stops the refund and shows the shortfall. Host wallets are not debited, and this action does not cancel or revive the booking. Success is recorded only after Paystack confirms.
               </span>
             </div>
 
@@ -5262,34 +5311,80 @@ export default function AdminPortalPage() {
                 </div>
               </div>
 
-              {/* Dynamic Calculation Preview */}
-              {(() => {
-                const targetBooking = bookings.find((b) => b.id === refundBookingId);
-                if (!targetBooking) return null;
-                const gross = targetBooking.totalAmount || targetBooking.totalPrice || 0;
-                const subtotal = targetBooking.accommodationSubtotal || Math.round(gross * 0.985 - 100);
-                const fee = targetBooking.paystackFeeAmount || calculatePaystackFee(subtotal);
-                const refundable = subtotal > 0 ? subtotal : Math.max(0, gross - fee);
-
+              {refundPreviewError && (
+                <p className="text-xs text-rose-700" role="alert">{refundPreviewError}</p>
+              )}
+              {refundPreview && (() => {
+                const typed = refundAmount.trim() ? Math.floor(Number(refundAmount)) : refundPreview.refundable;
+                const amount = Number.isFinite(typed) ? typed : 0;
+                const overRefundable = amount > refundPreview.refundable;
+                const shortfall = Math.max(0, amount - (refundPreview.commissionAvailable || 0));
+                const insufficient = shortfall > 0;
                 return (
                   <div className="p-4 bg-surface-muted rounded-2xl border border-border space-y-2 text-xs">
                     <div className="flex justify-between">
-                      <span className="text-primary-muted">Gross Amount Paid:</span>
-                      <span className="font-semibold text-primary">{formatNaira(gross)}</span>
+                      <span className="text-primary-muted">Original verified payment</span>
+                      <span className="font-semibold text-primary tabular-nums">{formatNaira(refundPreview.originalPayment || 0)}</span>
                     </div>
-                    <div className="flex justify-between text-rose-700">
-                      <span>Gateway Fee (1.5% + ₦100):</span>
-                      <span className="font-semibold">-{formatNaira(fee)}</span>
+                    <div className="flex justify-between">
+                      <span className="text-primary-muted">Remaining refundable</span>
+                      <span className="font-semibold text-primary tabular-nums">{formatNaira(refundPreview.refundable || 0)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-primary-muted">Commission available (1040)</span>
+                      <span className="font-semibold text-primary tabular-nums">{formatNaira(refundPreview.commissionAvailable || 0)}</span>
+                    </div>
+                    <div className="pt-2 border-t border-border">
+                      <p className="font-bold text-primary uppercase text-[11px] mb-1">Prior refunds</p>
+                      {(refundPreview.priorRefunds || []).length === 0 ? (
+                        <p className="text-primary-muted">None</p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {refundPreview.priorRefunds.map((row: any) => (
+                            <li key={row.id} className="flex justify-between gap-2">
+                              <span>{row.status}</span>
+                              <span className="tabular-nums">{formatNaira(row.amount || 0)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                     <div className="pt-2 border-t border-border flex justify-between items-center">
-                      <span className="font-bold text-primary uppercase text-[11px]">Net Refund to Guest:</span>
-                      <span className="text-lg font-bold text-blue-900 tabular-nums">
-                        {formatNaira(refundable)}
-                      </span>
+                      <span className="font-bold text-primary uppercase text-[11px]">Amount from commission 1040</span>
+                      <span className="text-lg font-bold text-blue-900 tabular-nums">{formatNaira(amount)}</span>
                     </div>
+                    {refundPreview.blockReason && (
+                      <p className="text-rose-800 bg-rose-50 border border-rose-200 rounded-xl p-2" role="alert">{refundPreview.blockReason}</p>
+                    )}
+                    {insufficient && (
+                      <p className="text-rose-800 bg-rose-50 border border-rose-200 rounded-xl p-2" role="alert">
+                        Insufficient commission funds. Shortfall {formatNaira(shortfall)}. This refund stays blocked. Host wallets are not used.
+                      </p>
+                    )}
+                    {overRefundable && (
+                      <p className="text-rose-800 bg-rose-50 border border-rose-200 rounded-xl p-2" role="alert">
+                        That amount is above the remaining refundable payment.
+                      </p>
+                    )}
                   </div>
                 );
               })()}
+
+              <div>
+                <label htmlFor="refund-amount" className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
+                  Amount (NGN, optional)
+                </label>
+                <input
+                  id="refund-amount"
+                  type="number"
+                  min={1}
+                  inputMode="numeric"
+                  value={refundAmount}
+                  onChange={(e) => setRefundAmount(e.target.value)}
+                  placeholder="Full remaining refundable amount"
+                  className="w-full px-3 py-2 rounded-xl border border-border bg-surface text-primary text-xs focus:outline-none focus:border-accent"
+                />
+              </div>
 
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-primary mb-1">
@@ -5332,7 +5427,7 @@ export default function AdminPortalPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isProcessingRefund || !refundBookingId}
+                  disabled={isProcessingRefund || !refundBookingId || !refundPreview?.executable || (refundAmount.trim() ? Math.floor(Number(refundAmount)) > (refundPreview?.refundable || 0) || Math.floor(Number(refundAmount)) > (refundPreview?.commissionAvailable || 0) : (refundPreview?.refundable || 0) > (refundPreview?.commissionAvailable || 0))}
                   className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
                 >
                   {isProcessingRefund ? (

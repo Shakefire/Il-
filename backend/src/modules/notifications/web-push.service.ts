@@ -1,11 +1,10 @@
 import { env } from "../../config/env"
+import { validateDeviceToken } from "./recipient-validator"
+import type { ChannelSendResult } from "./delivery-ledger"
+import { getDb, schema } from "../../db/client"
+import { eq } from "drizzle-orm"
 
-export type WebPushSendResult = {
-  ok: boolean
-  mock: boolean
-  providerMessageId?: string
-  error?: string
-}
+export type WebPushSendResult = ChannelSendResult
 
 type PushSubscriptionJson = {
   endpoint: string
@@ -40,8 +39,8 @@ const parseSubscription = (tokenOrEndpoint: string): PushSubscriptionJson | null
 
 /**
  * Web Push adapter.
- * - Without VAPID / WEB_PUSH_PROVIDER=console → honest mock log (ok + mock).
- * - With VAPID + provider=webpush → encrypted send via `web-push` package.
+ * Validates endpoint format, deactivates 404/410 expired subscriptions,
+ * distinguishes provider acceptance vs delivery, and never throws to callers.
  */
 export async function sendWebPush(params: {
   endpoint: string
@@ -49,12 +48,34 @@ export async function sendWebPush(params: {
   body: string
   data?: Record<string, string>
 }): Promise<WebPushSendResult> {
+  // 1. Strict recipient validation
+  const validation = validateDeviceToken(params.endpoint, "web_push")
+  if (!validation.valid) {
+    return {
+      ok: false,
+      mock: false,
+      skipped: true,
+      error: validation.error,
+    }
+  }
+
   const ready =
     env.WEB_PUSH_PROVIDER === "webpush" &&
     !!env.WEB_PUSH_VAPID_PUBLIC_KEY &&
     !!env.WEB_PUSH_VAPID_PRIVATE_KEY
 
+  // 2. Unconfigured / Console Provider handling
   if (!ready) {
+    if (env.NODE_ENV === "production") {
+      console.log("ℹ [WebPush] Web push not configured in production — skipping channel.")
+      return {
+        ok: false,
+        mock: false,
+        notConfigured: true,
+        skipped: true,
+        error: "Web push not configured (optional in current environment)",
+      }
+    }
     const endpoint = resolveWebPushEndpoint(params.endpoint)
     console.log(
       `🌐 [WebPush Mock] endpoint=${endpoint.slice(0, 48)}… | ${params.title}`
@@ -62,10 +83,12 @@ export async function sendWebPush(params: {
     return {
       ok: true,
       mock: true,
+      accepted: true,
       providerMessageId: `webpush_mock_${Date.now()}`,
     }
   }
 
+  // 3. Live Web Push dispatch via VAPID
   const subscription = parseSubscription(params.endpoint)
   if (!subscription?.endpoint) {
     return { ok: false, mock: false, error: "Invalid web push subscription" }
@@ -103,15 +126,34 @@ export async function sendWebPush(params: {
     return {
       ok: true,
       mock: false,
+      accepted: true,
       providerMessageId: String(result.statusCode || "webpush_sent"),
     }
   } catch (err: any) {
     console.warn("[WebPush] Encrypted send failed:", err?.message || err)
+    // Deactivate expired or unsubscribed subscription
+    if (err?.statusCode === 404 || err?.statusCode === 410) {
+      await deactivateInvalidSubscription(params.endpoint)
+    }
     return {
       ok: false,
       mock: false,
       error: err?.message || "Web push send failed",
     }
+  }
+}
+
+/** Clean up expired / unsubscribed browser endpoints from device_tokens */
+async function deactivateInvalidSubscription(endpoint: string): Promise<void> {
+  try {
+    const db = getDb()
+    await db
+      .update(schema.deviceTokens)
+      .set({ revokedAt: new Date(), updatedAt: new Date() })
+      .where(eq(schema.deviceTokens.token, endpoint))
+    console.log(`[WebPush] Deactivated expired subscription (${endpoint.slice(0, 32)}...)`)
+  } catch (e) {
+    console.warn("[WebPush] Failed to deactivate expired subscription:", e)
   }
 }
 

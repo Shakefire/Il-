@@ -114,7 +114,7 @@ describe("Phase 3: Reservation lifecycle, host accept/decline, payment gates", a
     // classic host earnings = 90000 * 2; at 100% payout hostNet = classic
     assert.equal(result.pricing.classicHostEarnings, 180000)
     assert.equal(result.pricing.hostNetAmount, 180000)
-    assert.equal(result.pricing.accommodationSubtotal, 200000)
+    assert.equal(result.pricing.accommodationSubtotal, 198000)
 
     const blocks = await db
       .select()
@@ -490,11 +490,12 @@ describe("Phase 3: Reservation lifecycle, host accept/decline, payment gates", a
     })
 
     assert.equal(created.pricing.hostPayoutPct, 59)
-    // classic = 90000 * 2 = 180000; 59% = 106200
+    // Host base 90,000 x 2 = 180,000. Guest subtotal = round(180,000 x 1.10) = 198,000.
+    // Phase 2 does not apply the 59% payout haircut. Host entitlement stays the host base.
     assert.equal(created.pricing.classicHostEarnings, 180000)
-    assert.equal(created.pricing.hostNetAmount, 106200)
-    assert.equal(created.pricing.hostCommissionAmount, 200000 - 106200)
-    assert.equal(created.pricing.accommodationSubtotal, 200000, "Guest price unchanged")
+    assert.equal(created.pricing.hostNetAmount, 180000)
+    assert.equal(created.pricing.hostCommissionAmount, 18000)
+    assert.equal(created.pricing.accommodationSubtotal, 198000)
 
     // Restore 100% for other suites
     await adminService.updateSettings({ defaultHostPayoutPct: 100 }, "usr_admin_default")

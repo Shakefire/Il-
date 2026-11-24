@@ -25,6 +25,9 @@ abstract final class EditorialLayout {
   static bool reduceMotion(BuildContext context) {
     return MediaQuery.disableAnimationsOf(context);
   }
+
+  /// Style 1 page snap curve ≈ `cubic-bezier(0.22, 1, 0.36, 1)`.
+  static const Curve tabSnap = Cubic(0.22, 1.0, 0.36, 1.0);
 }
 
 class EditorialPrice extends StatelessWidget {
@@ -106,13 +109,14 @@ class _EditorialShimmerState extends State<EditorialShimmer>
               return DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment(-1.4 + (t * 2.8), -0.2),
-                    end: Alignment(-0.2 + (t * 2.8), 0.4),
+                    begin: Alignment(-1.2 + (t * 2.6), -0.15),
+                    end: Alignment(-0.1 + (t * 2.6), 0.35),
                     colors: const <Color>[
                       EditorialColors.shimmerStart,
                       EditorialColors.shimmerMid,
-                      EditorialColors.shimmerEnd,
+                      EditorialColors.shimmerStart,
                     ],
+                    stops: const <double>[0.08, 0.18, 0.33],
                   ),
                 ),
               );
@@ -166,7 +170,7 @@ class _StayMarkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final Paint paint = Paint()
-      ..color = EditorialColors.brand.withValues(alpha: 0.34)
+      ..color = EditorialColors.brand.withValues(alpha: 0.28)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.6
       ..strokeCap = StrokeCap.round
@@ -196,10 +200,12 @@ class WishlistHeartButton extends StatefulWidget {
     super.key,
     required this.isSaved,
     required this.onPressed,
+    this.size = 36,
   });
 
   final bool isSaved;
   final VoidCallback onPressed;
+  final double size;
 
   @override
   State<WishlistHeartButton> createState() => _WishlistHeartButtonState();
@@ -234,6 +240,7 @@ class _WishlistHeartButtonState extends State<WishlistHeartButton>
 
   @override
   Widget build(BuildContext context) {
+    final double size = widget.size;
     return Semantics(
       button: true,
       label: widget.isSaved ? 'Remove from saved' : 'Save stay',
@@ -251,18 +258,18 @@ class _WishlistHeartButtonState extends State<WishlistHeartButton>
               return Transform.scale(scale: scale, child: child);
             },
             child: Ink(
-              width: 44,
-              height: 44,
+              width: size,
+              height: size,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: EditorialColors.glass,
+                color: const Color(0xEBFFFFFF),
                 border: Border.all(color: EditorialColors.glassBorder),
               ),
               child: Icon(
                 widget.isSaved
                     ? Icons.favorite_rounded
                     : Icons.favorite_border_rounded,
-                size: 22,
+                size: size * 0.5,
                 color: widget.isSaved
                     ? EditorialColors.heart
                     : EditorialColors.brand,
@@ -275,70 +282,84 @@ class _WishlistHeartButtonState extends State<WishlistHeartButton>
   }
 }
 
-class EditorialToolbar extends StatelessWidget {
-  const EditorialToolbar({
+/// Unified frosted top bar for shell tabs and pushed child screens.
+class TopNavBar extends StatelessWidget implements PreferredSizeWidget {
+  const TopNavBar({
     super.key,
     required this.title,
+    this.explorePill = false,
     this.onBack,
     this.trailing,
-    this.explorePill = false,
   });
 
   final String title;
+  final bool explorePill;
   final VoidCallback? onBack;
   final Widget? trailing;
-  final bool explorePill;
+
+  @override
+  Size get preferredSize => const Size.fromHeight(AppSpacing.topNavHeight);
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: EditorialColors.glass,
-      child: SizedBox(
-        height: 56,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 108),
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: AppTypography.screenTitle.copyWith(
-                  color: EditorialColors.ink,
-                  fontSize: 22,
-                ),
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: DecoratedBox(
+          decoration: const BoxDecoration(
+            color: Color(0xE0FAF8F5),
+            border: Border(
+              bottom: BorderSide(color: EditorialColors.headerRule),
+            ),
+          ),
+          child: SizedBox(
+            height: AppSpacing.topNavHeight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 108),
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: AppTypography.screenTitle,
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    child: explorePill
+                        ? const _ExplorePill()
+                        : IleCircularBackButton(
+                            onPressed: onBack,
+                            visualSize: 38,
+                            fillColor: EditorialColors.card,
+                            iconColor: EditorialColors.brand,
+                            borderColor: EditorialColors.stroke,
+                          ),
+                  ),
+                  Positioned(
+                    right: 0,
+                    child: trailing ?? const SizedBox(width: 38, height: 38),
+                  ),
+                ],
               ),
             ),
-            Positioned(
-              left: 8,
-              child: explorePill
-                  ? _ExplorePill(
-                      onPressed: () => context.go(AppRoutes.explore),
-                    )
-                  : IleCircularBackButton(
-                      onPressed: onBack,
-                      visualSize: 38,
-                      fillColor: EditorialColors.card,
-                      iconColor: EditorialColors.brand,
-                    ),
-            ),
-            Positioned(
-              right: 8,
-              child: trailing ?? const SizedBox(width: 44, height: 44),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-class _ExplorePill extends StatelessWidget {
-  const _ExplorePill({required this.onPressed});
+/// Alias kept for existing call sites.
+typedef EditorialToolbar = TopNavBar;
 
-  final VoidCallback onPressed;
+class _ExplorePill extends StatelessWidget {
+  const _ExplorePill();
 
   @override
   Widget build(BuildContext context) {
@@ -348,15 +369,14 @@ class _ExplorePill extends StatelessWidget {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onPressed,
+          onTap: () => context.go(AppRoutes.explore),
           borderRadius: AppRadius.pillAll,
-            child: Ink(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Ink(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
             decoration: BoxDecoration(
-              color: EditorialColors.card,
+              color: EditorialColors.explorePillFill,
               borderRadius: AppRadius.pillAll,
-              border: Border.all(color: EditorialColors.hairline),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -364,14 +384,15 @@ class _ExplorePill extends StatelessWidget {
                 const Icon(
                   Icons.arrow_back_rounded,
                   size: 16,
-                  color: EditorialColors.brand,
+                  color: EditorialColors.ink,
                 ),
                 const SizedBox(width: 4),
                 Text(
                   'Explore',
                   style: AppTypography.supporting.copyWith(
-                    color: EditorialColors.brand,
-                    fontWeight: FontWeight.w700,
+                    color: EditorialColors.ink,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
                   ),
                 ),
               ],
@@ -388,11 +409,74 @@ class EditorialHelpButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return IconButton(
+    return _ChromeIconButton(
       tooltip: 'Help',
+      icon: Icons.help_outline_rounded,
       onPressed: () => context.push(AppRoutes.help),
-      icon: const Icon(Icons.help_outline_rounded, color: EditorialColors.brand),
-      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+    );
+  }
+}
+
+class EditorialSettingsButton extends StatelessWidget {
+  const EditorialSettingsButton({super.key, required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ChromeIconButton(
+      tooltip: 'Settings',
+      icon: Icons.settings_outlined,
+      onPressed: onPressed,
+    );
+  }
+}
+
+class EditorialMarkReadButton extends StatelessWidget {
+  const EditorialMarkReadButton({super.key, this.onPressed});
+
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ChromeIconButton(
+      tooltip: 'Mark all read',
+      icon: Icons.done_all_rounded,
+      onPressed: onPressed ?? () {},
+    );
+  }
+}
+
+class _ChromeIconButton extends StatelessWidget {
+  const _ChromeIconButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: EditorialColors.card,
+        shape: const CircleBorder(
+          side: BorderSide(color: EditorialColors.stroke),
+        ),
+        child: InkWell(
+          onTap: onPressed,
+          customBorder: const CircleBorder(),
+          child: SizedBox(
+            width: 38,
+            height: 38,
+            child: Icon(icon, size: 18, color: EditorialColors.brand),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -420,242 +504,126 @@ class EditorialCard extends StatelessWidget {
   }
 }
 
-/// Frosted sign-in gate. Auth itself stays on the existing login route.
+/// Sign-in gate — empty-state copy only; no demo bookings or fake threads.
 class GuestSignInGate extends StatelessWidget {
   const GuestSignInGate({
     super.key,
     required this.returnPath,
-    required this.preview,
     required this.message,
+    this.title = 'Sign in to continue',
+    this.icon = Icons.lock_outline_rounded,
   });
 
   final String returnPath;
-  final Widget preview;
   final String message;
+  final String title;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     final String login =
         '${AppRoutes.login}?returnTo=${Uri.encodeComponent(returnPath)}';
+    final String register =
+        '${AppRoutes.register}?returnTo=${Uri.encodeComponent(returnPath)}';
     return ListView(
       padding: EdgeInsets.fromLTRB(
         AppSpacing.screenHorizontal,
-        AppSpacing.md,
+        8,
         AppSpacing.screenHorizontal,
         EditorialLayout.dockClearance(context) + AppSpacing.lg,
       ),
       children: [
-        preview,
-        const SizedBox(height: AppSpacing.lg),
-        Text(message, style: AppTypography.body.copyWith(color: EditorialColors.ink)),
-        const SizedBox(height: AppSpacing.lg),
-        IleButton(
-          label: 'Continue with phone or email',
-          onPressed: () => context.push(login),
-          isExpanded: true,
+        const SizedBox(height: 24),
+        Center(
+          child: Container(
+            width: AppSpacing.guestGateIcon,
+            height: AppSpacing.guestGateIcon,
+            margin: const EdgeInsets.only(top: 0),
+            clipBehavior: Clip.none,
+            decoration: BoxDecoration(
+              color: EditorialColors.tint,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 28, color: EditorialColors.brand),
+          ),
+        ),
+        const SizedBox(height: 20),
+        EditorialCard(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: AppTypography.sectionHeading.copyWith(fontSize: 22),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: AppTypography.body.copyWith(
+                  color: EditorialColors.inkMuted,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              IleButton(
+                label: 'Sign in',
+                onPressed: () => context.push(login),
+                isExpanded: true,
+                height: AppSpacing.guestCtaHeight,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: AppSpacing.guestCtaHeight,
+                child: OutlinedButton(
+                  onPressed: () => context.push(register),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: EditorialColors.ink,
+                    side: const BorderSide(color: EditorialColors.outlineButton),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    minimumSize: const Size.fromHeight(AppSpacing.guestCtaHeight),
+                  ),
+                  child: Text(
+                    'Create account',
+                    style: AppTypography.buttonSecondary.copyWith(
+                      color: EditorialColors.ink,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 }
 
-/// Clearly labeled sample gate pass. Not a reservation and not a real code.
+/// Design-system-only preview (not used on production guest shells).
+@Deprecated('Demo sample removed from guest shells; keep only for design kit')
 class SampleStayPass extends StatelessWidget {
   const SampleStayPass({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: 'Sample digital key card. This is not your reservation.',
-      child: SizedBox(
-        height: 248,
-        child: Stack(
-          children: [
-            Positioned(
-              left: 16,
-              right: 16,
-              top: 18,
-              child: Container(
-                height: 180,
-                decoration: BoxDecoration(
-                  color: EditorialColors.brand.withValues(alpha: 0.72),
-                  borderRadius: AppRadius.editorialCardAll,
-                ),
-              ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-                decoration: BoxDecoration(
-                  color: EditorialColors.brand,
-                  borderRadius: AppRadius.editorialCardAll,
-                  boxShadow: AppShadows.editorialCard,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          'SAMPLE',
-                          style: AppTypography.microLabel.copyWith(
-                            color: EditorialColors.gold,
-                            letterSpacing: 1.4,
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          'Preview',
-                          style: AppTypography.caption.copyWith(
-                            color: EditorialColors.onBrand.withValues(alpha: 0.8),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Gate pass',
-                      style: AppTypography.screenTitle.copyWith(
-                        color: EditorialColors.onBrand,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Not your reservation',
-                      style: AppTypography.supporting.copyWith(
-                        color: EditorialColors.onBrand.withValues(alpha: 0.86),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const _PassRow(
-                      label: 'Gate code',
-                      value: 'Shown after the host confirms',
-                    ),
-                    const _PassRow(
-                      label: 'Wi-Fi',
-                      value: 'Sent with your check-in note',
-                    ),
-                    const _PassRow(
-                      label: 'Concierge',
-                      value: 'Desk messages live in Inbox',
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 }
 
-class _PassRow extends StatelessWidget {
-  const _PassRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 88,
-            child: Text(
-              label,
-              style: AppTypography.caption.copyWith(
-                color: EditorialColors.gold,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: AppTypography.supporting.copyWith(
-                color: EditorialColors.onBrand,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Sample concierge thread. Distinct from the bookings key card.
+/// Design-system-only preview (not used on production guest shells).
+@Deprecated('Demo sample removed from guest shells; keep only for design kit')
 class SampleConciergeThread extends StatelessWidget {
   const SampleConciergeThread({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: 'Sample concierge conversation. Not a real message thread.',
-      child: EditorialCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'SAMPLE THREAD',
-              style: AppTypography.microLabel.copyWith(
-                color: EditorialColors.gold,
-                letterSpacing: 1.2,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text('Concierge', style: AppTypography.cardTitle),
-            const SizedBox(height: 4),
-            Text(
-              'A preview of Inbox. Nothing here is a message to you.',
-              style: AppTypography.caption.copyWith(color: EditorialColors.inkMuted),
-            ),
-            const SizedBox(height: 16),
-            const _ThreadBubble(
-              text:
-                  'Hi — I can help with arrival questions after your host confirms the stay.',
-            ),
-            const SizedBox(height: 8),
-            const _ThreadBubble(
-              text:
-                  'Gate codes and Wi-Fi are not in this preview. They appear on a confirmed booking.',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ThreadBubble extends StatelessWidget {
-  const _ThreadBubble({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: EditorialColors.shimmerStart,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(6),
-          topRight: Radius.circular(18),
-          bottomLeft: Radius.circular(18),
-          bottomRight: Radius.circular(18),
-        ),
-      ),
-      child: Text(
-        text,
-        style: AppTypography.supporting.copyWith(color: EditorialColors.ink),
-      ),
-    );
+    return const SizedBox.shrink();
   }
 }
 
@@ -665,43 +633,77 @@ class EditorialGlassChip extends StatelessWidget {
     required this.icon,
     required this.label,
     this.iconColor = EditorialColors.gold,
+    this.dark = false,
   });
 
   final IconData icon;
   final String label;
   final Color iconColor;
+  final bool dark;
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: AppRadius.pillAll,
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ImageFilter.blur(sigmaX: dark ? 8 : 20, sigmaY: dark ? 8 : 20),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: EditorialColors.glass,
+            color: dark
+                ? EditorialColors.trustScrim
+                : const Color(0xEBFFFFFF),
             borderRadius: AppRadius.pillAll,
-            border: Border.all(color: EditorialColors.glassBorder),
+            border: dark
+                ? null
+                : Border.all(color: EditorialColors.glassBorder),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 14, color: iconColor),
-                const SizedBox(width: 4),
-                Text(
-                  label,
-                  style: AppTypography.caption.copyWith(
-                    color: EditorialColors.ink,
-                    fontWeight: FontWeight.w700,
+            padding: EdgeInsets.symmetric(
+              horizontal: dark ? 12 : 12,
+              vertical: dark ? 0 : 6,
+            ),
+            child: SizedBox(
+              height: dark ? 30 : null,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: dark ? 12 : 14, color: iconColor),
+                  const SizedBox(width: 4),
+                  Text(
+                    label,
+                    style: AppTypography.caption.copyWith(
+                      color: dark ? Colors.white : EditorialColors.ink,
+                      fontWeight: FontWeight.w600,
+                      fontSize: dark ? 11 : 12,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+}
+
+/// Continuous tab swipe offset (0…4) shared by dock indicator + Map fade.
+class MarketplaceSwipeScope extends InheritedNotifier<ValueNotifier<double>> {
+  const MarketplaceSwipeScope({
+    super.key,
+    required ValueNotifier<double> notifier,
+    required super.child,
+  }) : super(notifier: notifier);
+
+  static double offsetOf(BuildContext context) {
+    final MarketplaceSwipeScope? scope =
+        context.dependOnInheritedWidgetOfExactType<MarketplaceSwipeScope>();
+    return scope?.notifier?.value ?? 0;
+  }
+
+  static ValueNotifier<double>? notifierOf(BuildContext context) {
+    return context
+        .dependOnInheritedWidgetOfExactType<MarketplaceSwipeScope>()
+        ?.notifier;
   }
 }

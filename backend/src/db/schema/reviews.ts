@@ -11,14 +11,14 @@ export const reviews = pgTable("reviews", {
   id: varchar("id", { length: 100 }).primaryKey(),
   propertyId: varchar("property_id", { length: 100 })
     .notNull()
-    .references(() => properties.id, { onDelete: "cascade" }),
+    .references(() => properties.id, { onDelete: "restrict" }),
   bookingId: varchar("booking_id", { length: 100 })
     .notNull()
     .unique()
-    .references(() => bookings.id, { onDelete: "cascade" }),
+    .references(() => bookings.id, { onDelete: "restrict" }),
   guestId: varchar("guest_id", { length: 100 })
     .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+    .references(() => users.id, { onDelete: "restrict" }),
 
   // Ratings (1–5 stars)
   overallRating: integer("overall_rating").notNull(),

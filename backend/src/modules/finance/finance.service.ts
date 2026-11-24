@@ -1,16 +1,16 @@
 import { eq, desc, and, sql, gte, lte, isNull, isNotNull } from "drizzle-orm";
 import crypto from "crypto";
 import { getDb, schema } from "../../db/client";
-import { LedgerService } from "./ledger.service";
-import { env } from "../../config/env";
+import { ensurePhase2Accounts, LedgerService } from "./ledger.service";
 import { BankResolutionService, maskAccountNumber } from "../payments/bank-resolution.service";
 import { PaystackTransferService } from "../payments/paystack-transfer.service";
-
+import { assertFinanceAdmin, executeAdminRefund, FinanceControlError } from "./admin-refund.service";
 export class FinanceService {
   /**
    * Financial Executive Summary for Admin Dashboard
    */
   static async getFinancialSummary() {
+    await ensurePhase2Accounts(getDb());
     const trialBalance = await LedgerService.getTrialBalance();
     const rows = trialBalance.rows;
 
@@ -59,6 +59,11 @@ export class FinanceService {
         hostSettlementPayable,
         processingFeeEscrow,
         platformCommissionRevenue,
+        /** Cash available in account 1040. This is not gross booking volume. */
+        commissionFundsAvailable: findBal("1040"),
+        commissionFundsReserved: findBal("1050"),
+        guestRefundsFromCommission: findBal("5030"),
+        grossBookingVolumeIsNotPlatformRevenue: true,
         totalDisbursed: payoutStats?.totalDisbursed || 0,
         pendingPayoutsCount: payoutStats?.pendingPayoutsCount || 0,
         pendingPayoutsAmount: payoutStats?.pendingPayoutsAmount || 0,
@@ -544,7 +549,7 @@ export class FinanceService {
   }
 
   /**
-   * Admin Confirms and Processes a Booking Refund
+   * Admin executes a refund from commission account 1040 only.
    */
   static async processRefund(
     adminId: string,
@@ -553,144 +558,28 @@ export class FinanceService {
       reason?: string;
       adminNotes?: string;
       paystackRefundId?: string;
+      amountNaira?: number;
     }
   ) {
-    const db = getDb();
-    const { bookingId, reason, adminNotes, paystackRefundId } = params;
-
-    return await db.transaction(async (tx) => {
-      const [booking] = await tx
-        .select()
-        .from(schema.bookings)
-        .where(eq(schema.bookings.id, bookingId))
-        .limit(1);
-
-      if (!booking) {
-        throw new Error(`Booking ${bookingId} not found`);
-      }
-
-      // Check if already refunded
-      const [existingRefund] = await tx
-        .select()
-        .from(schema.refunds)
-        .where(and(eq(schema.refunds.bookingId, bookingId), eq(schema.refunds.status, "PROCESSED")))
-        .limit(1);
-
-      if (existingRefund) {
-        throw new Error(`Booking ${bookingId} has already been refunded`);
-      }
-
-      // Approved Phase 9 rule: refund amount = paid − recorded Paystack fee (admin-only execution).
-      const grossPaid = booking.totalAmount || 0;
-      const recordedFee =
-        typeof booking.paystackFeeAmount === "number" && booking.paystackFeeAmount > 0
-          ? booking.paystackFeeAmount
-          : 0;
-      const refundableAmount = Math.max(0, grossPaid - recordedFee);
-
-      // Real Paystack Refund Integration (Phase 6)
-      let resolvedPaystackRefundId = paystackRefundId || null;
-      const [payment] = await tx
-        .select()
-        .from(schema.payments)
-        .where(and(eq(schema.payments.bookingId, bookingId), eq(schema.payments.status, "SUCCESS")))
-        .limit(1);
-
-      const skipLivePaystackRefund =
-        process.env.PAYSTACK_MOCK_TRANSFERS === "true" || process.env.NODE_ENV === "test";
-
-      if (
-        !skipLivePaystackRefund &&
-        env.PAYSTACK_SECRET_KEY &&
-        payment &&
-        (payment.gatewayReference || payment.reference)
-      ) {
-        const paystackTx = payment.gatewayReference || payment.reference;
-        console.log(`[Finance] Executing real Paystack refund for tx: ${paystackTx}, amount: ₦${refundableAmount}`);
-
-        const paystackRes = await fetch("https://api.paystack.co/refund", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            transaction: paystackTx,
-            amount: refundableAmount * 100, // in kobo
-            currency: "NGN",
-            customer_note: reason || "Booking accommodation refund",
-            merchant_note: `Ilé booking #${booking.referenceCode} refund processed by admin: ${adminNotes || "N/A"}`,
-          }),
-        });
-
-        const pData = await paystackRes.json().catch(() => ({}));
-        console.log(`[Finance] Paystack refund response:`, pData);
-
-        if (!paystackRes.ok || !pData.status) {
-          const errMsg = pData?.message || "Paystack refund request was declined.";
-          console.error(`[Finance] Paystack refund failed: ${errMsg}`);
-          throw new Error(`Paystack refund rejected by gateway: ${errMsg}. Ledger transaction aborted.`);
-        }
-
-        if (pData?.data?.id) {
-          resolvedPaystackRefundId = String(pData.data.id);
-        }
-      }
-
-      const result = await LedgerService.recordBookingRefund(tx, {
-        bookingId: booking.id,
-        guestId: booking.guestId,
-        grossPaid,
-        refundableAmount,
-        nonRefundableProcessingFee: recordedFee,
-        adminId,
-        reason,
-        adminNotes,
-        paystackRefundId: resolvedPaystackRefundId,
-      });
-
-      // Release availability blocks so dates return to live calendar inventory
-      await tx
-        .delete(schema.availabilityBlocks)
-        .where(
-          and(
-            eq(schema.availabilityBlocks.propertyId, booking.propertyId),
-            eq(schema.availabilityBlocks.startDate, booking.checkInDate),
-            eq(schema.availabilityBlocks.endDate, booking.checkOutDate)
-          )
-        );
-
-      // Notify guest of confirmed refund via Resend
-      import("../notifications/notifications.service").then(async ({ sendEmail, bookingRefundEmail }) => {
-        const [property] = await getDb()
-          .select({ title: schema.properties.title })
-          .from(schema.properties)
-          .where(eq(schema.properties.id, booking.propertyId))
-          .limit(1);
-
-        sendEmail(
-          bookingRefundEmail({
-            guestName: `${booking.guestFirstName} ${booking.guestLastName}`.trim(),
-            guestEmail: booking.guestEmail,
-            propertyTitle: property?.title || "Property",
-            referenceCode: booking.referenceCode,
-            refundAmount: refundableAmount,
-            currency: booking.currency || "NGN",
-            status: "PROCESSED",
-          })
-        ).catch((e) => console.warn("[Finance] Failed to send booking refund email:", e));
-      });
-
-      return {
-        success: true,
-        bookingId: booking.id,
-        refundedAmount: refundableAmount,
-        processingFeeRetained: recordedFee,
-        paystackRefundId: resolvedPaystackRefundId,
-        refundId: result.refundId,
-        journalId: result.journal.id,
-      };
+    const reason = (params.reason || params.adminNotes || "").trim();
+    const result = await executeAdminRefund({
+      adminId,
+      bookingId: params.bookingId,
+      amountNaira: params.amountNaira,
+      reason,
+      idempotencyKey: "admin-direct:" + params.bookingId + ":" + (params.amountNaira || "full") + ":" + reason,
     });
+    return {
+      success: result.success,
+      bookingId: params.bookingId,
+      refundedAmount: result.refundedAmount,
+      processingFeeRetained: 0,
+      paystackRefundId: result.paystackRefundId,
+      refundId: result.refundId,
+      status: result.status,
+      fundingAccount: "1040",
+      idempotent: result.idempotent,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -701,6 +590,7 @@ export class FinanceService {
    * Admin approves a REQUESTED refund (does NOT yet call Paystack).
    */
   static async approveRefund(adminId: string, refundId: string) {
+    await assertFinanceAdmin(adminId);
     const db = getDb();
 
     const [refund] = await db
@@ -737,6 +627,7 @@ export class FinanceService {
    * Admin rejects a REQUESTED refund.
    */
   static async rejectRefund(adminId: string, refundId: string, adminNotes?: string) {
+    await assertFinanceAdmin(adminId);
     const db = getDb();
 
     const [refund] = await db
@@ -770,121 +661,37 @@ export class FinanceService {
   }
 
   /**
-   * Admin finalizes an APPROVED refund: calls Paystack, posts journal entry, sets PROCESSED.
+   * Admin executes an APPROVED refund. Provider success is required before SUCCESSFUL.
+   * Does not cancel the booking, release inventory, or debit the host.
    */
   static async processApprovedRefund(
     adminId: string,
     refundId: string,
-    params: { paystackRefundId?: string } = {}
+    params: { paystackRefundId?: string; amountNaira?: number } = {}
   ) {
     const db = getDb();
-
-    const [refund] = await db
-      .select()
-      .from(schema.refunds)
-      .where(eq(schema.refunds.id, refundId))
-      .limit(1);
-
-    if (!refund) throw new Error(`Refund ${refundId} not found`);
-    if (refund.status !== "APPROVED") {
-      throw new Error(`Refund ${refundId} must be APPROVED before processing (current: ${refund.status})`);
+    const [refund] = await db.select().from(schema.refunds).where(eq(schema.refunds.id, refundId)).limit(1);
+    if (!refund) throw new Error("Refund " + refundId + " not found");
+    if (refund.status !== "APPROVED" && refund.status !== "SUCCESSFUL" && refund.status !== "PROCESSED") {
+      throw new Error("Refund " + refundId + " must be APPROVED before processing (current: " + refund.status + ")");
     }
-
-    return await db.transaction(async (tx) => {
-      const [booking] = await tx
-        .select()
-        .from(schema.bookings)
-        .where(eq(schema.bookings.id, refund.bookingId))
-        .limit(1);
-
-      if (!booking) throw new Error(`Booking ${refund.bookingId} not found`);
-
-      let resolvedPaystackRefundId = params.paystackRefundId || null;
-
-      // Execute real Paystack refund if key is present (skip under transfer mock / test)
-      const [payment] = await tx
-        .select()
-        .from(schema.payments)
-        .where(and(eq(schema.payments.bookingId, refund.bookingId), eq(schema.payments.status, "SUCCESS")))
-        .limit(1);
-
-      const skipLivePaystackRefund =
-        process.env.PAYSTACK_MOCK_TRANSFERS === "true" || process.env.NODE_ENV === "test";
-
-      if (
-        !skipLivePaystackRefund &&
-        env.PAYSTACK_SECRET_KEY &&
-        payment &&
-        (payment.gatewayReference || payment.reference)
-      ) {
-        const paystackTx = payment.gatewayReference || payment.reference;
-        const paystackRes = await fetch("https://api.paystack.co/refund", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            transaction: paystackTx,
-            amount: refund.refundableAmount * 100,
-            currency: "NGN",
-            customer_note: "Booking accommodation refund",
-            merchant_note: `Ilé booking #${booking.referenceCode} refund by admin`,
-          }),
-        });
-
-        const pData = await paystackRes.json().catch(() => ({}));
-        if (!paystackRes.ok || !pData.status) {
-          throw new Error(`Paystack refund rejected: ${pData?.message || "Unknown error"}`);
-        }
-        if (pData?.data?.id) resolvedPaystackRefundId = String(pData.data.id);
-      } else if (skipLivePaystackRefund && !resolvedPaystackRefundId) {
-        resolvedPaystackRefundId = `mock_refund_${refundId}`;
-      }
-
-      // Journal + cancel booking/payouts; update THIS refund row (no duplicate PROCESSED insert).
-      const ledgerResult = await LedgerService.recordBookingRefund(tx, {
-        bookingId: booking.id,
-        guestId: booking.guestId,
-        grossPaid: refund.grossPaid || booking.totalAmount,
-        refundableAmount: refund.refundableAmount,
-        nonRefundableProcessingFee: refund.nonRefundableProcessingFee,
-        adminId,
-        reason: refund.reason || undefined,
-        adminNotes: refund.adminNotes || undefined,
-        paystackRefundId: resolvedPaystackRefundId,
-        existingRefundId: refundId,
-      });
-
-      const [processed] = await tx
-        .select()
-        .from(schema.refunds)
-        .where(eq(schema.refunds.id, refundId))
-        .limit(1);
-
-      await tx.insert(schema.auditLogs).values({
-        id: `audit_${crypto.randomUUID()}`,
-        userId: adminId,
-        action: "ADMIN_PROCESS_REFUND",
-        entityType: "REFUND",
-        entityId: refundId,
-        details: JSON.stringify({
-          refundId,
-          bookingId: booking.id,
-          refundableAmount: refund.refundableAmount,
-          paystackRefundId: resolvedPaystackRefundId,
-          journalId: ledgerResult.journal?.id,
-        }),
-        createdAt: new Date(),
-      });
-
-      // Release availability after processed refund
-      await tx
-        .delete(schema.availabilityBlocks)
-        .where(eq(schema.availabilityBlocks.bookingId, booking.id));
-
-      return { success: true, refundId, processed, paystackRefundId: resolvedPaystackRefundId };
+    const result = await executeAdminRefund({
+      adminId,
+      bookingId: refund.bookingId,
+      existingRefundId: refundId,
+      amountNaira: params.amountNaira,
+      reason: refund.reason || "Admin executed approved refund",
+      idempotencyKey: "approved:" + refundId,
     });
+    return {
+      success: result.success,
+      refundId: result.refundId,
+      paystackRefundId: result.paystackRefundId,
+      status: result.status,
+      processed: result.status === "SUCCESSFUL" ? { id: result.refundId, status: result.status } : null,
+      fundingAccount: "1040",
+      idempotent: result.idempotent,
+    };
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -1180,6 +987,28 @@ export class FinanceService {
       .from(schema.webhookEvents);
 
     const trialBalance = await LedgerService.getTrialBalance();
+    const [successfulRefunds] = await db
+      .select({
+        amount: sql<number>`COALESCE(SUM(CASE WHEN ${schema.refunds.status} IN ('SUCCESSFUL', 'PROCESSED') THEN ${schema.refunds.refundableAmount} ELSE 0 END), 0)::int`,
+      })
+      .from(schema.refunds);
+    const ledgerRefunds = trialBalance.rows.find((row) => row.code === "5030")?.netBalance || 0;
+    const refundRowAmount = Number(successfulRefunds?.amount || 0);
+    const discrepancies: Array<{ code: string; detail: string; difference: number }> = [];
+    if (!trialBalance.totals.isBalanced) {
+      discrepancies.push({
+        code: "LEDGER_IMBALANCE",
+        detail: "Trial balance debits and credits do not match.",
+        difference: trialBalance.totals.imbalance,
+      });
+    }
+    if (refundRowAmount !== ledgerRefunds) {
+      discrepancies.push({
+        code: "REFUND_LEDGER_MISMATCH",
+        detail: "Successful refund rows do not match guest-refund expense account 5030.",
+        difference: refundRowAmount - ledgerRefunds,
+      });
+    }
 
     return {
       payments: paymentCounts,
@@ -1192,6 +1021,8 @@ export class FinanceService {
         totalCredits: trialBalance.totals.credits,
         imbalance: trialBalance.totals.imbalance,
       },
+      discrepancies,
+      hasDiscrepancy: discrepancies.length > 0,
       generatedAt: new Date().toISOString(),
     };
   }
@@ -1235,7 +1066,7 @@ export class FinanceService {
       .where(
         and(
           eq(schema.refunds.bookingId, bookingId),
-          sql`${schema.refunds.status} IN ('REQUESTED', 'APPROVED', 'PROCESSED')`
+          sql`${schema.refunds.status} IN ('REQUESTED', 'APPROVED', 'PENDING', 'RECONCILIATION_REQUIRED', 'PROCESSED')`
         )
       )
       .limit(1);
@@ -1439,7 +1270,7 @@ export class FinanceService {
           amount: locked.amount,
           overrideReason: meta.overrideReason || null,
           alreadyRecorded: result.alreadyRecorded,
-          journalId: result.journal?.id || result.journalId,
+          journalId: result.alreadyRecorded ? result.journalId : result.journal?.id,
         }),
       });
 
@@ -1448,7 +1279,7 @@ export class FinanceService {
         reason: result.alreadyRecorded
           ? "Settlement journal already existed; payout moved if still HELD"
           : "Settlement released to READY_FOR_PAYOUT",
-        journalId: result.journal?.id || result.journalId,
+        journalId: result.alreadyRecorded ? result.journalId : result.journal?.id,
         alreadyReleased: result.alreadyRecorded,
       };
     });
@@ -1676,7 +1507,7 @@ export class FinanceService {
       .where(
         and(
           eq(schema.refunds.bookingId, bookingId),
-          sql`${schema.refunds.status} IN ('REQUESTED', 'APPROVED', 'PROCESSED')`
+          sql`${schema.refunds.status} IN ('REQUESTED', 'APPROVED', 'PENDING', 'RECONCILIATION_REQUIRED', 'PROCESSED')`
         )
       )
       .limit(1);
@@ -1803,7 +1634,7 @@ export class FinanceService {
           amount: locked.amount,
           checkInBypassed: true,
           reason: "PO AUTOMATIC mode — verified payment releases payable without check-in gate",
-          journalId: result.journal?.id || result.journalId,
+          journalId: result.alreadyRecorded ? result.journalId : result.journal?.id,
         }),
       });
 
@@ -1812,7 +1643,7 @@ export class FinanceService {
         reason: result.alreadyRecorded
           ? "Settlement journal already existed; payout moved if still HELD"
           : "AUTOMATIC settlement released to READY_FOR_PAYOUT (check-in not required)",
-        journalId: result.journal?.id || result.journalId,
+        journalId: result.alreadyRecorded ? result.journalId : result.journal?.id,
       };
     });
   }
@@ -2262,7 +2093,10 @@ export class FinanceService {
   }
 
   /**
-   * Host wallet projection — no separate balance table.
+   * Host wallet. Available is the sum of this host's READY_FOR_PAYOUT rows,
+   * which is the amount requestHostWithdrawal can lock. It is not a forecast
+   * and it is not the pooled 2020 balance (that account is shared and still
+   * includes funds that are in flight).
    */
   static async getHostWallet(hostId: string) {
     const db = getDb();
@@ -2335,6 +2169,11 @@ export class FinanceService {
         available: totals?.available || 0,
         processing: totals?.processing || 0,
         paid: totals?.paid || 0,
+        totalEarnings: (totals?.pending || 0) + (totals?.available || 0) + (totals?.processing || 0) + (totals?.paid || 0),
+        withdrawalsInProgress: totals?.processing || 0,
+        successfulWithdrawals: totals?.paid || 0,
+        failedWithdrawalCount: history.filter((row) => row.transferStatus === "FAILED" || row.transferStatus === "REVERSED").length,
+        failedWithdrawals: history.filter((row) => row.transferStatus === "FAILED" || row.transferStatus === "REVERSED").length,
         currency: "NGN",
       },
       payoutMode: platformMode,
@@ -2346,8 +2185,6 @@ export class FinanceService {
         available: "Available / payable (ready for withdrawal or automatic transfer)",
         processing: "Processing (transfer in flight — not retriable from the app)",
         paid: "Paid to your verified bank (success)",
-        commission:
-          "Ilé commission was snapshotted on each booking — not recalculated later",
         automatic:
           "Automatic mode pays host net after verified guest payment when bank is verified",
         manual:
@@ -2376,7 +2213,9 @@ export class FinanceService {
           row.status === "HELD"
             ? `Pending (${modeLabel})`
             : row.status === "READY_FOR_PAYOUT"
-              ? row.exceptionCode === "NO_VERIFIED_BANK"
+              ? row.transferStatus === "FAILED" || row.transferStatus === "REVERSED"
+                ? "Failed — released back to available"
+                : row.exceptionCode === "NO_VERIFIED_BANK"
                 ? "Payable — bank required"
                 : row.exceptionCode === "ADMIN_HOLD"
                   ? "On hold"
@@ -2390,13 +2229,12 @@ export class FinanceService {
                   : row.status === "FAILED"
                     ? "Failed — admin reconcile"
                     : row.status;
+        const { hostCommissionAmount: _hiddenCommission, accountNumber: _rawAccount, ...visible } = row;
         return {
-          ...row,
+          ...visible,
           accountNumberMasked: maskAccountNumber(row.accountNumber),
-          accountNumber: undefined,
           displayStatus,
-          commissionAmount: row.hostCommissionAmount || 0,
-          payableAmount: row.hostNetAmount || row.amount,
+          payableAmount: row.amount,
         };
       }),
     };
@@ -2477,23 +2315,60 @@ export class FinanceService {
       let running = 0;
 
       for (const row of lockedRows) {
+        if (running >= requested) break;
         if (params.payoutIds && params.payoutIds.length > 0 && !params.payoutIds.includes(row.id)) {
           continue;
         }
-        if (running + row.amount > requested) {
-          // Prefer exact fill from whole payout rows — no partial split (no new tables)
+        const room = requested - running;
+        if (row.amount <= room) {
+          selected.push(row);
+          running += row.amount;
           continue;
         }
-        selected.push(row);
-        running += row.amount;
-        if (running >= requested) break;
+        const childId = `pay_${crypto.randomUUID()}`;
+        const [parent] = await tx
+          .update(schema.payouts)
+          .set({
+            amount: row.amount - room,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(schema.payouts.id, row.id),
+              eq(schema.payouts.status, "READY_FOR_PAYOUT"),
+              eq(schema.payouts.amount, row.amount)
+            )
+          )
+          .returning();
+        if (!parent) {
+          throw Object.assign(new Error("Concurrent withdrawal reserved these funds. Retry shortly."), {
+            statusCode: 409,
+            code: "CONCURRENT_WITHDRAWAL",
+          });
+        }
+        await tx.insert(schema.payouts).values({
+          id: childId,
+          bookingId: row.bookingId,
+          hostId: row.hostId,
+          amount: room,
+          currency: row.currency || "NGN",
+          status: "READY_FOR_PAYOUT",
+          payoutMode: row.payoutMode,
+          notes: `SPLIT_FROM:${row.id}`,
+        });
+        selected.push({
+          ...row,
+          id: childId,
+          amount: room,
+          notes: `SPLIT_FROM:${row.id}`,
+        });
+        running += room;
+        break;
       }
 
-      if (selected.length === 0 || running <= 0) {
+      if (selected.length === 0 || running < requested) {
         throw Object.assign(
-          new Error(
-            "Could not reserve payout rows for that amount. Withdraw exact available booking totals (no partial payout splits)."
-          ),
+          new Error("Could not reserve that amount from available earnings."),
           { statusCode: 409, code: "RESERVE_FAILED" }
         );
       }
@@ -2533,7 +2408,9 @@ export class FinanceService {
             bankName: profile.bankName,
             accountNumber: profile.bankAccountNumber,
             accountName: profile.bankAccountName,
-            notes: `Host withdrawal batch ${batchId}`,
+            notes: row.notes?.includes("SPLIT_FROM:")
+              ? `${row.notes}; Host withdrawal batch ${batchId}`
+              : `Host withdrawal batch ${batchId}`,
             updatedAt: new Date(),
           })
           .where(

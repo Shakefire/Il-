@@ -156,6 +156,9 @@ describe("Phase 1: Financial Engine, Pricing & Admin Settings Verification", () 
     assert.equal(booking.cleaningFee, 0);
     assert.equal(booking.totalAmount, 202000);
 
+    const priorSettings = await adminService.getSettings();
+    const priorMode = priorSettings.hostPayoutMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL";
+    await adminService.updateSettings({ hostPayoutMode: "MANUAL" }, "usr_admin_default");
     await bookingsService.acceptBooking(booking.id, verifiedHostId);
     const { initializeBookingPayment } = await import("../backend/src/modules/payments/payments.service");
     const init = await initializeBookingPayment(booking.id, booking.accessToken);
@@ -179,6 +182,7 @@ describe("Phase 1: Financial Engine, Pricing & Admin Settings Verification", () 
     assert.equal(earnings.grossAmount, 200000, "Host gross is accommodation subtotal (₦200,000)");
     assert.equal(earnings.netAmount, classicHost);
     assert.equal(earnings.status, "PENDING");
+    await adminService.updateSettings({ hostPayoutMode: priorMode }, "usr_admin_default");
   });
 
   it("4. Cancellation Neutralization: unpaid cancel free; paid cancel requires refund path", async () => {
@@ -196,6 +200,9 @@ describe("Phase 1: Financial Engine, Pricing & Admin Settings Verification", () 
     });
 
     const [booking] = await db.select().from(schema.bookings).where(eq(schema.bookings.id, result.booking.id));
+    const priorSettings = await adminService.getSettings();
+    const priorMode = priorSettings.hostPayoutMode === "AUTOMATIC" ? "AUTOMATIC" : "MANUAL";
+    await adminService.updateSettings({ hostPayoutMode: "MANUAL" }, "usr_admin_default");
     await bookingsService.acceptBooking(booking.id, verifiedHostId);
     const { initializeBookingPayment } = await import("../backend/src/modules/payments/payments.service");
     const init = await initializeBookingPayment(booking.id, booking.accessToken);
@@ -219,21 +226,23 @@ describe("Phase 1: Financial Engine, Pricing & Admin Settings Verification", () 
       (e: any) => e.code === "REFUND_REQUIRED" || e.statusCode === 409
     );
 
-    // Neutralize via finance refund path
+    // Admin refund is funded from commission cash. It must not cancel host earnings.
     const { FinanceService } = await import("../backend/src/modules/finance/finance.service");
-    await FinanceService.processRefund("usr_admin_default", {
-      bookingId: booking.id,
-      reason: "Emergency cancellation",
-    });
+    try {
+      await FinanceService.processRefund("usr_admin_default", {
+        bookingId: booking.id,
+        reason: "Emergency cancellation",
+      });
+    } catch (err: any) {
+      assert.equal(err.code, "INSUFFICIENT_COMMISSION");
+    }
 
     const [cancelledEarnings] = await db
       .select()
       .from(schema.hostEarnings)
       .where(eq(schema.hostEarnings.bookingId, booking.id));
-    assert.ok(
-      cancelledEarnings.status === "CANCELLED" || cancelledEarnings.status === "PENDING",
-      "Earnings neutralized or refunded via finance path"
-    );
+    assert.equal(cancelledEarnings.status, "PENDING", "Refunds do not cancel host earnings");
+    await adminService.updateSettings({ hostPayoutMode: priorMode }, "usr_admin_default");
   });
 
   it("5. Admin Stats Revenue Query: Sums SUCCESS payments (non-zero in production)", async () => {

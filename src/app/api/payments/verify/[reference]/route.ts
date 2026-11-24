@@ -16,11 +16,12 @@ export async function GET(
     const result = await verifyPayment(reference);
     if (!result.verified) {
       if (result.status === "failed") {
-        // Terminal failure from payment provider — cancel booking and release dates
+        // Record the failed attempt. Do not cancel the booking; the guest can retry until the payment deadline.
         try {
           await processFailedPayment({
             reference,
             reason: result.error || "Payment was declined by financial institution.",
+            outcome: "failed",
           });
         } catch (cancelErr) {
           console.warn("[API] Failed to cancel booking after declined payment:", cancelErr);

@@ -15,7 +15,8 @@ import {
 import { LedgerService } from "../backend/src/modules/finance/ledger.service"
 
 process.env.PAYSTACK_MOCK_TRANSFERS = "true"
-process.env.NODE_ENV = process.env.NODE_ENV || "test"
+const testEnv = process.env as Record<string, string | undefined>
+if (!testEnv.NODE_ENV) testEnv.NODE_ENV = "test"
 if (!process.env.PAYSTACK_SECRET_KEY) {
   process.env.PAYSTACK_SECRET_KEY = "sk_test_phase7_webhook_hmac"
 }

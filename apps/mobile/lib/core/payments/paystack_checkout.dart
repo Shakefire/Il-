@@ -31,7 +31,15 @@ abstract final class PaystackCheckout {
     return false;
   }
 
+  /// True when host is a local/dev callback surface (mock Paystack returns).
+  static bool isLocalDevHost(String? host) {
+    if (host == null || host.trim().isEmpty) return false;
+    final String h = host.trim().toLowerCase();
+    return h == 'localhost' || h == '127.0.0.1' || h.endsWith('.ngrok-free.app');
+  }
+
   /// True when URL looks like an Ilé / Paystack return with a payment ref.
+  /// `payment=mock` is accepted only on local/dev hosts — never on production domains.
   static bool isPaymentReturnUrl(Uri uri) {
     final String path = uri.path.toLowerCase();
     final Map<String, String> q = uri.queryParameters;
@@ -39,15 +47,17 @@ abstract final class PaystackCheckout {
     final bool hasRef =
         (q['ref'] ?? q['reference'] ?? q['trxref'] ?? '').trim().isNotEmpty;
     if (!hasRef) return false;
-    if (payment == 'success' || payment == 'mock' || payment == 'callback') {
+    final bool allowMock = isLocalDevHost(uri.host);
+    if (payment == 'success' || payment == 'callback') {
       return true;
     }
+    if (payment == 'mock') return allowMock;
     // Paystack sometimes lands on /trips or callback without payment= key
     if (path.contains('trips') || path.contains('payment')) {
-      return payment.isEmpty ||
-          payment == 'success' ||
-          payment == 'mock' ||
-          payment == 'callback';
+      if (payment.isEmpty || payment == 'success' || payment == 'callback') {
+        return true;
+      }
+      if (payment == 'mock') return allowMock;
     }
     return false;
   }

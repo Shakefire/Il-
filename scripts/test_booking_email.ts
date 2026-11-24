@@ -487,7 +487,10 @@ assert(resultLegacyArrival.to === "tunde@example.com", "Legacy arrival guide del
 assert(resultLegacyArrival.html.includes("Sunset Terrace Wuse 2"), "Legacy arrival guide rendered property title");
 assert(resultLegacyArrival.html.includes("Adetokunbo Ademola Crescent"), "Legacy arrival guide rendered address");
 assert(resultLegacyArrival.html.includes("Ask security for Mr. Tunde&#39;s key at gate."), "Legacy instructions rendered");
-assert(resultLegacyArrival.html.includes("GATE-CLEARED"), "Default gate pass code used when omitted");
+assert(
+  resultLegacyArrival.html.includes("Open your confirmed trip in Ilé for the access code"),
+  "Omitted gate code must not invent a pass; the guest is sent to the confirmed trip"
+);
 
 console.log(`\n=============================================================`);
 console.log(`ALL TESTS PASSED: ${passedTests}/${totalTests} tests successful.`);

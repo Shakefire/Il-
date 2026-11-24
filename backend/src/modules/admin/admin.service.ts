@@ -123,51 +123,80 @@ export const adminService = {
       action: `PROPERTY_${status}`,
       entityType: "property",
       entityId: id,
-      details: reason || `Property status changed to ${status}`,
+      details: JSON.stringify({
+        reason: reason || null,
+        old: { status: property.status, moderationStatus: property.moderationStatus },
+        new: { status, moderationStatus: updateData.moderationStatus ?? property.moderationStatus },
+      }),
       ipAddress: ipAddress || null,
     });
 
-    // Notify host via Resend
-    if (status === "SUSPENDED") {
-      import("../notifications/notifications.service").then(async ({ sendEmail, listingSuspendedEmail }) => {
-        const [host] = await db
-          .select({ email: schema.users.email, firstName: schema.users.firstName })
-          .from(schema.users)
-          .where(eq(schema.users.id, property.hostId))
-          .limit(1);
+    // Notify host across in-app, email, and push
+    Promise.all([
+      import("../notifications/notifications.service"),
+      import("../notifications/orchestrator"),
+    ]).then(async ([{ listingSuspendedEmail, propertyReviewStatusEmail }, { notifyUserEvent }]) => {
+      const [host] = await db
+        .select({ id: schema.users.id, email: schema.users.email, firstName: schema.users.firstName, phone: schema.users.phone })
+        .from(schema.users)
+        .where(eq(schema.users.id, property.hostId))
+        .limit(1);
 
-        if (host) {
-          sendEmail(
-            listingSuspendedEmail({
+      if (!host) return;
+
+      if (status === "SUSPENDED") {
+        notifyUserEvent({
+          userId: host.id,
+          event: "LISTING_SUSPENDED",
+          entityType: "property",
+          entityId: property.id,
+          category: "listing",
+          channels: {
+            category: "listing",
+            email: listingSuspendedEmail({
               hostName: host.firstName,
               hostEmail: host.email,
               propertyTitle: property.title,
               reason: reason || undefined,
-            })
-          ).catch((e) => console.warn("[Admin] Failed to send listing suspension email:", e));
-        }
-      });
-    } else if (status === "PUBLISHED" || status === "REJECTED") {
-      import("../notifications/notifications.service").then(async ({ sendEmail, propertyReviewStatusEmail }) => {
-        const [host] = await db
-          .select({ email: schema.users.email, firstName: schema.users.firstName })
-          .from(schema.users)
-          .where(eq(schema.users.id, property.hostId))
-          .limit(1);
-
-        if (host) {
-          sendEmail(
-            propertyReviewStatusEmail({
+            }),
+            inbox: {
+              userId: host.id,
+              title: "Listing suspended",
+              body: `${property.title} was suspended by moderation.${reason ? ` Reason: ${reason}` : ""}`,
+              deepLink: `/host/listings`,
+            },
+            push: true,
+          },
+        });
+      } else if (status === "PUBLISHED" || status === "REJECTED") {
+        notifyUserEvent({
+          userId: host.id,
+          event: status === "PUBLISHED" ? "LISTING_PUBLISHED" : "LISTING_SUSPENDED",
+          entityType: "property",
+          entityId: property.id,
+          category: "listing",
+          channels: {
+            category: "listing",
+            email: propertyReviewStatusEmail({
               hostName: host.firstName,
               hostEmail: host.email,
               propertyTitle: property.title,
               status: status === "PUBLISHED" ? "APPROVED" : "REJECTED",
               reason: reason || undefined,
-            })
-          ).catch((e) => console.warn("[Admin] Failed to send moderation status email:", e));
-        }
-      });
-    }
+            }),
+            inbox: {
+              userId: host.id,
+              title: status === "PUBLISHED" ? "Listing approved!" : "Listing rejected",
+              body: status === "PUBLISHED"
+                ? `${property.title} was approved and is live on the marketplace.`
+                : `${property.title} was not approved.${reason ? ` Reason: ${reason}` : ""}`,
+              deepLink: `/host/listings`,
+            },
+            push: true,
+          },
+        });
+      }
+    }).catch((e) => console.warn("[Admin] Failed to dispatch property status notification:", e));
 
     return updated;
   },
@@ -265,19 +294,33 @@ export const adminService = {
       .from(schema.properties)
       .where(eq(schema.properties.hostId, hostId));
 
+    const [bookingHistory] = await db
+      .select({ total: count(schema.bookings.id) })
+      .from(schema.bookings)
+      .innerJoin(schema.properties, eq(schema.bookings.propertyId, schema.properties.id))
+      .where(eq(schema.properties.hostId, hostId));
+    const [earningHistory] = await db
+      .select({ total: count(schema.hostEarnings.id) })
+      .from(schema.hostEarnings)
+      .where(eq(schema.hostEarnings.hostId, hostId));
+    if (Number(bookingHistory?.total || 0) > 0 || Number(earningHistory?.total || 0) > 0) {
+      const err: any = new Error(
+        "Host has booking or earnings history. Suspend the account instead of deleting it. Financial records are retained."
+      );
+      err.statusCode = 409;
+      throw err;
+    }
+
     for (const prop of hostProperties) {
       await db.delete(schema.propertyPrivateDetails).where(eq(schema.propertyPrivateDetails.propertyId, prop.id));
       await db.delete(schema.propertyImages).where(eq(schema.propertyImages.propertyId, prop.id));
       await db.delete(schema.propertyAmenities).where(eq(schema.propertyAmenities.propertyId, prop.id));
       await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.propertyId, prop.id));
       await db.delete(schema.reviews).where(eq(schema.reviews.propertyId, prop.id));
-      await db.delete(schema.bookings).where(eq(schema.bookings.propertyId, prop.id));
       await db.delete(schema.properties).where(eq(schema.properties.id, prop.id));
     }
 
-    // 2. Delete payouts, earnings, verification logs, profile
-    await db.delete(schema.payouts).where(eq(schema.payouts.hostId, hostId));
-    await db.delete(schema.hostEarnings).where(eq(schema.hostEarnings.hostId, hostId));
+    // 2. Delete verification logs and profile. Payouts and earnings are retained when present.
     await db.delete(schema.verificationLogs).where(eq(schema.verificationLogs.hostId, hostId));
     await db.delete(schema.profiles).where(eq(schema.profiles.userId, hostId));
 
@@ -359,25 +402,11 @@ export const adminService = {
       throw new Error("Booking not found");
     }
 
-    // Clean up availability blocks, payouts, refunds, payments
-    await db.delete(schema.availabilityBlocks).where(eq(schema.availabilityBlocks.bookingId, bookingId));
-    await db.delete(schema.payouts).where(eq(schema.payouts.bookingId, bookingId));
-    await db.delete(schema.refunds).where(eq(schema.refunds.bookingId, bookingId));
-    await db.delete(schema.payments).where(eq(schema.payments.bookingId, bookingId));
-    await db.delete(schema.reviews).where(eq(schema.reviews.bookingId, bookingId));
-    await db.delete(schema.bookings).where(eq(schema.bookings.id, bookingId));
-
-    await db.insert(schema.auditLogs).values({
-      id: `audit_${crypto.randomUUID()}`,
-      userId: adminId,
-      action: "BOOKING_DELETED",
-      entityType: "booking",
-      entityId: bookingId,
-      details: `Booking #${booking.referenceCode} (${booking.guestFirstName} ${booking.guestLastName}) permanently deleted by administrator.`,
-      ipAddress: ipAddress || null,
-    });
-
-    return { success: true, message: `Booking #${booking.referenceCode} deleted successfully.` };
+    const err: any = new Error(
+      `Booking #${booking.referenceCode} is retained. Cancel it or request a refund. Permanent deletion of booking history is disabled.`
+    );
+    err.statusCode = 409;
+    throw err;
   },
 
   async deleteTransaction(paymentId: string, adminId: string, ipAddress?: string) {
@@ -392,19 +421,11 @@ export const adminService = {
       throw new Error("Payment record not found");
     }
 
-    await db.delete(schema.payments).where(eq(schema.payments.id, paymentId));
-
-    await db.insert(schema.auditLogs).values({
-      id: `audit_${crypto.randomUUID()}`,
-      userId: adminId,
-      action: "PAYMENT_DELETED",
-      entityType: "payment",
-      entityId: paymentId,
-      details: `Payment transaction ${payment.reference} (₦${(payment.amount / 100).toLocaleString()}) deleted by administrator.`,
-      ipAddress: ipAddress || null,
-    });
-
-    return { success: true, message: `Transaction ${payment.reference} deleted successfully.` };
+    const err: any = new Error(
+      `Payment ${payment.reference} is retained for reconciliation. Permanent deletion of payment records is disabled.`
+    );
+    err.statusCode = 409;
+    throw err;
   },
 
   async getBookings(pagination: PaginationParams) {
@@ -679,15 +700,33 @@ export const adminService = {
       ipAddress: ipAddress || null,
     });
 
-    // Send congratulatory approval email
-    import("../notifications/notifications.service").then(({ sendEmail, hostApplicationApprovedEmail }) => {
-      sendEmail(
-        hostApplicationApprovedEmail({
-          hostName: host.firstName,
-          hostEmail: host.email,
-        })
-      ).catch((e) => console.warn("[Admin] Failed to send host approval email:", e));
-    });
+    // Send congratulatory approval across in-app, email, and push
+    Promise.all([
+      import("../notifications/notifications.service"),
+      import("../notifications/orchestrator"),
+    ]).then(([{ hostApplicationApprovedEmail }, { notifyUserEvent }]) => {
+      notifyUserEvent({
+        userId: hostId,
+        event: "HOST_KYC_APPROVED",
+        entityType: "host",
+        entityId: hostId,
+        category: "kyc",
+        channels: {
+          category: "kyc",
+          email: hostApplicationApprovedEmail({
+            hostName: host.firstName,
+            hostEmail: host.email,
+          }),
+          inbox: {
+            userId: hostId,
+            title: "Host account approved!",
+            body: `Congratulations ${host.firstName}! Your host credentials have been verified. You can now publish listings and host guests.`,
+            deepLink: `/host/dashboard`,
+          },
+          push: true,
+        },
+      });
+    }).catch((e) => console.warn("[Admin] Failed to send host approval notification:", e));
 
     return {
       success: true,
@@ -763,16 +802,34 @@ export const adminService = {
       ipAddress: ipAddress || null,
     });
 
-    // Send rejection email
-    import("../notifications/notifications.service").then(({ sendEmail, hostApplicationRejectedEmail }) => {
-      sendEmail(
-        hostApplicationRejectedEmail({
-          hostName: host.firstName,
-          hostEmail: host.email,
-          reason,
-        })
-      ).catch((e) => console.warn("[Admin] Failed to send host rejection email:", e));
-    });
+    // Send rejection notification across in-app, email, and push
+    Promise.all([
+      import("../notifications/notifications.service"),
+      import("../notifications/orchestrator"),
+    ]).then(([{ hostApplicationRejectedEmail }, { notifyUserEvent }]) => {
+      notifyUserEvent({
+        userId: hostId,
+        event: "HOST_KYC_REJECTED",
+        entityType: "host",
+        entityId: hostId,
+        category: "kyc",
+        channels: {
+          category: "kyc",
+          email: hostApplicationRejectedEmail({
+            hostName: host.firstName,
+            hostEmail: host.email,
+            reason,
+          }),
+          inbox: {
+            userId: hostId,
+            title: "Host application rejected",
+            body: `Your host verification was rejected: ${reason}`,
+            deepLink: `/host/onboarding`,
+          },
+          push: true,
+        },
+      });
+    }).catch((e) => console.warn("[Admin] Failed to send host rejection notification:", e));
 
     return {
       success: true,
@@ -1183,13 +1240,18 @@ export const adminService = {
       entityType: "platform_settings",
       entityId: "default",
       details: JSON.stringify({
+        previousCommissionPct: existing?.defaultHostCommissionPct ?? null,
         commissionPct: updated.defaultHostCommissionPct,
+        actorId: adminId,
+        changedAt: new Date().toISOString(),
         hostPayoutPct: updated.defaultHostPayoutPct,
         payoutHoldHours: updated.payoutHoldHours,
         hostPayoutMode: nextMode,
         previousHostPayoutMode: previousMode,
+        summary: `commission=${updated.defaultHostCommissionPct}% applies to new bookings only`,
+        appliesToNewBookingsOnly: true,
         note:
-          "Mode switch does not auto-drain historical pending payouts and does not reverse in-flight transfers.",
+          "Commission changes apply to new bookings only. Historical snapshots are not rewritten. Mode switch does not auto-drain historical pending payouts and does not reverse in-flight transfers.",
       }),
       ipAddress: ipAddress || null,
     });

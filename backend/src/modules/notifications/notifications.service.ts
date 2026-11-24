@@ -10,6 +10,7 @@ import crypto from "crypto"
 import { eq, sql } from "drizzle-orm"
 import { env } from "../../config/env"
 import { getDb, schema } from "../../db/client"
+import { validateEmail, maskRecipient } from "./recipient-validator"
 
 export interface EmailPayload {
   to: string
@@ -30,6 +31,10 @@ export type SendEmailResult = {
   sent: boolean
   idempotent?: boolean
   exhausted?: boolean
+  skipped?: boolean
+  notConfigured?: boolean
+  accepted?: boolean
+  delivered?: boolean
   attempts?: number
   providerMessageId?: string
   error?: string
@@ -1402,7 +1407,7 @@ export function bookingAccessPassEmail(data: BookingAccessPassData): EmailPayloa
                         Estate Security Gate Pass Code:
                       </div>
                       <div style="font-family: -apple-system, BlinkMacSystemFont, 'SF Mono', Consolas, monospace; font-size: 24px; font-weight: 800; color: #0B5D45; letter-spacing: 3px;">
-                        ${escapeHtml(data.accessGateCode || "GATE-CLEARED")}
+                        ${escapeHtml(data.accessGateCode || "Open your confirmed trip in Ilé for the access code")}
                       </div>
                     </div>
 
@@ -1537,7 +1542,7 @@ Time Zone: ${timeZone}
 Length of Stay: ${nights} ${nights === 1 ? "Night" : "Nights"} (${data.guestCount || 1} Guests)
 
 ESTATE SECURITY GATE CLEARANCE & PROCEDURES:
-Gate Pass Code: ${data.accessGateCode || "GATE-CLEARED"}
+Gate Pass Code: ${data.accessGateCode || "Open your confirmed trip in Ilé for the access code"}
 Instructions: ${data.accessInstructions || "Present reservation reference to estate security guards."}
 
 HELPFUL REMINDERS:
@@ -2429,16 +2434,8 @@ export function hostBookingConfirmedEmail(data: {
     <div style="background-color: #FAFAF8; border: 1px solid #E7E5E0; border-radius: 12px; padding: 20px; margin: 20px 0;">
       <h3 style="font-size: 14px; margin: 0 0 12px 0; color: #0B5D45; text-transform: uppercase; letter-spacing: 0.5px;">Host Payout Breakdown</h3>
       <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-        <tr>
-          <td style="padding: 5px 0; color: #6B6B67;">Gross Booking Total:</td>
-          <td style="padding: 5px 0; text-align: right; font-weight: 600;">${formatCurrency(data.grossAmount, cur)}</td>
-        </tr>
-        <tr>
-          <td style="padding: 5px 0; color: #6B6B67;">Ilé Platform Commission:</td>
-          <td style="padding: 5px 0; text-align: right; color: #6B6B67;">- ${formatCurrency(data.commissionAmount, cur)}</td>
-        </tr>
         <tr style="border-top: 1.5px solid #E7E5E0;">
-          <td style="padding: 8px 0 0 0; font-weight: 800; color: #0B5D45; font-size: 15px;">Estimated Net Payout:</td>
+          <td style="padding: 8px 0 0 0; font-weight: 800; color: #0B5D45; font-size: 15px;">Your earnings:</td>
           <td style="padding: 8px 0 0 0; text-align: right; font-weight: 800; color: #0B5D45; font-size: 16px;">${formatCurrency(data.netPayout, cur)}</td>
         </tr>
       </table>
@@ -2629,6 +2626,37 @@ export async function sendTransactionalEmail(
   const entityType = payload.entityType || "booking"
   const entityId = payload.entityId || null
 
+  // 1. Strict recipient email validation
+  const emailValidation = validateEmail(payload.to)
+  if (!emailValidation.valid) {
+    if (payload.idempotencyKey) {
+      try {
+        await ensureEmailDeliveryRow({
+          idempotencyKey: payload.idempotencyKey,
+          eventType,
+          entityType,
+          entityId,
+          recipient: String(payload.to || ""),
+          subject: payload.subject,
+          maxAttempts: 1,
+        })
+        await recordEmailDeliveryAttempt({
+          idempotencyKey: payload.idempotencyKey,
+          success: false,
+          error: `SKIPPED: ${emailValidation.error}`,
+          maxAttempts: 1,
+        })
+      } catch {}
+    }
+    return {
+      sent: false,
+      skipped: true,
+      error: emailValidation.error,
+    }
+  }
+
+  const validEmail = emailValidation.value
+
   if (payload.idempotencyKey) {
     try {
       const ledger = await ensureEmailDeliveryRow({
@@ -2636,17 +2664,28 @@ export async function sendTransactionalEmail(
         eventType,
         entityType,
         entityId,
-        recipient: payload.to,
+        recipient: validEmail,
         subject: payload.subject,
         maxAttempts,
       })
 
-      if (ledger.status === "SENT") {
+      if (ledger.status === "SENT" || ledger.status === "ACCEPTED" || ledger.status === "DELIVERED") {
+        return {
+          sent: true,
+          idempotent: true,
+          accepted: true,
+          attempts: ledger.attempts,
+          providerMessageId: ledger.providerMessageId || undefined,
+        }
+      }
+
+      if (ledger.status === "SKIPPED" || ledger.status === "NOT_CONFIGURED") {
         return {
           sent: false,
           idempotent: true,
-          attempts: ledger.attempts,
-          providerMessageId: ledger.providerMessageId || undefined,
+          skipped: true,
+          notConfigured: ledger.status === "NOT_CONFIGURED",
+          error: ledger.lastError || undefined,
         }
       }
 
@@ -2670,21 +2709,42 @@ export async function sendTransactionalEmail(
   const apiKey = env.RESEND_API_KEY || env.EMAIL_API_KEY
 
   let sendOk = false
+  let isAccepted = false
+  let isSkipped = false
+  let isNotConfigured = false
   let providerMessageId: string | undefined
   let sendError: string | undefined
 
   if (provider === "console" || !apiKey) {
-    console.log(`\n📧 [Email Mock] To: ${payload.to} | Subject: ${payload.subject} | Key: ${payload.idempotencyKey || "none"}`)
-    sendOk = true
-    providerMessageId = `mock_${Date.now()}`
+    if (env.NODE_ENV === "production") {
+      console.error(
+        `❌ [Email] Refusing mock email success in production (provider=${provider}, key=${apiKey ? "set" : "missing"}) | To: ${validEmail}`
+      )
+      sendOk = false
+      isSkipped = true
+      isNotConfigured = true
+      sendError = "Email provider not configured for production"
+    } else {
+      console.log(`\n📧 [Email Mock] To: ${validEmail} | Subject: ${payload.subject} | Key: ${payload.idempotencyKey || "none"}`)
+      sendOk = true
+      isAccepted = true
+      providerMessageId = `mock_${Date.now()}`
+    }
   } else if (provider === "resend") {
-    const resend = await sendViaResend(payload)
+    const resend = await sendViaResend({ ...payload, to: validEmail })
     sendOk = resend.ok
+    isAccepted = resend.ok
     providerMessageId = resend.id
     sendError = resend.error
+  } else if (env.NODE_ENV === "production") {
+    console.error(`[Email] Unknown provider in production: ${provider}`)
+    sendOk = false
+    isSkipped = true
+    sendError = `Unknown email provider: ${provider}`
   } else {
     console.warn(`[Email] Unknown provider: ${provider}, falling back to console`)
     sendOk = true
+    isAccepted = true
     providerMessageId = `fallback_${Date.now()}`
   }
 
@@ -2693,6 +2753,7 @@ export async function sendTransactionalEmail(
       await recordEmailDeliveryAttempt({
         idempotencyKey: payload.idempotencyKey,
         success: sendOk,
+        status: isNotConfigured ? "NOT_CONFIGURED" : isSkipped ? "SKIPPED" : isAccepted ? "ACCEPTED" : undefined,
         providerMessageId,
         error: sendError,
         maxAttempts,
@@ -2702,12 +2763,15 @@ export async function sendTransactionalEmail(
     }
   }
 
-  if (!sendOk) {
+  if (!sendOk && !isSkipped) {
     console.error(`[Email] Send failed (logged, non-fatal): ${sendError || "unknown"}`)
   }
 
   return {
     sent: sendOk,
+    accepted: isAccepted,
+    skipped: isSkipped,
+    notConfigured: isNotConfigured,
     attempts: sendOk ? 1 : undefined,
     providerMessageId,
     error: sendError,
@@ -2753,7 +2817,7 @@ const ensureEmailDeliveryRow = async (params: {
       eventType: params.eventType,
       entityType: params.entityType,
       entityId: params.entityId,
-      recipient: params.recipient,
+      recipient: maskRecipient(params.recipient, "email"),
       subject: params.subject,
       status: "PENDING",
       attempts: 0,
@@ -2781,6 +2845,7 @@ const ensureEmailDeliveryRow = async (params: {
 const recordEmailDeliveryAttempt = async (params: {
   idempotencyKey: string
   success: boolean
+  status?: string
   providerMessageId?: string
   error?: string
   maxAttempts: number
@@ -2792,7 +2857,7 @@ const recordEmailDeliveryAttempt = async (params: {
     await db
       .update(schema.emailDeliveries)
       .set({
-        status: "SENT",
+        status: params.status || "ACCEPTED",
         attempts: sql`${schema.emailDeliveries.attempts} + 1`,
         providerMessageId: params.providerMessageId || null,
         lastError: null,
@@ -2809,14 +2874,23 @@ const recordEmailDeliveryAttempt = async (params: {
     .where(eq(schema.emailDeliveries.idempotencyKey, params.idempotencyKey))
     .limit(1)
 
-  const nextAttempts = (row?.attempts || 0) + 1
-  const exhausted = nextAttempts >= (row?.maxAttempts || params.maxAttempts)
+  const isSkipped =
+    params.status === "SKIPPED" ||
+    params.status === "NOT_CONFIGURED" ||
+    params.error?.startsWith("SKIPPED") ||
+    params.error?.startsWith("NOT_CONFIGURED")
+
+  const nextAttempts = (row?.attempts || 0) + (isSkipped ? 0 : 1)
+  const exhausted = !isSkipped && nextAttempts >= (row?.maxAttempts || params.maxAttempts)
+  const finalStatus =
+    params.status || (isSkipped ? "SKIPPED" : exhausted ? "EXHAUSTED" : "FAILED")
 
   await db
     .update(schema.emailDeliveries)
     .set({
-      status: exhausted ? "EXHAUSTED" : "FAILED",
+      status: finalStatus,
       attempts: nextAttempts,
+      providerMessageId: params.providerMessageId || null,
       lastError: (params.error || "Send failed").slice(0, 2000),
       updatedAt: now,
     })

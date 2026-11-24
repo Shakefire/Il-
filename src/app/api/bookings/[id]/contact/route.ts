@@ -14,27 +14,16 @@ export async function GET(
   }
 
   const session = authenticateNextRequest(req);
-  const { searchParams } = new URL(req.url);
-  const token = searchParams.get("token") || req.headers.get("x-access-token");
-
-  const emailParam = searchParams.get("email");
-
-  // Determine authorized identity: token, guest email, or session user ID/role
-  const authIdentifier = token || emailParam || session?.userId || (session?.role === "admin" ? "admin" : undefined);
-
-  if (!authIdentifier) {
-    return NextResponse.json(
-      { error: "Unauthorized access: valid session or access token required to view property arrival guide." },
-      { status: 401 }
-    );
+  if (!session) {
+    return NextResponse.json({ error: "Sign in to view stay details." }, { status: 401 });
   }
 
   try {
-    const contact = await bookingsService.getBookingContact(id, authIdentifier);
+    const contact = await bookingsService.getBookingContact(id, session.userId);
     return NextResponse.json(contact);
   } catch (err: any) {
     return NextResponse.json(
-      { error: err.message || "Failed to load property arrival and contact details" },
+      { error: err.message || "Failed to load stay details" },
       { status: err.statusCode || 400 }
     );
   }

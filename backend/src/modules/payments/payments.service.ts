@@ -6,13 +6,16 @@
  */
 
 import { env } from "../../config/env";
+import {
+  canUsePaystackDevMocks,
+  paystackNotConfiguredError,
+} from "../../lib/payment-mocks";
 import { getDb, schema } from "../../db/client";
 import { eq, and, or, sql } from "drizzle-orm";
 import crypto from "crypto";
 import {
   sendEmail,
   bookingConfirmationEmail,
-  bookingAccessPassEmail,
   hostBookingConfirmedEmail,
   bookingPaymentFailedEmail,
   bookingRefundEmail,
@@ -23,6 +26,7 @@ import {
   dispatchLifecycleEmail,
   LIFECYCLE_EMAIL_EVENT,
 } from "../notifications/lifecycle-notify";
+import { notifyUserEvent } from "../notifications/orchestrator";
 import { recordBookingAudit } from "../../lib/booking-audit";
 import { LedgerService } from "../finance/ledger.service";
 
@@ -103,6 +107,67 @@ const notifyLatePaymentReconciliation = (params: {
     },
   });
 };
+
+/** Paystack success must match this booking, guest, and amount. Missing metadata is not a mismatch. */
+export function paymentAssociationProblem(
+  data: { paidAmountNaira: number; currency: string; rawPayload?: string },
+  booking: { id: string; totalAmount: number; guestEmail: string }
+): string | null {
+  if (!data.currency || data.currency.toUpperCase() !== "NGN") {
+    return `currency ${data.currency || "missing"}`;
+  }
+  if (Math.abs(Number(data.paidAmountNaira) - Number(booking.totalAmount)) > 1) {
+    return `amount ${data.paidAmountNaira} != ${booking.totalAmount}`;
+  }
+  if (!data.rawPayload) return null;
+  try {
+    const parsed = JSON.parse(data.rawPayload);
+    const dataNode = parsed?.data && typeof parsed.data === "object" ? parsed.data : parsed;
+    const meta = dataNode?.metadata || parsed?.metadata;
+    const metaBookingId = meta?.bookingId || meta?.booking_id;
+    if (metaBookingId && String(metaBookingId) !== booking.id) {
+      return `metadata booking ${metaBookingId}`;
+    }
+    const email = dataNode?.customer?.email || parsed?.customer?.email;
+    if (
+      email &&
+      String(email).toLowerCase() !== String(booking.guestEmail || "").toLowerCase()
+    ) {
+      return "customer email does not match booking guest";
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function publicPaymentBooking(booking: any, property?: any) {
+  return {
+    id: booking.id,
+    referenceCode: booking.referenceCode,
+    status: booking.status,
+    bookingStatus: booking.status,
+    checkInDate: booking.checkInDate,
+    checkOutDate: booking.checkOutDate,
+    numberOfNights: booking.numberOfNights,
+    totalAmount: booking.totalAmount,
+    currency: booking.currency,
+    paymentDeadlineAt: booking.paymentDeadlineAt,
+    cancellationReason: booking.cancellationReason,
+    guestFirstName: booking.guestFirstName,
+    contactAvailable: booking.status === "CONFIRMED" || booking.status === "COMPLETED",
+    property: property
+      ? {
+          id: property.id,
+          title: property.title,
+          city: property.city,
+          neighborhood: property.neighborhood,
+          coverImage: property.coverImage,
+          slug: property.slug,
+        }
+      : undefined,
+  };
+}
 
 // ─── Initialize Booking Payment ───
 
@@ -211,8 +276,11 @@ export async function initializeBookingPayment(
     createdAt: new Date(),
   });
 
-  // 4. Initialize with Paystack if secret key is configured
-  if (env.PAYSTACK_SECRET_KEY) {
+  // 4. Initialize with Paystack if a real secret is configured.
+  // Local test placeholders must not call api.paystack.co.
+  const paystackKey = env.PAYSTACK_SECRET_KEY || ""
+  const isLocalPlaceholderKey = paystackKey.includes("local_only_not_live")
+  if (paystackKey && !isLocalPlaceholderKey) {
     try {
       const res = await fetch("https://api.paystack.co/transaction/initialize", {
         method: "POST",
@@ -266,7 +334,16 @@ export async function initializeBookingPayment(
     }
   }
 
-  // Fallback for development if no key
+  // Dev/test only — never invent a successful Paystack session in production
+  if (!canUsePaystackDevMocks()) {
+    return {
+      success: false,
+      reference: paymentRef,
+      gatewayProvider: "PAYSTACK",
+      error: paystackNotConfiguredError(),
+    };
+  }
+
   return {
     success: true,
     reference: paymentRef,
@@ -284,7 +361,15 @@ export async function processSuccessfulPayment(data: {
   currency: string;
   method?: string;
   rawPayload?: string;
-}): Promise<{ success: boolean; message: string; booking?: any }> {
+}): Promise<{
+  success: boolean;
+  message: string;
+  booking?: any;
+  bookingConfirmed?: boolean;
+  reconciliationRequired?: boolean;
+  resolutionPending?: boolean;
+  automaticPayout?: unknown;
+}> {
   const db = getDb();
 
   // 1. Locate payment record
@@ -309,49 +394,11 @@ export async function processSuccessfulPayment(data: {
     throw new Error(`Associated booking ${payment.bookingId} not found.`);
   }
 
-  // 3. IDEMPOTENCY CHECK: If already confirmed, exit safely without duplicating actions
-  if (payment.status === "SUCCESS" && booking.status === "CONFIRMED") {
-    return {
-      success: true,
-      message: "Payment and booking already processed successfully (idempotent).",
-      booking,
-    };
-  }
-
-  // Late Paystack success after cancel/expire: record payment, flag recon/refund, no confirm/earnings
-  if (
-    booking.status === "CANCELLED" ||
-    booking.status === "COMPLETED" ||
-    (booking.status === "PAYMENT_PENDING" &&
-      booking.paymentDeadlineAt &&
-      new Date(booking.paymentDeadlineAt).getTime() <= Date.now())
-  ) {
-    return await recordLatePaymentForReconciliation({
-      payment,
-      booking,
-      data,
-    });
-  }
-
-  if (booking.status !== "PAYMENT_PENDING") {
-    throw new Error(
-      `Cannot confirm payment for booking in status ${booking.status}. Expected PAYMENT_PENDING.`
-    );
-  }
-
-  // 4. Validate Amount and Currency
-  if (data.currency.toUpperCase() !== "NGN") {
-    throw new Error(`Unexpected transaction currency: ${data.currency}. Expected NGN.`);
-  }
-
-  if (Math.abs(data.paidAmountNaira - booking.totalAmount) > 1) {
-    throw new Error(
-      `Payment amount mismatch! Expected ₦${booking.totalAmount}, received ₦${data.paidAmountNaira}.`
-    );
-  }
-
   let confirmedBooking = booking;
   let latePaymentRace = false;
+  let idempotentAlready = false;
+  let associationMismatch = false;
+  let duplicateCharge = false;
 
   const [property] = await db
     .select()
@@ -359,9 +406,154 @@ export async function processSuccessfulPayment(data: {
     .where(eq(schema.properties.id, booking.propertyId))
     .limit(1);
 
-  // 5-7. Transaction-safe Payment Confirmation & Host Earnings Snapshot
+  // 5-7. Row-locked confirmation. A concurrent success that already confirmed
+  // the stay is idempotent — it must not open a late-payment refund.
   await db.transaction(async (tx) => {
-    // 5. Update Payment Record
+    const [lockedPayment] = await tx
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.id, payment.id))
+      .limit(1)
+      .for("update");
+
+    const [lockedBooking] = await tx
+      .select()
+      .from(schema.bookings)
+      .where(eq(schema.bookings.id, booking.id))
+      .limit(1)
+      .for("update");
+
+    if (!lockedPayment || !lockedBooking) {
+      throw new Error("Payment or booking disappeared during confirmation.");
+    }
+
+    const association = paymentAssociationProblem(data, lockedBooking);
+    const deadlinePassed =
+      !!lockedBooking.paymentDeadlineAt &&
+      new Date(lockedBooking.paymentDeadlineAt).getTime() <= Date.now();
+
+    const ensureRefund = async (reason: string, notes: string) => {
+      const [existingRefund] = await tx
+        .select({ id: schema.refunds.id })
+        .from(schema.refunds)
+        .where(and(eq(schema.refunds.bookingId, lockedBooking.id), eq(schema.refunds.reason, reason)))
+        .limit(1);
+      if (existingRefund) return;
+      const fee =
+        lockedBooking.paystackFeeAmount && lockedBooking.paystackFeeAmount > 0
+          ? lockedBooking.paystackFeeAmount
+          : 0;
+      const refundable = Math.max(0, data.paidAmountNaira - fee);
+      await tx.insert(schema.refunds).values({
+        id: `ref_late_${crypto.randomUUID()}`,
+        bookingId: lockedBooking.id,
+        guestId: lockedBooking.guestId,
+        grossPaid: data.paidAmountNaira,
+        nonRefundableProcessingFee: fee,
+        refundableAmount: refundable,
+        currency: "NGN",
+        status: "REQUESTED",
+        reason,
+        adminNotes: notes,
+      });
+    };
+
+    const markPaymentCaptured = async (note: string) => {
+      await tx
+        .update(schema.payments)
+        .set({
+          status: "SUCCESS",
+          gatewayReference: data.gatewayReference || data.reference,
+          method: data.method || "CARD",
+          paidAt: new Date(),
+          rawPayload: `${data.rawPayload || ""}\n${note}`,
+        })
+        .where(eq(schema.payments.id, lockedPayment.id));
+    };
+
+    if (
+      lockedPayment.status === "SUCCESS" &&
+      lockedBooking.status === "CONFIRMED" &&
+      !association
+    ) {
+      idempotentAlready = true;
+      confirmedBooking = lockedBooking;
+      return;
+    }
+
+    if (lockedPayment.status === "SUCCESS" && lockedBooking.status !== "CONFIRMED") {
+      latePaymentRace = lockedBooking.status !== "PAYMENT_PENDING" || deadlinePassed;
+      associationMismatch = !!association;
+      confirmedBooking = lockedBooking;
+      await ensureRefund(
+        association ? "PAYMENT_ASSOCIATION_MISMATCH" : "LATE_PAYMENT_AFTER_CANCEL_OR_EXPIRE",
+        "Captured payment replay. Booking was not confirmed by this call."
+      );
+      return;
+    }
+
+    if (association) {
+      await markPaymentCaptured(`[ILE_ASSOCIATION_MISMATCH] ${association}`);
+      await ensureRefund(
+        "PAYMENT_ASSOCIATION_MISMATCH",
+        `Paystack success did not match booking/guest/amount (${association}). Booking was not confirmed.`
+      );
+      associationMismatch = true;
+      confirmedBooking = lockedBooking;
+      return;
+    }
+
+    if (lockedBooking.status !== "PAYMENT_PENDING" || deadlinePassed) {
+      if (lockedBooking.status === "CONFIRMED") {
+        await markPaymentCaptured("[ILE_DUPLICATE_CHARGE_AFTER_CONFIRM]");
+        await ensureRefund(
+          "DUPLICATE_PAYMENT_AFTER_CONFIRM",
+          "Another successful charge arrived after the booking was already CONFIRMED. Do not post earnings again."
+        );
+        duplicateCharge = true;
+        confirmedBooking = lockedBooking;
+        return;
+      }
+
+      await markPaymentCaptured(
+        "[ILE_LATE_PAYMENT_RECONCILIATION] Booking was cancelled/expired; not confirmed."
+      );
+      if (lockedBooking.status === "PAYMENT_PENDING") {
+        const [cancelled] = await tx
+          .update(schema.bookings)
+          .set({
+            status: "CANCELLED",
+            cancellationReason: "PAYMENT_WINDOW_EXPIRED",
+            cancelledAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(schema.bookings.id, lockedBooking.id), eq(schema.bookings.status, "PAYMENT_PENDING"))
+          )
+          .returning();
+        confirmedBooking = cancelled || lockedBooking;
+      } else {
+        confirmedBooking = lockedBooking;
+      }
+      await tx
+        .delete(schema.availabilityBlocks)
+        .where(eq(schema.availabilityBlocks.bookingId, lockedBooking.id));
+      await tx
+        .update(schema.hostEarnings)
+        .set({ status: "CANCELLED" })
+        .where(eq(schema.hostEarnings.bookingId, lockedBooking.id));
+      await tx
+        .update(schema.payouts)
+        .set({ status: "CANCELLED", updatedAt: new Date() })
+        .where(eq(schema.payouts.bookingId, lockedBooking.id));
+      await ensureRefund(
+        "LATE_PAYMENT_AFTER_CANCEL_OR_EXPIRE",
+        "Paystack success arrived after cancel/expire. Auto-refund not executed here. No host earnings."
+      );
+      latePaymentRace = true;
+      return;
+    }
+
     await tx
       .update(schema.payments)
       .set({
@@ -371,49 +563,36 @@ export async function processSuccessfulPayment(data: {
         paidAt: new Date(),
         rawPayload: data.rawPayload || null,
       })
-      .where(eq(schema.payments.id, payment.id));
+      .where(eq(schema.payments.id, lockedPayment.id));
 
-    // 6. Confirm Booking only from PAYMENT_PENDING (conditional — no silent revive)
     const [confirmed] = await tx
       .update(schema.bookings)
       .set({
         status: "CONFIRMED",
         updatedAt: new Date(),
       })
-      .where(and(eq(schema.bookings.id, booking.id), eq(schema.bookings.status, "PAYMENT_PENDING")))
+      .where(
+        and(eq(schema.bookings.id, lockedBooking.id), eq(schema.bookings.status, "PAYMENT_PENDING"))
+      )
       .returning();
 
     if (!confirmed) {
-      // Race lost to cancel/expire: keep payment SUCCESS recorded above, flag recon, no earnings
-      const [existingRefund] = await tx
-        .select({ id: schema.refunds.id })
-        .from(schema.refunds)
-        .where(eq(schema.refunds.bookingId, booking.id))
+      const [current] = await tx
+        .select()
+        .from(schema.bookings)
+        .where(eq(schema.bookings.id, lockedBooking.id))
         .limit(1);
-
-      if (!existingRefund) {
-        const fee =
-          booking.paystackFeeAmount && booking.paystackFeeAmount > 0
-            ? booking.paystackFeeAmount
-            : 0;
-        const refundable = Math.max(0, data.paidAmountNaira - fee);
-        await tx.insert(schema.refunds).values({
-          id: `ref_late_${crypto.randomUUID()}`,
-          bookingId: booking.id,
-          guestId: booking.guestId,
-          grossPaid: data.paidAmountNaira,
-          nonRefundableProcessingFee: fee,
-          refundableAmount: refundable,
-          currency: "NGN",
-          status: "REQUESTED",
-          reason: "LATE_PAYMENT_AFTER_CANCEL_OR_EXPIRE",
-          adminNotes:
-            "Paystack reported success after booking left PAYMENT_PENDING. Do not confirm or create host earnings. Admin must reconcile/refund.",
-        });
+      if (current?.status === "CONFIRMED") {
+        idempotentAlready = true;
+        confirmedBooking = current;
+        return;
       }
-
       latePaymentRace = true;
-      confirmedBooking = booking;
+      confirmedBooking = current || lockedBooking;
+      await ensureRefund(
+        "LATE_PAYMENT_AFTER_CANCEL_OR_EXPIRE",
+        "Conditional confirm matched no row and booking was not CONFIRMED. No earnings posted."
+      );
       return;
     }
     confirmedBooking = confirmed;
@@ -459,14 +638,19 @@ export async function processSuccessfulPayment(data: {
         (booking.nightlyPrice * booking.numberOfNights) ||
         (booking.totalAmount - (booking.serviceFee || 0));
 
-      const commissionRate = (booking.hostCommissionPct || 10) / 100;
-      const commissionAmount =
-        booking.hostCommissionAmount && booking.hostCommissionAmount > 0
+      const snapshotBalances =
+        typeof booking.hostNetAmount === "number" &&
+        typeof booking.hostCommissionAmount === "number" &&
+        booking.hostNetAmount + booking.hostCommissionAmount === accommodationSubtotal;
+      const commissionAmount = snapshotBalances
+        ? booking.hostCommissionAmount || 0
+        : booking.hostCommissionAmount && booking.hostCommissionAmount > 0
           ? booking.hostCommissionAmount
-          : Math.round(accommodationSubtotal * commissionRate);
+          : Math.max(0, accommodationSubtotal - (booking.hostNetAmount || 0));
 
-      const netAmount =
-        booking.hostNetAmount && booking.hostNetAmount > 0
+      const netAmount = snapshotBalances
+        ? booking.hostNetAmount || 0
+        : booking.hostNetAmount && booking.hostNetAmount > 0
           ? booking.hostNetAmount
           : accommodationSubtotal - commissionAmount;
 
@@ -518,36 +702,55 @@ export async function processSuccessfulPayment(data: {
     }
   });
 
-  if (latePaymentRace) {
-    notifyLatePaymentReconciliation({
-      booking: confirmedBooking || booking,
-      propertyTitle: property?.title || "Ilé Property",
-      paidAmountNaira: data.paidAmountNaira,
-      currency: data.currency || booking.currency,
-    });
+  if (idempotentAlready) {
     return {
       success: true,
-      message:
-        "Payment recorded but booking was no longer payable. Flagged for admin reconciliation/refund. Booking was NOT confirmed and no host earnings were created.",
-      booking: confirmedBooking,
+      message: "Payment and booking already processed successfully (idempotent).",
+      booking: publicPaymentBooking(confirmedBooking, property),
+      bookingConfirmed: true,
+      reconciliationRequired: false,
+    } as any;
+  }
+
+  if (latePaymentRace || associationMismatch || duplicateCharge) {
+    if (latePaymentRace || duplicateCharge) {
+      notifyLatePaymentReconciliation({
+        booking: confirmedBooking || booking,
+        propertyTitle: property?.title || "Ilé Property",
+        paidAmountNaira: data.paidAmountNaira,
+        currency: data.currency || booking.currency,
+      });
+    } else {
+      recordBookingAudit({
+        action: "PAYMENT_ASSOCIATION_MISMATCH",
+        bookingId: booking.id,
+        details: {
+          reference: data.reference,
+          amount: data.paidAmountNaira,
+          bookingConfirmed: false,
+        },
+      });
+    }
+    const stayConfirmed = duplicateCharge || confirmedBooking?.status === "CONFIRMED";
+    return {
+      success: true,
+      message: associationMismatch
+        ? "Payment did not match this booking, guest, or amount. The stay was not confirmed."
+        : duplicateCharge
+          ? "Additional charge recorded after the stay was already confirmed. Queued for reconciliation. Booking was not changed."
+          : "Payment recorded but booking was no longer payable. Flagged for admin reconciliation/refund. Booking was NOT confirmed and no host earnings were created.",
+      booking: publicPaymentBooking(confirmedBooking || booking, property),
       reconciliationRequired: true,
-      bookingConfirmed: false,
+      bookingConfirmed: stayConfirmed,
       resolutionPending: true,
     } as any;
   }
 
-  // 8. Fetch Quarantined Details & Send Emails via Resend
-  let privateDetails: any = null;
+  // 8. Confirmation emails (stay confirmed independently of any pass product)
   try {
-    const [fetchedPrivateDetails] = await db
-      .select()
-      .from(schema.propertyPrivateDetails)
-      .where(eq(schema.propertyPrivateDetails.propertyId, booking.propertyId))
-      .limit(1);
-    privateDetails = fetchedPrivateDetails;
-
     const [host] = await db
       .select({
+        id: schema.users.id,
         phone: schema.users.phone,
         firstName: schema.users.firstName,
         lastName: schema.users.lastName,
@@ -560,17 +763,8 @@ export async function processSuccessfulPayment(data: {
 
     const propTitle = property?.title || "Shortlet Stay";
     const guestName = `${booking.guestFirstName || ""} ${booking.guestLastName || ""}`.trim() || "Valued Guest";
-    const hostFullName = host
-      ? `${host.firstName} ${host.lastName}`.trim()
-      : privateDetails?.contactName || "Designated Ilé Stay Guide";
-    const hostPhone = privateDetails?.contactPhone || host?.phone || "+234 912 202 904";
-    const exactAddress = privateDetails?.exactAddress || `${property?.neighborhood || "Maitama"}, ${property?.city || "Abuja"}`;
-    const unitNumber = privateDetails?.unitNumber || undefined;
-    const gateCode = privateDetails?.accessGateCode || "GATE-CLEARED";
     const city = property?.city || "Abuja";
     const state = property?.state || "FCT";
-    const latitude = property?.latitude || undefined;
-    const longitude = property?.longitude || undefined;
 
     // A. Confirmation — NO exact address/host contact (CONFIRMED only)
     dispatchLifecycleEmail(
@@ -613,55 +807,23 @@ export async function processSuccessfulPayment(data: {
         paidAt: payment.paidAt || new Date(),
         bookingStatus: "CONFIRMED",
         accessToken: booking.accessToken,
-      })
+      }),
+      {
+        userId: booking.guestId,
+        phone: booking.guestPhone,
+        inboxTitle: "Payment confirmed — stay booked!",
+        inboxBody: `Your stay at ${propTitle} (${booking.referenceCode}) is confirmed. Check-in on ${booking.checkInDate}.`,
+        deepLink: `/trips`,
+        smsMessage: booking.guestPhone
+          ? `Ilé: Payment confirmed for ${booking.referenceCode} at ${propTitle}. Your stay is confirmed!`
+          : undefined,
+      }
     );
 
-    // B. Arrival guide with private address — CONFIRMED only
-    dispatchLifecycleEmail(
-      booking.id,
-      LIFECYCLE_EMAIL_EVENT.GUEST_ARRIVAL_GUIDE,
-      "guest",
-      bookingAccessPassEmail({
-        guestName,
-        guestEmail: booking.guestEmail,
-        propertyTitle: propTitle,
-        referenceCode: booking.referenceCode,
-        checkIn: booking.checkInDate,
-        checkOut: booking.checkOutDate,
-        address: exactAddress,
-        unitNumber,
-        neighborhood: property?.neighborhood || undefined,
-        city,
-        state,
-        latitude,
-        longitude,
-        accessInstructions: privateDetails?.checkInInstructions || "Present your reservation reference to estate security guards for swift clearance.",
-        accessGateCode: gateCode,
-        propertyImage: property?.coverImage || undefined,
-        propertyType: property?.propertyType || "Serviced Residence",
-        spaceType: property?.spaceType || "Entire place",
-        propertyTagline: property?.tagline || undefined,
-        propertyDescription: property?.description || undefined,
-        bedrooms: property?.bedrooms,
-        bathrooms: property?.bathrooms,
-        guestCount: booking.guestCount || 1,
-        numberOfNights: booking.numberOfNights,
-        hostName: hostFullName,
-        hostPhone,
-        hostEmail: privateDetails?.contactEmail || host?.email || undefined,
-        hostAvatar: host?.avatarUrl || undefined,
-        hostRole: "Your accommodation host & arrival concierge",
-        parkingDescription: property?.parkingDescription || undefined,
-        powerDescription: property?.powerDescription || property?.powerType || undefined,
-        securityDescription: property?.securityDescription || undefined,
-        waterDescription: property?.waterDescription || undefined,
-        houseRules: privateDetails?.houseRulesPrivate || undefined,
-        accessToken: booking.accessToken,
-      })
-    );
+    // Confirmation email above is sufficient for a paid stay.
 
-    // C. Host confirmed notification
-    if (host?.email) {
+    // B. Host confirmed notification
+    if (host) {
       const gross =
         booking.accommodationSubtotal ||
         (booking.nightlyPrice * booking.numberOfNights) ||
@@ -682,7 +844,7 @@ export async function processSuccessfulPayment(data: {
         "host",
         hostBookingConfirmedEmail({
           hostName: host.firstName || "Host",
-          hostEmail: host.email,
+          hostEmail: host.email || "",
           propertyTitle: propTitle,
           referenceCode: booking.referenceCode,
           guestName,
@@ -696,7 +858,17 @@ export async function processSuccessfulPayment(data: {
           commissionAmount: commission,
           netPayout: net,
           currency: booking.currency || "NGN",
-        })
+        }),
+        {
+          userId: host.id,
+          phone: host.phone,
+          inboxTitle: "Reservation confirmed & paid",
+          inboxBody: `${guestName} confirmed payment for ${propTitle} (${booking.referenceCode}). Net payout: ₦${net.toLocaleString()}.`,
+          deepLink: `/host/dashboard`,
+          smsMessage: host.phone
+            ? `Ilé: Confirmed booking ${booking.referenceCode} for ${propTitle} by ${guestName}. Payout: ₦${net.toLocaleString()}.`
+            : undefined,
+        }
       );
     }
 
@@ -736,31 +908,9 @@ export async function processSuccessfulPayment(data: {
     success: true,
     message: "Payment verified and booking confirmed successfully.",
     automaticPayout,
-    booking: {
-      ...confirmedBooking,
-      property: property
-        ? {
-            id: property.id,
-            title: property.title,
-            city: property.city,
-            neighborhood: property.neighborhood,
-            coverImage: property.coverImage,
-            slug: property.slug,
-          }
-        : undefined,
-      privateDetails: privateDetails
-        ? {
-            bookingReference: confirmedBooking.referenceCode,
-            exactAddress: privateDetails.exactAddress,
-            unitNumber: privateDetails.unitNumber || undefined,
-            contactName: privateDetails.contactName,
-            contactPhone: privateDetails.contactPhone,
-            contactEmail: privateDetails.contactEmail,
-            checkInInstructions: privateDetails.checkInInstructions || undefined,
-            accessGateCode: privateDetails.accessGateCode || undefined,
-          }
-        : undefined,
-    },
+    bookingConfirmed: true,
+    reconciliationRequired: false,
+    booking: publicPaymentBooking(confirmedBooking, property),
   };
 }
 
@@ -769,77 +919,102 @@ export async function processSuccessfulPayment(data: {
 export async function processFailedPayment(data: {
   reference: string;
   reason?: string;
-}): Promise<{ processed: boolean; message: string }> {
+  outcome?: "failed" | "abandoned";
+}): Promise<{ processed: boolean; message: string; bookingStatus?: string }> {
   const db = getDb();
-  const [payment] = await db
-    .select()
-    .from(schema.payments)
-    .where(eq(schema.payments.reference, data.reference))
-    .limit(1);
+  const outcome = data.outcome === "abandoned" ? "ABANDONED" : "FAILED";
 
-  if (!payment) return { processed: false, message: "Payment not found" };
+  return await db.transaction(async (tx) => {
+    const [payment] = await tx
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.reference, data.reference))
+      .limit(1)
+      .for("update");
 
-  // Mark payment as FAILED
-  await db
-    .update(schema.payments)
-    .set({ status: "FAILED" })
-    .where(eq(schema.payments.id, payment.id));
+    if (!payment) return { processed: false, message: "Payment not found" };
 
-  const [booking] = await db
-    .select()
-    .from(schema.bookings)
-    .where(eq(schema.bookings.id, payment.bookingId))
-    .limit(1);
+    const [booking] = await tx
+      .select()
+      .from(schema.bookings)
+      .where(eq(schema.bookings.id, payment.bookingId))
+      .limit(1)
+      .for("update");
 
-  if (booking && booking.status !== "CONFIRMED" && booking.status !== "CANCELLED") {
-    // Cancel the booking and release availability blocks
-    await db
-      .update(schema.bookings)
-      .set({
-        status: "CANCELLED",
-        cancellationReason: data.reason || "Payment was not completed.",
-        cancelledAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.bookings.id, booking.id));
+    // A captured or confirmed stay must not be cancelled by a later failed/abandoned event.
+    if (payment.status === "SUCCESS" || booking?.status === "CONFIRMED" || booking?.status === "COMPLETED") {
+      return {
+        processed: true,
+        message: "Ignored failed/abandoned event because payment or booking is already successful.",
+        bookingStatus: booking?.status,
+      };
+    }
 
-    // Release availability blocks so dates return to live calendar
-    await db
-      .delete(schema.availabilityBlocks)
-      .where(eq(schema.availabilityBlocks.bookingId, booking.id));
+    if (payment.status !== "SUCCESS") {
+      await tx
+        .update(schema.payments)
+        .set({
+          status: outcome,
+          rawPayload: data.reason || null,
+        })
+        .where(eq(schema.payments.id, payment.id));
+    }
 
-    // Neutralize any pending host earnings & payouts
-    await db
-      .update(schema.hostEarnings)
-      .set({ status: "CANCELLED" })
-      .where(eq(schema.hostEarnings.bookingId, booking.id));
+    // Leave PAYMENT_PENDING inventory in place until the payment deadline.
+    // The guest may retry inside the window. Expiry releases the hold.
+    if (booking && booking.guestId && booking.status !== "CANCELLED") {
+      const [property] = await tx
+        .select({ title: schema.properties.title })
+        .from(schema.properties)
+        .where(eq(schema.properties.id, booking.propertyId))
+        .limit(1);
 
-    await db
-      .update(schema.payouts)
-      .set({ status: "CANCELLED", updatedAt: new Date() })
-      .where(eq(schema.payouts.bookingId, booking.id));
-
-    const [property] = await db
-      .select({ title: schema.properties.title })
-      .from(schema.properties)
-      .where(eq(schema.properties.id, booking.propertyId))
-      .limit(1);
-
-    // Notify guest of payment failure
-    sendEmail(
-      bookingPaymentFailedEmail({
+      const reason = data.reason || (outcome === "ABANDONED" ? "Payment was abandoned." : "Payment authorization was unsuccessful.");
+      const emailPayload = bookingPaymentFailedEmail({
         guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
         guestEmail: booking.guestEmail,
         propertyTitle: property?.title || "Ilé Property",
         referenceCode: booking.referenceCode,
         amount: payment.amount,
         currency: payment.currency,
-        reason: data.reason || "Payment authorization was unsuccessful.",
-      })
-    ).catch((err) => console.warn("[Payments] Failed to send payment failed email:", err));
-  }
+        reason,
+      });
 
-  return { processed: true, message: "Payment marked failed, booking cancelled, and dates released." };
+      notifyUserEvent({
+        userId: booking.guestId,
+        event: "GUEST_PAYMENT_FAILED",
+        entityType: "booking",
+        entityId: booking.id,
+        category: "payment",
+        channels: {
+          category: "payment",
+          email: emailPayload,
+          inbox: {
+            userId: booking.guestId,
+            title: outcome === "ABANDONED" ? "Payment not finished" : "Payment unsuccessful",
+            body: `Payment for ${property?.title || "your stay"} (${booking.referenceCode}) was not completed. You can retry until the payment deadline.`,
+            deepLink: `/trips`,
+          },
+          sms: booking.guestPhone
+            ? {
+                to: booking.guestPhone,
+                message: `Ilé: Payment for ${booking.referenceCode} was not completed. You can retry in the app until the deadline.`,
+              }
+            : undefined,
+          push: true,
+        },
+      });
+    }
+
+    return {
+      processed: true,
+      message:
+        "Payment attempt recorded as " +
+        outcome +
+        ". Booking status and inventory were not changed by this failure.",
+      bookingStatus: booking?.status,
+    };
+  });
 }
 
 // ─── Expire Due Host/Payment Windows (absolute deadlines) ───
@@ -874,7 +1049,14 @@ async function recordLatePaymentForReconciliation(params: {
     method?: string;
     rawPayload?: string;
   };
-}): Promise<{ success: boolean; message: string; booking?: any; reconciliationRequired?: boolean }> {
+}): Promise<{
+  success: boolean;
+  message: string;
+  booking?: any;
+  bookingConfirmed?: boolean;
+  reconciliationRequired?: boolean;
+  resolutionPending?: boolean;
+}> {
   const { payment, booking, data } = params;
   const db = getDb();
 
@@ -1058,17 +1240,39 @@ export async function handlePaystackWebhook(
   // 4. Record event receipt in durable webhook audit store
   const webhookRecordId = existingEvent?.id || `wevt_${crypto.randomUUID()}`;
   if (!existingEvent) {
-    await db.insert(schema.webhookEvents).values({
-      id: webhookRecordId,
-      eventId: rawEventId,
-      eventType,
-      gatewayProvider: "PAYSTACK",
-      payload: rawBody,
-      signature,
-      status: "RECEIVED",
-      attempts: 1,
-      createdAt: new Date(),
-    });
+    try {
+      await db.insert(schema.webhookEvents).values({
+        id: webhookRecordId,
+        eventId: rawEventId,
+        eventType,
+        gatewayProvider: "PAYSTACK",
+        payload: rawBody,
+        signature,
+        status: "RECEIVED",
+        attempts: 1,
+        createdAt: new Date(),
+      });
+    } catch (insertErr: any) {
+      const duplicate =
+        insertErr?.code === "23505" || String(insertErr?.message || "").toLowerCase().includes("duplicate");
+      if (!duplicate) throw insertErr;
+      const [raced] = await db
+        .select()
+        .from(schema.webhookEvents)
+        .where(
+          and(
+            eq(schema.webhookEvents.eventId, rawEventId),
+            eq(schema.webhookEvents.gatewayProvider, "PAYSTACK")
+          )
+        )
+        .limit(1);
+      if (raced?.status === "PROCESSED") {
+        return {
+          processed: true,
+          message: `Webhook event ${rawEventId} already processed (idempotent).`,
+        };
+      }
+    }
   } else {
     await db
       .update(schema.webhookEvents)
@@ -1283,27 +1487,38 @@ export async function handlePaystackWebhook(
 
       if (payout) {
         await db.transaction(async (tx) => {
+          const reversalRef = `payout:${payout.id}:reversal`;
+          const [existingReversal] = await tx
+            .select({ id: schema.ledgerJournals.id })
+            .from(schema.ledgerJournals)
+            .where(
+              and(
+                eq(schema.ledgerJournals.reference, reversalRef),
+                eq(schema.ledgerJournals.eventType, "PAYOUT_REVERSED")
+              )
+            )
+            .limit(1);
+          if (!existingReversal && payout.status === "PAID") {
+            await LedgerService.postJournalEntry(tx, {
+              reference: reversalRef,
+              eventType: "PAYOUT_REVERSED",
+              narration: `Paystack transfer reversed for payout #${payout.id} (Ref: ${transferRef}). Funds returned to host payable.`,
+              createdById: null,
+              entries: [
+                { accountCode: "1020", entryType: "DEBIT", amount: payout.amount },
+                { accountCode: "2020", entryType: "CREDIT", amount: payout.amount },
+              ],
+            });
+          }
           await tx
             .update(schema.payouts)
             .set({
-              status: "REVERSED",
+              status: "READY_FOR_PAYOUT",
               transferStatus: "REVERSED",
               transferFailureReason: txData.reason || "Paystack transfer reversed by bank switch",
               updatedAt: new Date(),
             })
             .where(eq(schema.payouts.id, payout.id));
-
-          // Post reversing ledger journal: Dr Operating Bank 1020, Cr Host Settlement Payable 2020
-          await LedgerService.postJournalEntry(tx, {
-            reference: `REV_${payout.id}_${Date.now()}`,
-            eventType: "PAYOUT_REVERSED",
-            narration: `Paystack transfer reversed for payout #${payout.id} (Ref: ${transferRef})`,
-            createdById: null,
-            entries: [
-              { accountCode: "1020", entryType: "DEBIT", amount: payout.amount },
-              { accountCode: "2020", entryType: "CREDIT", amount: payout.amount },
-            ],
-          });
         });
 
         console.warn(`[Payments] Payout ${payout.id} transfer reversed. Ledger adjusted.`);
@@ -1326,12 +1541,15 @@ export async function handlePaystackWebhook(
         await db
           .update(schema.refunds)
           .set({
-            status: "PROCESSED",
-            processedAt: new Date(),
             paystackRefundId,
             updatedAt: new Date(),
           })
-          .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+          .where(
+            and(
+              eq(schema.refunds.paystackRefundId, paystackRefundId),
+              sql`${schema.refunds.status} IN ('PENDING', 'RECONCILIATION_REQUIRED')`
+            )
+          );
       }
 
       if (refundData.transaction?.reference) {
@@ -1342,11 +1560,6 @@ export async function handlePaystackWebhook(
           .limit(1);
 
         if (payment) {
-          await db
-            .update(schema.bookings)
-            .set({ status: "REFUNDED", updatedAt: new Date() })
-            .where(eq(schema.bookings.id, payment.bookingId));
-
           const [booking] = await db
             .select()
             .from(schema.bookings)
@@ -1393,11 +1606,16 @@ export async function handlePaystackWebhook(
         await db
           .update(schema.refunds)
           .set({
-            status: "FAILED",
-            adminNotes: `Paystack refund failed: ${refundData.gateway_response || "Unknown reason"}`,
+            status: "RECONCILIATION_REQUIRED",
+            adminNotes: `Paystack refund failed webhook: ${refundData.gateway_response || "Unknown reason"}. Reservation was not auto-released.`,
             updatedAt: new Date(),
           })
-          .where(eq(schema.refunds.paystackRefundId, paystackRefundId));
+          .where(
+            and(
+              eq(schema.refunds.paystackRefundId, paystackRefundId),
+              eq(schema.refunds.status, "PENDING")
+            )
+          );
       }
 
       await db
@@ -1430,17 +1648,76 @@ export async function handlePaystackWebhook(
 
 export async function verifyPayment(reference: string): Promise<PaymentVerifyResult> {
   if (!env.PAYSTACK_SECRET_KEY) {
-    // Development fallback
+    if (!canUsePaystackDevMocks()) {
+      return {
+        verified: false,
+        status: "failed",
+        reference,
+        amount: 0,
+        currency: "NGN",
+        method: "UNKNOWN",
+        gatewayReference: "",
+        gatewayProvider: "PAYSTACK",
+        paidAt: new Date(),
+        error: paystackNotConfiguredError(),
+      };
+    }
+    // Dev/test only: still settle through the same booking lock. Never report
+    // verified=true without a stored payment row.
+    const db = getDb();
+    const [payment] = await db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.reference, reference))
+      .limit(1);
+    if (!payment) {
+      return {
+        verified: false,
+        status: "unknown",
+        reference,
+        amount: 0,
+        currency: "NGN",
+        method: "MOCK",
+        gatewayReference: "",
+        gatewayProvider: "MOCK_DEV",
+        paidAt: new Date(),
+        error: "No payment record for this reference.",
+      };
+    }
+    const [bookingRow] = await db
+      .select()
+      .from(schema.bookings)
+      .where(eq(schema.bookings.id, payment.bookingId))
+      .limit(1);
+    const processResult = await processSuccessfulPayment({
+      reference,
+      gatewayReference: `MOCK-${payment.id}`,
+      paidAmountNaira: payment.amount,
+      currency: payment.currency || "NGN",
+      method: "MOCK",
+      rawPayload: JSON.stringify({
+        mock: true,
+        data: {
+          metadata: { bookingId: payment.bookingId },
+          customer: { email: bookingRow?.guestEmail },
+        },
+      }),
+    });
+    const reconciliationRequired = !!(processResult as any).reconciliationRequired;
     return {
       verified: true,
       status: "success",
       reference,
-      amount: 0,
-      currency: "NGN",
+      amount: payment.amount,
+      currency: payment.currency || "NGN",
       method: "MOCK",
-      gatewayReference: `MOCK-${Date.now()}`,
+      gatewayReference: `MOCK-${payment.id}`,
       gatewayProvider: "MOCK_DEV",
       paidAt: new Date(),
+      booking: processResult.booking,
+      reconciliationRequired,
+      bookingConfirmed: (processResult as any).bookingConfirmed === true,
+      resolutionPending: reconciliationRequired,
     };
   }
 
@@ -1517,7 +1794,7 @@ export async function verifyPayment(reference: string): Promise<PaymentVerifyRes
       rawPayload: JSON.stringify(body),
       booking: processResult.booking,
       reconciliationRequired,
-      bookingConfirmed: !reconciliationRequired && processResult.booking?.status === "CONFIRMED",
+      bookingConfirmed: (processResult as any).bookingConfirmed === true,
       resolutionPending: reconciliationRequired,
     };
   } catch (err: any) {

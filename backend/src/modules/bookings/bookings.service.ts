@@ -12,7 +12,7 @@ import {
   DEFAULT_HOST_PAYOUT_PCT,
 } from "../../config/constants";
 import { parsePagination, paginatedResponse } from "../../lib/pagination";
-import { calculateFromGuestPrice } from "../pricing/pricing.service";
+import { getPlatformCommissionRate, resolveStayPricing } from "../pricing/pricing.service";
 import {
   bookingInitiatedEmail,
   bookingCancelledEmail,
@@ -27,10 +27,57 @@ import {
   dispatchLifecycleEmail,
   LIFECYCLE_EMAIL_EVENT,
 } from "../notifications/lifecycle-notify";
+import { notifyLifecycleEvent } from "../notifications/orchestrator";
+import { inboxService } from "../notifications/inbox.service";
 import { recordBookingAudit } from "../../lib/booking-audit";
+import { redactBookingFinance, presentGuestCreateResult } from "../../lib/guest-finance-redaction";
+import { getStayDetails } from "./stay-details";
+
+export { presentGuestCreateResult };
 
 const isActiveHoldStatus = (status: string | null | undefined): boolean =>
   !!status && (ACTIVE_HOLD_STATUSES as readonly string[]).includes(status);
+
+/**
+ * Full booking payload for the guest, host, admin, or access-token holder.
+ * An email match may see status only — never the access token, phone, or email.
+ */
+export function authorizeBookingView(
+  result: { booking: any; property: any; recovery?: any },
+  viewer: { userId?: string | null; role?: string | null; accessToken?: string | null; email?: string | null }
+) {
+  const booking = result.booking;
+  const hostId = result.property?.hostId;
+  const tokenOk = !!viewer.accessToken && viewer.accessToken === booking.accessToken;
+  const guestOk = !!viewer.userId && !!booking.guestId && viewer.userId === booking.guestId;
+  const hostOk = !!viewer.userId && !!hostId && viewer.userId === hostId;
+  const adminOk = viewer.role === "admin";
+  const emailOk =
+    !!viewer.email &&
+    !!booking.guestEmail &&
+    viewer.email.toLowerCase().trim() === String(booking.guestEmail).toLowerCase().trim();
+
+  if (!tokenOk && !guestOk && !hostOk && !adminOk && !emailOk) {
+    const err: any = new Error(
+      "Unauthorized access to booking details. Please log in or provide a valid access token."
+    );
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const full = tokenOk || guestOk || adminOk;
+  const audience = adminOk ? "admin" : hostOk && !guestOk ? "host" : "guest";
+  let safeBooking = redactBookingFinance({ ...booking }, audience);
+  if (!full) {
+    delete safeBooking.accessToken;
+    delete safeBooking.guestPhone;
+    delete safeBooking.guestEmail;
+    delete safeBooking.guestId;
+  } else if (hostOk && !guestOk && !adminOk && !tokenOk) {
+    delete safeBooking.accessToken;
+  }
+  return { ...result, booking: safeBooking };
+}
 
 const CreateBookingSchema = z.object({
   propertyId: z.string().min(1, "Property ID is required"),
@@ -276,20 +323,21 @@ export const bookingsService = {
         }
       } catch {}
 
-      const pricing = calculateFromGuestPrice(
-        property.pricePerNight,
+      const pricing = resolveStayPricing({
+        pricePerNight: property.pricePerNight,
+        hostBasePrice: property.hostBasePrice,
         nights,
-        commissionPct / 100,
-        property.hostBasePrice || undefined
-      );
+        commissionRate: commissionPct / 100,
+      });
 
       const pricePerNight = pricing.guestNightlyAccommodationPrice;
       const accommodationSubtotal = pricing.accommodationSubtotal;
       const paystackFee = pricing.paystackFee;
       const classicHostEarnings = pricing.hostEarnings;
-      // Host payout % applies to classic host earnings only — guest price unchanged; no double commission
-      const hostNetAmount = Math.round((classicHostEarnings * hostPayoutPct) / 100);
-      const hostCommissionAmount = accommodationSubtotal - hostNetAmount;
+      // Phase 2: host entitlement is 100% of host base. The payout-% haircut is snapshotted
+      // for audit only and is not applied (that haircut was a second cut on top of commission).
+      const hostNetAmount = classicHostEarnings;
+      const hostCommissionAmount = pricing.platformCommission;
       const totalAmount = pricing.totalGuestPayment;
       const hostResponseDeadlineAt = new Date(nowDate.getTime() + HOST_RESPONSE_WINDOW_SECONDS * 1000);
 
@@ -376,6 +424,21 @@ export const bookingsService = {
         }
       )
 
+      // Mandatory Transactional In-App Outbox: Persist guest notification directly in tx
+      if (session?.userId) {
+        const guestInboxKey = `booking:${booking.id}:${LIFECYCLE_EMAIL_EVENT.GUEST_REQUEST_SUBMITTED}:guest:inbox`;
+        await inboxService.upsertInboxItem({
+          userId: session.userId,
+          eventType: LIFECYCLE_EMAIL_EVENT.GUEST_REQUEST_SUBMITTED,
+          title: "Booking request sent",
+          body: `Your request for ${property.title} was sent to the host. Reference ${booking.referenceCode}.`,
+          entityType: "booking",
+          entityId: booking.id,
+          deepLink: `/trips`,
+          idempotencyKey: guestInboxKey,
+        }, tx);
+      }
+
       recordBookingAudit({
         action: "BOOKING_REQUEST_CREATED",
         bookingId: booking.id,
@@ -386,23 +449,36 @@ export const bookingsService = {
           propertyId: property.id,
           hostResponseDeadlineAt: hostResponseDeadlineAt.toISOString(),
         },
-      })
+      });
 
-      // Notify host (best-effort)
-      tx.select({
-        email: schema.users.email,
-        firstName: schema.users.firstName,
-      })
+      // Query host profile BEFORE committing/returning to guarantee reliable alerting
+      const [host] = await tx
+        .select({
+          id: schema.users.id,
+          email: schema.users.email,
+          firstName: schema.users.firstName,
+          phone: schema.users.phone,
+        })
         .from(schema.users)
         .where(eq(schema.users.id, property.hostId))
-        .limit(1)
-        .then(([host]) => {
-          if (!host?.email) return
-          dispatchLifecycleEmail(
-            booking.id,
-            LIFECYCLE_EMAIL_EVENT.HOST_REQUEST_RECEIVED,
-            "host",
-            hostBookingRequestEmail({
+        .limit(1);
+
+      if (host) {
+        // Mandatory Transactional In-App Outbox: Persist host notification directly in tx
+        const hostInboxKey = `booking:${booking.id}:${LIFECYCLE_EMAIL_EVENT.HOST_REQUEST_RECEIVED}:host:inbox`;
+        await inboxService.upsertInboxItem({
+          userId: property.hostId,
+          eventType: LIFECYCLE_EMAIL_EVENT.HOST_REQUEST_RECEIVED,
+          title: "New booking request",
+          body: `${booking.guestFirstName} requested ${property.title} (${booking.referenceCode}). Respond within 2 minutes.`,
+          entityType: "booking",
+          entityId: booking.id,
+          deepLink: `/host/dashboard`,
+          idempotencyKey: hostInboxKey,
+        }, tx);
+
+        const hostEmailPayload = host.email
+          ? hostBookingRequestEmail({
               hostName: host.firstName || "Host",
               hostEmail: host.email,
               propertyTitle: property.title,
@@ -414,16 +490,31 @@ export const bookingsService = {
               hostResponseDeadlineAt: hostResponseDeadlineAt.toISOString(),
               totalAmount: booking.totalAmount,
               currency: booking.currency,
-            }),
-            {
-              userId: property.hostId,
-              inboxTitle: "New booking request",
-              inboxBody: `${booking.guestFirstName} requested ${property.title} (${booking.referenceCode}). Respond within your confirmation window.`,
-              deepLink: `/host/dashboard`,
-            }
-          )
-        })
-        .catch((e) => console.warn("[Bookings] Failed to dispatch host request email:", e))
+            })
+          : {
+              to: "",
+              subject: `New booking request: ${property.title} (${booking.referenceCode})`,
+              html: "",
+              text: `New booking request from ${booking.guestFirstName} ${booking.guestLastName} for ${property.title}. Reference: ${booking.referenceCode}.`,
+            };
+
+        dispatchLifecycleEmail(
+          booking.id,
+          LIFECYCLE_EMAIL_EVENT.HOST_REQUEST_RECEIVED,
+          "host",
+          hostEmailPayload,
+          {
+            userId: property.hostId,
+            phone: host.phone || null,
+            inboxTitle: "New booking request",
+            inboxBody: `${booking.guestFirstName} requested ${property.title} (${booking.referenceCode}). Respond within 2 minutes.`,
+            deepLink: `/host/dashboard`,
+            smsMessage: host.phone
+              ? `Ilé: New booking request ${booking.referenceCode} for ${property.title} from ${booking.guestFirstName}. Respond within 2 mins: https://ilestays.ng/host/dashboard`
+              : undefined,
+          }
+        );
+      }
 
       return {
         booking: enrichedBooking,
@@ -464,7 +555,8 @@ export const bookingsService = {
         .select()
         .from(schema.bookings)
         .where(eq(schema.bookings.id, bookingId))
-        .limit(1);
+        .limit(1)
+        .for("update");
 
       if (!booking) {
         const err: any = new Error("Booking not found");
@@ -566,6 +658,21 @@ export const bookingsService = {
         .set({ type: "RESERVATION" })
         .where(eq(schema.availabilityBlocks.bookingId, bookingId));
 
+      // Mandatory Transactional In-App Outbox: Persist host acceptance for guest
+      if (booking.guestId) {
+        const guestAcceptKey = `booking:${booking.id}:${LIFECYCLE_EMAIL_EVENT.GUEST_HOST_ACCEPTED}:guest:inbox`;
+        await inboxService.upsertInboxItem({
+          userId: booking.guestId,
+          eventType: LIFECYCLE_EMAIL_EVENT.GUEST_HOST_ACCEPTED,
+          title: "Host accepted — proceed to payment",
+          body: `Proceed to payment for ${property.title} (${booking.referenceCode}) before the deadline.`,
+          entityType: "booking",
+          entityId: booking.id,
+          deepLink: `/trips`,
+          idempotencyKey: guestAcceptKey,
+        }, tx);
+      }
+
       dispatchLifecycleEmail(
         booking.id,
         LIFECYCLE_EMAIL_EVENT.GUEST_HOST_ACCEPTED,
@@ -622,7 +729,8 @@ export const bookingsService = {
         .select()
         .from(schema.bookings)
         .where(eq(schema.bookings.id, bookingId))
-        .limit(1);
+        .limit(1)
+        .for("update");
 
       if (!booking) {
         const err: any = new Error("Booking not found");
@@ -682,6 +790,21 @@ export const bookingsService = {
         .delete(schema.availabilityBlocks)
         .where(eq(schema.availabilityBlocks.bookingId, bookingId));
 
+      // Mandatory Transactional In-App Outbox: Persist decline for guest
+      if (booking.guestId) {
+        const guestDeclineKey = `booking:${booking.id}:${LIFECYCLE_EMAIL_EVENT.GUEST_HOST_DECLINED}:guest:inbox`;
+        await inboxService.upsertInboxItem({
+          userId: booking.guestId,
+          eventType: LIFECYCLE_EMAIL_EVENT.GUEST_HOST_DECLINED,
+          title: "Host declined your request",
+          body: `Your request for ${property.title} (${booking.referenceCode}) was declined. Browse similar stays.`,
+          entityType: "booking",
+          entityId: booking.id,
+          deepLink: `/trips`,
+          idempotencyKey: guestDeclineKey,
+        }, tx);
+      }
+
       dispatchLifecycleEmail(
         booking.id,
         LIFECYCLE_EMAIL_EVENT.GUEST_HOST_DECLINED,
@@ -722,9 +845,77 @@ export const bookingsService = {
 
   /**
    * Expire PENDING_HOST past host deadline and PAYMENT_PENDING past payment deadline.
-   * Conditional updates; safe under concurrent cron runners.
+   * Targeted mode (onlyBookingId set): expires at most that id — never a global sweep.
+   * Global mode (no onlyBookingId): advisory-locked sweeper for cron/worker only.
+   * CONFIRMED / COMPLETED are never expired.
    */
-  async expireDueBookings(limit = 100): Promise<{
+  async expireDueBookings(limit = 100, onlyBookingId?: string): Promise<{
+    expired: number;
+    bookingIds: string[];
+    hostExpired: number;
+    paymentExpired: number;
+    scope: "targeted" | "global";
+  }> {
+    if (onlyBookingId) {
+      return this.expireDueBookingsTargeted(onlyBookingId);
+    }
+    return this.expireDueBookingsGlobal(limit);
+  },
+
+  async expireDueBookingsTargeted(bookingId: string): Promise<{
+    expired: number;
+    bookingIds: string[];
+    hostExpired: number;
+    paymentExpired: number;
+    scope: "targeted";
+  }> {
+    if (!bookingId || typeof bookingId !== "string") {
+      throw Object.assign(new Error("Targeted expiration requires a booking id."), {
+        statusCode: 400,
+        code: "TARGETED_EXPIRE_REQUIRES_ID",
+      });
+    }
+    const result = await this.runExpirePass(1, bookingId);
+    return { ...result, scope: "targeted" };
+  },
+
+  async expireDueBookingsGlobal(limit = 100): Promise<{
+    expired: number;
+    bookingIds: string[];
+    hostExpired: number;
+    paymentExpired: number;
+    scope: "global";
+  }> {
+    const db = getDb();
+    let acquiredLock = false;
+    try {
+      const lockRes: any = await db.execute(
+        sql`SELECT pg_try_advisory_lock(99281) AS acquired`
+      );
+      const rows = lockRes?.rows || lockRes;
+      if (rows && rows.length > 0 && rows[0]?.acquired === false) {
+        return { expired: 0, bookingIds: [], hostExpired: 0, paymentExpired: 0, scope: "global" };
+      }
+      acquiredLock = true;
+    } catch {
+      // PGlite or environments without advisory lock support
+    }
+
+    try {
+      const result = await this.runExpirePass(limit, undefined);
+      return { ...result, scope: "global" };
+    } finally {
+      if (acquiredLock) {
+        try {
+          await db.execute(sql`SELECT pg_advisory_unlock(99281)`);
+        } catch {
+          // ignore unlock failures on PGlite
+        }
+      }
+    }
+  },
+
+  async runExpirePass(limit = 100, onlyBookingId?: string): Promise<{
     expired: number;
     bookingIds: string[];
     hostExpired: number;
@@ -736,16 +927,17 @@ export const bookingsService = {
     let hostExpired = 0;
     let paymentExpired = 0;
 
-    const dueHost = await db
-      .select({ id: schema.bookings.id })
-      .from(schema.bookings)
-      .where(
-        and(
-          eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST),
-          lte(schema.bookings.hostResponseDeadlineAt, now)
+      const dueHost = await db
+        .select({ id: schema.bookings.id })
+        .from(schema.bookings)
+        .where(
+          and(
+            eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST),
+            lte(schema.bookings.hostResponseDeadlineAt, now),
+            onlyBookingId ? eq(schema.bookings.id, onlyBookingId) : sql`true`
+          )
         )
-      )
-      .limit(limit);
+        .limit(limit);
 
     for (const row of dueHost) {
       const result = await db.transaction(async (tx) => {
@@ -795,7 +987,17 @@ export const bookingsService = {
             referenceCode: result.referenceCode,
             checkIn: result.checkInDate,
             checkOut: result.checkOutDate,
-          })
+          }),
+          {
+            userId: result.guestId,
+            phone: result.guestPhone,
+            inboxTitle: "Booking request timed out",
+            inboxBody: `The host did not respond in time for ${prop?.title || "your stay"}. Browse similar available stays now.`,
+            deepLink: `/trips`,
+            smsMessage: result.guestPhone
+              ? `Ilé: Booking request ${result.referenceCode} timed out. Open the app to view similar available stays.`
+              : undefined,
+          }
         );
         recordBookingAudit({
           action: "HOST_WINDOW_EXPIRED",
@@ -813,7 +1015,8 @@ export const bookingsService = {
         .where(
           and(
             eq(schema.bookings.status, BOOKING_STATUS.PAYMENT_PENDING),
-            lte(schema.bookings.paymentDeadlineAt, now)
+            lte(schema.bookings.paymentDeadlineAt, now),
+            onlyBookingId ? eq(schema.bookings.id, onlyBookingId) : sql`true`
           )
         )
         .limit(remaining);
@@ -875,7 +1078,17 @@ export const bookingsService = {
               referenceCode: result.referenceCode,
               checkIn: result.checkInDate,
               checkOut: result.checkOutDate,
-            })
+            }),
+            {
+              userId: result.guestId,
+              phone: result.guestPhone,
+              inboxTitle: "Payment window expired",
+              inboxBody: `Your 10-minute hold for ${prop?.title || "your stay"} (${result.referenceCode}) has expired. Dates have been released.`,
+              deepLink: `/trips`,
+              smsMessage: result.guestPhone
+                ? `Ilé: Payment window for ${result.referenceCode} has expired. Dates have been released.`
+                : undefined,
+            }
           );
           recordBookingAudit({
             action: "PAYMENT_WINDOW_EXPIRED",
@@ -884,6 +1097,13 @@ export const bookingsService = {
           });
         }
       }
+    }
+
+    if (onlyBookingId && expiredIds.some((id) => id !== onlyBookingId)) {
+      throw Object.assign(new Error("Targeted expiration swept unrelated bookings."), {
+        statusCode: 500,
+        code: "TARGETED_EXPIRE_SCOPE_VIOLATION",
+      });
     }
 
     return {
@@ -1092,7 +1312,17 @@ export const bookingsService = {
           checkOut: booking.checkOutDate,
           cancellationReason: reason || CANCELLATION_REASON.GUEST_CANCELLED_BEFORE_PAYMENT,
           refundNote: "No payment was collected — no refund is required.",
-        })
+        }),
+        {
+          userId: booking.guestId,
+          phone: booking.guestPhone,
+          inboxTitle: "Booking request cancelled",
+          inboxBody: `Your booking request for ${prop?.title || "your stay"} (${booking.referenceCode}) was cancelled. No charges were made.`,
+          deepLink: `/trips`,
+          smsMessage: booking.guestPhone
+            ? `Ilé: Booking request ${booking.referenceCode} was cancelled. No payment was collected.`
+            : undefined,
+        }
       );
 
       recordBookingAudit({
@@ -1382,6 +1612,155 @@ export const bookingsService = {
       .where(eq(schema.properties.id, booking.propertyId))
       .limit(1);
 
+    const now = new Date();
+
+    // Eager lazy expiration on read: host response deadline
+    if (
+      booking.status === BOOKING_STATUS.PENDING_HOST &&
+      booking.hostResponseDeadlineAt &&
+      new Date(booking.hostResponseDeadlineAt).getTime() <= now.getTime()
+    ) {
+      const [expired] = await db
+        .update(schema.bookings)
+        .set({
+          status: BOOKING_STATUS.CANCELLED,
+          cancellationReason: CANCELLATION_REASON.HOST_WINDOW_EXPIRED,
+          hostResponse: HOST_RESPONSE.EXPIRED,
+          cancelledAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(schema.bookings.id, booking.id),
+            eq(schema.bookings.status, BOOKING_STATUS.PENDING_HOST)
+          )
+        )
+        .returning();
+
+      if (expired) {
+        await db
+          .delete(schema.availabilityBlocks)
+          .where(eq(schema.availabilityBlocks.bookingId, booking.id));
+
+        dispatchLifecycleEmail(
+          booking.id,
+          LIFECYCLE_EMAIL_EVENT.GUEST_HOST_WINDOW_EXPIRED,
+          "guest",
+          guestHostWindowExpiredEmail({
+            guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+            guestEmail: booking.guestEmail,
+            propertyTitle: property?.title || "Ilé Property",
+            referenceCode: booking.referenceCode,
+            checkIn: booking.checkInDate,
+            checkOut: booking.checkOutDate,
+          }),
+          {
+            userId: booking.guestId,
+            phone: booking.guestPhone,
+            inboxTitle: "Booking request timed out",
+            inboxBody: `The host did not respond in time for ${property?.title || "your stay"}. Browse similar available stays now.`,
+            deepLink: `/trips`,
+            smsMessage: booking.guestPhone
+              ? `Ilé: Booking request ${booking.referenceCode} timed out. Open the app to view similar available stays.`
+              : undefined,
+          }
+        );
+
+        if (property?.hostId) {
+          notifyLifecycleEvent({
+            bookingId: booking.id,
+            event: "HOST_REQUEST_EXPIRED",
+            recipientRole: "host",
+            channels: {
+              inbox: {
+                userId: property.hostId,
+                title: "Booking request expired",
+                body: `The request for ${property?.title || "your property"} (${booking.referenceCode}) expired because it was not answered in time.`,
+                deepLink: `/host/dashboard`,
+              },
+              push: true,
+            },
+          });
+        }
+
+        recordBookingAudit({
+          action: "HOST_WINDOW_EXPIRED",
+          bookingId: booking.id,
+          details: { referenceCode: booking.referenceCode, lazy: true },
+        });
+
+        Object.assign(booking, expired);
+      }
+    } else if (
+      booking.status === BOOKING_STATUS.PAYMENT_PENDING &&
+      booking.paymentDeadlineAt &&
+      new Date(booking.paymentDeadlineAt).getTime() <= now.getTime()
+    ) {
+      const [expired] = await db
+        .update(schema.bookings)
+        .set({
+          status: BOOKING_STATUS.CANCELLED,
+          cancellationReason: CANCELLATION_REASON.PAYMENT_WINDOW_EXPIRED,
+          cancelledAt: now,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(schema.bookings.id, booking.id),
+            eq(schema.bookings.status, BOOKING_STATUS.PAYMENT_PENDING)
+          )
+        )
+        .returning();
+
+      if (expired) {
+        await db
+          .delete(schema.availabilityBlocks)
+          .where(eq(schema.availabilityBlocks.bookingId, booking.id));
+
+        await db
+          .update(schema.payments)
+          .set({ status: "EXPIRED" })
+          .where(
+            and(
+              eq(schema.payments.bookingId, booking.id),
+              inArray(schema.payments.status, ["INITIALIZED", "PENDING"])
+            )
+          );
+
+        dispatchLifecycleEmail(
+          booking.id,
+          LIFECYCLE_EMAIL_EVENT.GUEST_PAYMENT_WINDOW_EXPIRED,
+          "guest",
+          guestPaymentWindowExpiredEmail({
+            guestName: `${booking.guestFirstName} ${booking.guestLastName}`,
+            guestEmail: booking.guestEmail,
+            propertyTitle: property?.title || "Ilé Property",
+            referenceCode: booking.referenceCode,
+            checkIn: booking.checkInDate,
+            checkOut: booking.checkOutDate,
+          }),
+          {
+            userId: booking.guestId,
+            phone: booking.guestPhone,
+            inboxTitle: "Payment window ended",
+            inboxBody: `The payment window for ${property?.title || "your stay"} (${booking.referenceCode}) ended. The hold on these dates has been released.`,
+            deepLink: `/trips`,
+            smsMessage: booking.guestPhone
+              ? `Ilé: Payment window for ${booking.referenceCode} expired. The dates have been released.`
+              : undefined,
+          }
+        );
+
+        recordBookingAudit({
+          action: "PAYMENT_WINDOW_EXPIRED",
+          bookingId: booking.id,
+          details: { referenceCode: booking.referenceCode, lazy: true },
+        });
+
+        Object.assign(booking, expired);
+      }
+    }
+
     const [latestPayment] = await db
       .select({
         id: schema.payments.id,
@@ -1407,7 +1786,6 @@ export const bookingsService = {
       .orderBy(desc(schema.refunds.createdAt))
       .limit(1);
 
-    const now = new Date();
     const reconciliationRequired =
       !!openRefund &&
       (openRefund.status === "REQUESTED" || openRefund.status === "APPROVED") &&
@@ -1464,6 +1842,7 @@ export const bookingsService = {
     const publicProperty = property
       ? {
           id: property.id,
+          hostId: property.hostId,
           slug: property.slug,
           title: property.title,
           city: property.city,
@@ -1582,6 +1961,7 @@ export const bookingsService = {
       .limit(Math.min(40, Math.max(limit * 4, 12)));
 
     const available: Array<Record<string, unknown>> = [];
+    const alternativeRate = await getPlatformCommissionRate();
     for (const prop of candidates) {
       if (available.length >= limit) break;
       const availability = await this.checkAvailability(
@@ -1591,12 +1971,12 @@ export const bookingsService = {
       );
       if (!availability.available) continue;
 
-      const pricing = calculateFromGuestPrice(
-        prop.pricePerNight,
+      const pricing = resolveStayPricing({
+        pricePerNight: prop.pricePerNight,
+        hostBasePrice: prop.hostBasePrice,
         nights,
-        undefined,
-        prop.hostBasePrice || undefined
-      );
+        commissionRate: alternativeRate,
+      });
 
       available.push({
         id: prop.id,
@@ -1610,7 +1990,7 @@ export const bookingsService = {
         minimumNights: prop.minimumNights,
         bedrooms: prop.bedrooms,
         bathrooms: prop.bathrooms,
-        pricePerNight: prop.pricePerNight,
+        pricePerNight: pricing.guestNightlyAccommodationPrice,
         currency: prop.currency,
         rating: prop.rating,
         pricing: {
@@ -1651,6 +2031,7 @@ export const bookingsService = {
   },
 
   async getUserBookings(userId: string, paginationQuery: any) {
+    // Do not run a global expire sweep from guest list reads — worker/cron owns global scope.
     const db = getDb();
     const params = parsePagination(paginationQuery || {});
 
@@ -1677,7 +2058,7 @@ export const bookingsService = {
           .limit(1);
 
         return {
-          ...b,
+          ...redactBookingFinance(b, "guest"),
           property: prop || null,
         };
       })
@@ -1692,62 +2073,12 @@ export const bookingsService = {
     return paginatedResponse(enriched, total, params);
   },
 
-  async getBookingContact(bookingIdOrRef: string, authorizedUserIdOrToken?: string) {
-    const db = getDb();
-    const [booking] = await db
-      .select()
-      .from(schema.bookings)
-      .where(
-        or(
-          eq(schema.bookings.id, bookingIdOrRef),
-          eq(schema.bookings.referenceCode, bookingIdOrRef)
-        )
-      )
-      .limit(1);
-    if (!booking) throw new Error("Booking not found");
-
-    if (booking.status !== BOOKING_STATUS.CONFIRMED) {
-      throw new Error("Booking must be confirmed to view contact details");
-    }
-
-    if (authorizedUserIdOrToken) {
-      const isTokenMatch = booking.accessToken && authorizedUserIdOrToken === booking.accessToken;
-      const isGuestMatch = booking.guestId && authorizedUserIdOrToken === booking.guestId;
-      const isEmailMatch = booking.guestEmail && authorizedUserIdOrToken.toLowerCase().trim() === booking.guestEmail.toLowerCase().trim();
-      if (!isTokenMatch && !isGuestMatch && !isEmailMatch && authorizedUserIdOrToken !== "admin") {
-        const [prop] = await db
-          .select({ hostId: schema.properties.hostId })
-          .from(schema.properties)
-          .where(eq(schema.properties.id, booking.propertyId))
-          .limit(1);
-        if (!prop || prop.hostId !== authorizedUserIdOrToken) {
-          const err: any = new Error("Unauthorized to view property access details");
-          err.statusCode = 403;
-          throw err;
-        }
-      }
-    }
-
-    const [privateDetails] = await db
-      .select()
-      .from(schema.propertyPrivateDetails)
-      .where(eq(schema.propertyPrivateDetails.propertyId, booking.propertyId))
-      .limit(1);
-
-    if (!privateDetails) {
-      throw new Error("Private contact details not found");
-    }
-
+  async getBookingContact(bookingIdOrRef: string, authorizedUserId?: string) {
+    const stay = await getStayDetails(bookingIdOrRef, authorizedUserId || "");
     return {
-      bookingReference: booking.referenceCode,
-      exactAddress: privateDetails.exactAddress,
-      unitNumber: privateDetails.unitNumber,
-      contactName: privateDetails.contactName,
-      contactPhone: privateDetails.contactPhone,
-      contactEmail: privateDetails.contactEmail,
-      checkInInstructions: privateDetails.checkInInstructions,
-      accessGateCode: privateDetails.accessGateCode,
-      houseRulesPrivate: privateDetails.houseRulesPrivate,
+      ...stay,
+      bookingReference: stay.reference,
+      checkInInstructions: stay.arrivalNotes,
     };
   },
 

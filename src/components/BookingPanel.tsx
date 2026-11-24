@@ -1,13 +1,20 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Property } from "@/types"
 import { formatNaira, calculateNights, getDefaultDates, getTodayISO, calculatePaystackFee } from "@/lib/utils"
 import BookingModal from "./BookingModal"
-import { Shield, Sparkles, ChevronLeft, ChevronRight, Calendar, Users } from "lucide-react"
+import { Shield, Sparkles, ChevronLeft, ChevronRight, Calendar, Users, Zap, CheckCircle2, Sliders } from "lucide-react"
 
 interface BookingPanelProps {
   property: Property
+}
+
+interface SearchContext {
+  destination?: string
+  apartmentType?: string
+  powerPreference?: string
+  bedrooms?: number
 }
 
 export default function BookingPanel({ property }: BookingPanelProps) {
@@ -19,8 +26,59 @@ export default function BookingPanel({ property }: BookingPanelProps) {
   // Guest selection only — never substitute listing maxGuests as booked count
   const [guests, setGuests] = useState(Math.min(2, maxGuests))
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [searchContext, setSearchContext] = useState<SearchContext>({})
 
   const todayISO = getTodayISO()
+
+  // Inherit marketplace search criteria from URL query parameters or sessionStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      const urlParams = new URLSearchParams(window.location.search)
+      let stored: Partial<SearchContext & { checkIn?: string; checkOut?: string; guests?: number }> = {}
+      try {
+        const raw = sessionStorage.getItem("ile_search_session")
+        if (raw) stored = JSON.parse(raw)
+      } catch {
+        // ignore parse error
+      }
+
+      const paramCheckIn = urlParams.get("checkIn") || stored.checkIn
+      const paramCheckOut = urlParams.get("checkOut") || stored.checkOut
+      const paramGuests = urlParams.get("guests") || (stored.guests ? String(stored.guests) : null)
+      const paramDest = urlParams.get("destination") || urlParams.get("location") || stored.destination
+      const paramType = urlParams.get("type") || stored.apartmentType
+      const paramPower = urlParams.get("power") || stored.powerPreference
+      const paramBedrooms = urlParams.get("bedrooms") || (stored.bedrooms ? String(stored.bedrooms) : null)
+
+      if (paramCheckIn && paramCheckIn >= todayISO) {
+        setCheckIn(paramCheckIn)
+        if (paramCheckOut && paramCheckOut > paramCheckIn) {
+          setCheckOut(paramCheckOut)
+        } else {
+          const d = new Date(paramCheckIn)
+          d.setDate(d.getDate() + minNights)
+          setCheckOut(d.toISOString().split("T")[0])
+        }
+      }
+
+      if (paramGuests) {
+        const parsedG = parseInt(paramGuests, 10)
+        if (!isNaN(parsedG) && parsedG >= 1) {
+          setGuests(Math.min(maxGuests, parsedG))
+        }
+      }
+
+      setSearchContext({
+        destination: paramDest || undefined,
+        apartmentType: paramType || undefined,
+        powerPreference: paramPower || undefined,
+        bedrooms: paramBedrooms ? parseInt(paramBedrooms, 10) : undefined,
+      })
+    } catch {
+      // safe fallback
+    }
+  }, [maxGuests, minNights, todayISO])
   const nights = calculateNights(checkIn, checkOut)
   const stayCost = property.pricePerNight * nights
   const processingFee = calculatePaystackFee(stayCost)
@@ -187,6 +245,39 @@ export default function BookingPanel({ property }: BookingPanelProps) {
           </p>
         )}
 
+        {/* Inherited Search Context & Compatibility Feedback */}
+        <div className="mt-4 p-3 bg-[#F4F8F6] border border-[#0B5D45]/15 rounded-xl space-y-2 text-xs">
+          <div className="flex items-center justify-between font-semibold text-[#0B5D45]">
+            <span className="flex items-center gap-1.5">
+              <Sliders size={13} />
+              <span>Search Criteria Inherited</span>
+            </span>
+            <span className="text-[11px] bg-white px-2 py-0.5 rounded-full border border-[#0B5D45]/20 text-[#0B5D45] font-medium">
+              {searchContext.destination ? `Search: ${searchContext.destination}` : `${property.neighborhood}, ${property.city}`}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 pt-1 text-[11.5px] text-[#2C4A3E]">
+            <div className="flex items-center gap-1.5 bg-white/70 px-2 py-1 rounded-md border border-[#0B5D45]/10">
+              <CheckCircle2 size={12} className="text-[#0B5D45] shrink-0" />
+              <span className="truncate">{property.propertyType}</span>
+            </div>
+            {property.infrastructure?.powerType ? (
+              <div className="flex items-center gap-1.5 bg-white/70 px-2 py-1 rounded-md border border-[#0B5D45]/10">
+                <Zap size={12} className="text-[#D4AF37] shrink-0" />
+                <span className="truncate">{property.infrastructure.powerType}</span>
+              </div>
+            ) : null}
+            <div className="flex items-center gap-1.5 bg-white/70 px-2 py-1 rounded-md border border-[#0B5D45]/10">
+              <CheckCircle2 size={12} className="text-[#0B5D45] shrink-0" />
+              <span className="truncate">{property.bedrooms} Bed · {property.bathrooms || 1} Bath</span>
+            </div>
+            <div className="flex items-center gap-1.5 bg-white/70 px-2 py-1 rounded-md border border-[#0B5D45]/10">
+              <CheckCircle2 size={12} className="text-[#0B5D45] shrink-0" />
+              <span className="truncate">Up to {maxGuests} guests</span>
+            </div>
+          </div>
+        </div>
+
         {property.isReserved && (
           <div className="p-3.5 mb-4 mt-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900 font-medium">
             <Shield size={16} className="text-amber-700 shrink-0 mt-0.5" />
@@ -280,6 +371,7 @@ export default function BookingPanel({ property }: BookingPanelProps) {
         checkIn={checkIn}
         checkOut={checkOut}
         guests={guests}
+        searchCriteria={searchContext}
       />
     </>
   )

@@ -1,6 +1,7 @@
 import { FastifyInstance } from "fastify";
-import { bookingsService } from "./bookings.service";
+import { authorizeBookingView, bookingsService, presentGuestCreateResult } from "./bookings.service";
 import { authenticateRequest, extractSession } from "../../lib/security";
+import { clientIp, consumeRateLimitAsync } from "../../lib/rate-limit";
 
 const assertCronOrAdmin = async (request: any, reply: any): Promise<boolean> => {
   const cronSecret = process.env.CRON_SECRET || process.env.INTERNAL_JOB_SECRET;
@@ -27,10 +28,28 @@ const assertCronOrAdmin = async (request: any, reply: any): Promise<boolean> => 
 export async function bookingsRoutes(fastify: FastifyInstance) {
   // POST /api/bookings — Create reservation request (PENDING_HOST; no Paystack)
   fastify.post("/", async (request, reply) => {
+    const limit = await consumeRateLimitAsync(
+      `booking-create:${clientIp(request)}`,
+      12,
+      10 * 60 * 1000,
+      "strict"
+    );
+    if (!limit.ok) {
+      const status = limit.backend === "reject" ? 503 : 429;
+      reply.header("Retry-After", String(limit.retryAfterSec || 30));
+      return reply.status(status).send({
+        error:
+          status === 503
+            ? "Security checks temporarily unavailable. Try again shortly."
+            : "Too many booking requests. Try again shortly.",
+        retryAfterSec: limit.retryAfterSec,
+        retryable: true,
+      });
+    }
     try {
       const session = extractSession(request);
       const result = await bookingsService.createBooking(request.body, session);
-      return reply.status(201).send(result);
+      return reply.status(201).send(presentGuestCreateResult(result));
     } catch (error: any) {
       if (error.issues) {
         return reply.status(400).send({ error: error.issues[0]?.message || "Validation failed" });
@@ -118,6 +137,8 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
 
   // POST /api/bookings/reminders/process — Process upcoming arrival reminders
   fastify.post("/reminders/process", async (request, reply) => {
+    const ok = await assertCronOrAdmin(request, reply);
+    if (!ok) return;
     try {
       const { date } = (request.body || {}) as { date?: string };
       const result = await bookingsService.processUpcomingArrivalReminders(date);
@@ -205,11 +226,20 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
   // GET /api/bookings/:id — Get booking details (+ recovery metadata)
   fastify.get("/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
+    const query = request.query as { token?: string; accessToken?: string; email?: string };
+    const headerToken = request.headers["x-access-token"] as string | undefined;
+    const session = extractSession(request);
     try {
       const result = await bookingsService.getBooking(id);
-      return reply.send(result);
+      const safe = authorizeBookingView(result, {
+        userId: session?.userId || null,
+        role: session?.role || null,
+        accessToken: query.token || query.accessToken || headerToken || null,
+        email: query.email || null,
+      });
+      return reply.send(safe);
     } catch (error: any) {
-      return reply.status(404).send({ error: error.message });
+      return reply.status(error.statusCode || 404).send({ error: error.message });
     }
   });
 
@@ -226,53 +256,16 @@ export async function bookingsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // GET /api/bookings/:id/contact — Get quarantined private details (Access Pass)
-  fastify.get("/:id/contact", async (request, reply) => {
+  // GET /api/bookings/:id/contact — ordinary stay details / arrival notes
+  fastify.get("/:id/contact", async (request: any, reply: any) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
     const { id } = request.params as { id: string };
-    const { token: queryToken, accessToken: queryAccessToken } = request.query as { token?: string; accessToken?: string };
-    const headerToken = request.headers["x-access-token"] as string | undefined;
-    const providedToken = queryToken || queryAccessToken || headerToken;
-
-    let isAuthorized = false;
-    let booking: any;
-
     try {
-      const bookingData = await bookingsService.getBooking(id);
-      booking = bookingData.booking;
-    } catch {
-      return reply.status(404).send({ error: "Booking not found" });
-    }
-
-    // Check access token
-    if (providedToken && providedToken === booking.accessToken) {
-      isAuthorized = true;
-    }
-
-    // Check session
-    if (!isAuthorized) {
-      const session = extractSession(request);
-      if (session && (session.userId === booking.guestId || session.role === "admin")) {
-        isAuthorized = true;
-      }
-    }
-
-    if (!isAuthorized) {
-      return reply.status(401).send({ error: "Unauthorized: You do not have permission to view private details." });
-    }
-
-    // Strictly quarantined until payment is CONFIRMED
-    if (booking.status !== "CONFIRMED" && booking.status !== "COMPLETED") {
-      return reply.status(403).send({
-        error: "Payment required: Property address and check-in instructions are strictly quarantined until booking is CONFIRMED.",
-        status: booking.status,
-      });
-    }
-
-    try {
-      const result = await bookingsService.getBookingContact(id);
+      const result = await bookingsService.getBookingContact(id, session.userId);
       return reply.send(result);
     } catch (error: any) {
-      return reply.status(404).send({ error: error.message });
+      return reply.status(error.statusCode || 404).send({ error: error.message });
     }
   });
 }

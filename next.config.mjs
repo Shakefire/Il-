@@ -18,10 +18,10 @@ const nextConfig = {
     ],
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: false,
   },
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   // Prevent Vercel from issuing redirects that break /_next/data routes
   skipTrailingSlashRedirect: true,

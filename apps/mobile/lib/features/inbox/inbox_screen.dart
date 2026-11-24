@@ -59,7 +59,7 @@ class _InboxScreenState extends State<InboxScreen> {
             const EditorialToolbar(
               title: 'Inbox',
               explorePill: true,
-              trailing: EditorialHelpButton(),
+              trailing: EditorialMarkReadButton(),
             ),
             Expanded(
               child: _loading
@@ -75,9 +75,10 @@ class _InboxScreenState extends State<InboxScreen> {
                   : !_signedIn
                       ? const GuestSignInGate(
                           returnPath: AppRoutes.inbox,
-                          preview: SampleConciergeThread(),
+                          title: 'Inbox is empty',
                           message:
-                              'Sign in to keep a thread with your host and the Ilé desk. The conversation above is a sample, not a message waiting for you.',
+                              'Sign in to keep a thread with your host and the Ilé desk. There are no demo messages here.',
+                          icon: Icons.chat_bubble_outline_rounded,
                         )
                       : Padding(
                           padding: EdgeInsets.fromLTRB(

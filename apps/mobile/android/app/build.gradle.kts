@@ -2,13 +2,7 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-}
-
-// Apply Google Services only when console config is present — keeps builds
-// green without google-services.json (push stays a Dart-level no-op).
-val googleServicesFile = file("google-services.json")
-if (googleServicesFile.exists()) {
-    apply(plugin = "com.google.gms.google-services")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -49,4 +43,11 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Import the Firebase BoM
+    implementation(platform("com.google.firebase:firebase-bom:35.2.0"))
+    // Add Firebase dependencies
+    implementation("com.google.firebase:firebase-analytics")
 }

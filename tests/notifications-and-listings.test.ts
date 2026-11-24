@@ -367,12 +367,23 @@ describe("Ilé Notifications & Listing Lifecycle Test Suite", () => {
         checkOutDate: checkOutStr,
       });
 
-      assert.equal(result.booking.status, "PAYMENT_PENDING");
+      assert.equal(result.booking.status, "PENDING_HOST");
       assert.ok(result.booking.referenceCode.startsWith("ILE-"));
-      assert.ok(result.paymentReference);
 
       bookingId = result.booking.id;
-      paymentRef = result.paymentReference;
+      const accepted = await bookingsService.acceptBooking(bookingId, hostId);
+      assert.equal(accepted.booking.status, "PAYMENT_PENDING");
+      paymentRef = `ile_test_${timestamp}`;
+      await db.insert(schema.payments).values({
+        id: `pay_${crypto.randomUUID()}`,
+        bookingId,
+        reference: paymentRef,
+        amount: accepted.booking.totalAmount,
+        currency: "NGN",
+        method: "CARD",
+        status: "INITIALIZED",
+        gatewayProvider: "PAYSTACK",
+      });
     });
 
     it("Processes successful payment and confirms host earnings calculation", async () => {

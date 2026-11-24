@@ -15,6 +15,7 @@ class IleCircularBackButton extends StatelessWidget {
     this.visualSize = AppSpacing.authBackSize,
     this.iconColor = AppColors.foreground,
     this.fillColor = AppColors.surfaceMuted,
+    this.borderColor,
   });
 
   final VoidCallback? onPressed;
@@ -23,6 +24,7 @@ class IleCircularBackButton extends StatelessWidget {
   final double visualSize;
   final Color iconColor;
   final Color fillColor;
+  final Color? borderColor;
 
   void _handleBack(BuildContext context) {
     if (onPressed != null) {
@@ -61,6 +63,9 @@ class IleCircularBackButton extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: fillColor,
                   shape: BoxShape.circle,
+                  border: borderColor == null
+                      ? null
+                      : Border.all(color: borderColor!),
                 ),
                 child: Icon(
                   Icons.arrow_back_ios_new_rounded,

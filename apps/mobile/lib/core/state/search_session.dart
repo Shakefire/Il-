@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:intl/intl.dart';
 
 /// Shared guest search criteria — persists across Explore → Search → Details.
 class SearchSession extends ChangeNotifier {
@@ -18,6 +19,8 @@ class SearchSession extends ChangeNotifier {
   String sort = 'relevance';
   bool nearMe = false;
 
+  static final DateFormat _shortMonthDay = DateFormat('MMM d');
+
   bool get hasDates =>
       checkIn != null &&
       checkIn!.isNotEmpty &&
@@ -26,7 +29,13 @@ class SearchSession extends ChangeNotifier {
 
   String get datesLabel {
     if (!hasDates) return 'Add dates';
-    return '${checkIn!} → ${checkOut!}';
+    final DateTime? start = DateTime.tryParse(checkIn!);
+    final DateTime? end = DateTime.tryParse(checkOut!);
+    if (start == null || end == null) return 'Add dates';
+    if (start.year == end.year && start.month == end.month) {
+      return '${DateFormat('MMM d').format(start)} – ${DateFormat('d').format(end)}';
+    }
+    return '${_shortMonthDay.format(start)} – ${_shortMonthDay.format(end)}';
   }
 
   String get guestsLabel => guests == 1 ? '1 guest' : '$guests guests';
@@ -95,6 +104,10 @@ class SearchSession extends ChangeNotifier {
     lng = longitude;
     nearMe = isNearMe;
     notifyListeners();
+  }
+
+  void setPlace(String label, {double? latitude, double? longitude}) {
+    setDestination(label: label, latitude: latitude, longitude: longitude);
   }
 
   void setDates({required String? start, required String? end}) {
@@ -181,14 +194,14 @@ class SearchSession extends ChangeNotifier {
       if (destination.isNotEmpty && !nearMe) 'destination': destination,
       if (lat != null) 'lat': '$lat',
       if (lng != null) 'lng': '$lng',
-      if (checkIn != null) 'checkIn': checkIn!,
-      if (checkOut != null) 'checkOut': checkOut!,
+      'checkIn': ?checkIn,
+      'checkOut': ?checkOut,
       'guests': '$guests',
-      if (propertyType != null) 'type': propertyType!,
+      'type': ?propertyType,
       if (bedrooms != null) 'bedrooms': '$bedrooms',
       if (minPrice != null) 'minPrice': '$minPrice',
       if (maxPrice != null) 'maxPrice': '$maxPrice',
-      if (powerType != null) 'powerType': powerType!,
+      'powerType': ?powerType,
       if (amenities.isNotEmpty) 'amenities': amenities.join(','),
       'sort': sort,
     };

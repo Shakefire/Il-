@@ -17,8 +17,8 @@ function toCSV(headers: string[], rows: (string | number | null | undefined)[][]
   return [headerRow, ...dataRows].join("\n");
 }
 
-function naira(kobo: number | null | undefined): string {
-  return ((kobo ?? 0) / 100).toFixed(2);
+function naira(amount: number | null | undefined): string {
+  return String(Math.round(amount ?? 0));
 }
 
 export async function GET(req: NextRequest, { params }: { params: { type: string } }) {
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: { type: string
       case "collections": {
         const result = await FinanceService.getCollectionsReport({ from, to, limit, offset });
         if (format === "csv") {
-          const headers = ["Booking Ref", "Property", "Guest Email", "Gross (NGN)", "Paystack Fee (NGN)", "Net (NGN)", "Paid At", "Currency"];
+          const headers = ["Booking Ref", "Property", "Guest Email", "Gross collected (NGN)", "Paystack Fee (NGN)", "Collected after fee (NGN)", "Paid At", "Currency"];
           const rows = result.rows.map((r) => [
             r.bookingRef, r.propertyName, r.guestEmail,
             naira(r.amount), naira(r.paystackFeeAmount), naira(r.netAmount),
@@ -109,6 +109,25 @@ export async function GET(req: NextRequest, { params }: { params: { type: string
           });
         }
         return NextResponse.json(result);
+      }
+
+      case "ledger": {
+        const summary = await FinanceService.getFinancialSummary();
+        return NextResponse.json({
+          grossBookingVolumeIsNotPlatformRevenue: true,
+          trialBalance: summary.trialBalance,
+          metrics: summary.metrics,
+        });
+      }
+      case "commission-income": {
+        const summary = await FinanceService.getFinancialSummary();
+        return NextResponse.json({
+          note: "Platform commission is ledger account 4010. Available refund funding is account 1040. Gross booking volume is not platform revenue.",
+          platformCommissionRevenue: summary.metrics.platformCommissionRevenue,
+          commissionFundsAvailable: summary.metrics.commissionFundsAvailable,
+          commissionFundsReserved: summary.metrics.commissionFundsReserved,
+          guestRefundsFromCommission: summary.metrics.guestRefundsFromCommission,
+        });
       }
 
       default:

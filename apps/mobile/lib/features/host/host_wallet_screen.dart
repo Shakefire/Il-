@@ -39,11 +39,18 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
   String? _error;
   String? _notice;
   Map<String, dynamic>? _wallet;
+  final TextEditingController _amountCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _amountCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -119,6 +126,16 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
         _wallet?['balances'] as Map<String, dynamic>?;
     final int available = (balances?['available'] as num?)?.toInt() ?? 0;
     if (available <= 0) return;
+    final String raw = _amountCtrl.text.trim().replaceAll(',', '');
+    final int requested = raw.isEmpty ? available : int.tryParse(raw) ?? -1;
+    if (requested <= 0) {
+      setState(() => _notice = 'Enter a positive naira amount.');
+      return;
+    }
+    if (requested > available) {
+      setState(() => _notice = 'That amount is above the available balance.');
+      return;
+    }
     setState(() {
       _withdrawing = true;
       _notice = null;
@@ -126,7 +143,7 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
     try {
       final Map<String, dynamic> result =
           await context.read<IleApi>().requestHostWithdrawal(
-                amountNaira: available,
+                amountNaira: requested,
               );
       if (!mounted) return;
       setState(() {
@@ -192,6 +209,15 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       _BalanceTile(
+                        label: 'Total earnings',
+                        hint: 'Held, available, in progress, and paid',
+                        amount: (balances?['totalEarnings'] as num?)?.toInt() ??
+                            ((balances?['pending'] as num?)?.toInt() ?? 0) +
+                                ((balances?['available'] as num?)?.toInt() ?? 0) +
+                                ((balances?['processing'] as num?)?.toInt() ?? 0) +
+                                ((balances?['paid'] as num?)?.toInt() ?? 0),
+                      ),
+                      _BalanceTile(
                         label: 'Pending',
                         hint: (_wallet?['labels']
                                     as Map<String, dynamic>?)?['pending']
@@ -224,6 +250,13 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                             HostMessages.paidToBank,
                         amount: (balances?['paid'] as num?)?.toInt() ?? 0,
                       ),
+                      _CountTile(
+                        label: 'Failed withdrawals',
+                        hint: 'Attempts that did not complete. Restored funds are in Available.',
+                        count: (balances?['failedWithdrawalCount'] as num?)?.toInt() ??
+                            (balances?['failedWithdrawals'] as num?)?.toInt() ??
+                            0,
+                      ),
                       const SizedBox(height: AppSpacing.md),
                       if (bank?['verified'] == true)
                         Text(
@@ -247,8 +280,17 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                         Text(_notice!, style: AppTypography.caption),
                       ],
                       const SizedBox(height: AppSpacing.lg),
+                      TextField(
+                        controller: _amountCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Amount to withdraw (NGN)',
+                          hintText: 'Leave blank to withdraw all available',
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
                       IleButton(
-                        label: 'Withdraw available',
+                        label: 'Withdraw',
                         onPressed:
                             ((balances?['available'] as num?)?.toInt() ?? 0) > 0
                                 ? (_withdrawing ? null : _withdraw)
@@ -271,11 +313,10 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
                             title: Text(
-                              HostMessages.payoutStatusLabel(
-                                item['status']?.toString() ??
-                                    item['displayStatus']?.toString() ??
-                                    '',
-                              ),
+                              item['displayStatus']?.toString() ??
+                                  HostMessages.payoutStatusLabel(
+                                    item['status']?.toString() ?? '',
+                                  ),
                               style: AppTypography.bodyMedium,
                             ),
                             subtitle: Text(
@@ -291,6 +332,50 @@ class _HostWalletScreenState extends State<HostWalletScreen> {
                     ],
                   ),
                 ),
+    );
+  }
+}
+
+class _CountTile extends StatelessWidget {
+  const _CountTile({
+    required this.label,
+    required this.hint,
+    required this.count,
+  });
+
+  final String label;
+  final String hint;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: AppTypography.bodyMedium),
+                  Text(hint, style: AppTypography.caption),
+                ],
+              ),
+            ),
+            Text(
+              count == 1 ? '1 attempt' : '$count attempts',
+              style: AppTypography.sectionHeading,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

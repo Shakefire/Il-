@@ -2,13 +2,38 @@ import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 import { getDb, schema } from "../backend/src/db/client";
 import { eq, and, sql } from "drizzle-orm";
-import { LedgerService, ACCOUNT_CODES } from "../backend/src/modules/finance/ledger.service";
+import { LedgerService, ACCOUNT_CODES, ensurePhase2Accounts } from "../backend/src/modules/finance/ledger.service";
 import { FinanceService } from "../backend/src/modules/finance/finance.service";
 import crypto from "crypto";
 
 describe("Phase 2: Double-Entry Ledger Core & Financial Lifecycle", async () => {
+  if ((process.env.DATABASE_URL || "").startsWith("postgres")) {
+    throw new Error("Refusing the ledger suite against a configured Postgres URL.");
+  }
   const db = getDb();
   const testRunId = Date.now();
+
+  test("0. Local schema is ready and the default admin exists", async () => {
+    const { initAndSeedDb } = await import("../backend/src/db/seed");
+    await initAndSeedDb();
+    const [admin] = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(eq(schema.users.id, "usr_admin_default"))
+      .limit(1);
+    if (!admin) {
+      await db.insert(schema.users).values({
+        id: "usr_admin_default",
+        email: `admin_default_${testRunId}@test.ile.ng`,
+        passwordHash: "hash",
+        firstName: "Ile",
+        lastName: "Admin",
+        role: "admin",
+        emailVerified: true,
+        status: "ACTIVE",
+      });
+    }
+  });
 
   test("1. Chart of Accounts: All 8 core accounts exist and match expected types", async () => {
     const accounts = await db.select().from(schema.ledgerAccounts);
@@ -211,6 +236,17 @@ describe("Phase 2: Double-Entry Ledger Core & Financial Lifecycle", async () => 
 
     assert(payoutRow, "Payout row found");
 
+    await db
+      .update(schema.payouts)
+      .set({
+        bankCode: "058",
+        bankName: "GTBank",
+        accountNumber: "0123456789",
+        accountName: "Ledger Host",
+        paystackRecipientCode: "RCP_ledgertestrecipient",
+      })
+      .where(eq(schema.payouts.id, payoutRow.id));
+
     const disburseResult = await FinanceService.disbursePayout("usr_admin_default", {
       payoutId: payoutRow.id,
       transferRef: `NIP_TRF_${testRunId}`,
@@ -230,7 +266,7 @@ describe("Phase 2: Double-Entry Ledger Core & Financial Lifecycle", async () => 
     assert.equal(updatedPayout.paystackTransferRef, `NIP_TRF_${testRunId}`);
   });
 
-  test("6. Admin Refund Flow: Refunds accommodation subtotal and forfeits processing fee", async () => {
+  test("6. Admin Refund Flow: Funds the verified payment from commission account 1040", async () => {
     // Create a new booking to test refund
     const refundBookingId = `book_ref_test_${testRunId}`;
     const refundPaymentRef = `T_REF_${testRunId}`;
@@ -278,34 +314,93 @@ describe("Phase 2: Double-Entry Ledger Core & Financial Lifecycle", async () => 
       });
     });
 
-    // Admin executes refund
+    await db.insert(schema.payments).values({
+      id: `pay_ref_${testRunId}`,
+      bookingId: refundBookingId,
+      reference: refundPaymentRef,
+      amount: totalAmount,
+      currency: "NGN",
+      method: "card",
+      status: "SUCCESS",
+      gatewayProvider: "PAYSTACK",
+      gatewayReference: `psk_${testRunId}`,
+      paidAt: new Date(),
+    });
+
+    await db.transaction(async (tx) => {
+      await ensurePhase2Accounts(tx);
+      await LedgerService.postJournalEntry(tx, {
+        reference: `commission-fund-${refundBookingId}`,
+        eventType: "COMMISSION_ALLOCATION",
+        narration: "Test allocation of commission cash for a guest refund",
+        entries: [
+          { accountCode: ACCOUNT_CODES.COMMISSION_FUNDS, entryType: "DEBIT", amount: totalAmount },
+          { accountCode: ACCOUNT_CODES.PAYSTACK_CLEARING, entryType: "CREDIT", amount: totalAmount },
+        ],
+      });
+    });
+
+    const hostPayableBefore = await db.transaction(async (tx) => {
+      const [account] = await tx
+        .select({ id: schema.ledgerAccounts.id })
+        .from(schema.ledgerAccounts)
+        .where(eq(schema.ledgerAccounts.code, ACCOUNT_CODES.HOST_PAYABLE))
+        .limit(1);
+      if (!account) return 0;
+      const [sums] = await tx
+        .select({
+          credit: sql<number>`COALESCE(SUM(CASE WHEN ${schema.ledgerEntries.entryType} = 'CREDIT' THEN ${schema.ledgerEntries.amount} ELSE 0 END), 0)::int`,
+          debit: sql<number>`COALESCE(SUM(CASE WHEN ${schema.ledgerEntries.entryType} = 'DEBIT' THEN ${schema.ledgerEntries.amount} ELSE 0 END), 0)::int`,
+        })
+        .from(schema.ledgerEntries)
+        .where(eq(schema.ledgerEntries.accountId, account.id));
+      return (sums?.credit || 0) - (sums?.debit || 0);
+    });
+
     const refundResult = await FinanceService.processRefund("usr_admin_default", {
       bookingId: refundBookingId,
       reason: "Guest cancelled reservation ahead of time",
-      adminNotes: "Paystack fee retained; accommodation refunded in full",
+      adminNotes: "Funded from commission account 1040",
     });
 
     assert.equal(refundResult.success, true);
-    assert.equal(refundResult.refundedAmount, 100000, "Refunded accommodation is ₦100,000");
-    assert.equal(refundResult.processingFeeRetained, 1625, "Processing fee retained is ₦1,625");
+    assert.equal(refundResult.refundedAmount, totalAmount, "Refund uses the verified payment amount");
+    assert.equal(refundResult.processingFeeRetained, 0, "Processing fee is not retained as a second charge");
+    assert.equal(refundResult.fundingAccount, "1040");
 
-    // Verify refund row
+    assert.equal(typeof refundResult.refundId, "string");
     const [refundRecord] = await db
       .select()
       .from(schema.refunds)
-      .where(eq(schema.refunds.id, refundResult.refundId));
+      .where(eq(schema.refunds.id, refundResult.refundId as string));
 
-    assert.equal(refundRecord.status, "PROCESSED");
-    assert.equal(refundRecord.refundableAmount, 100000);
-    assert.equal(refundRecord.nonRefundableProcessingFee, 1625);
+    assert.equal(refundRecord.status, "SUCCESSFUL");
+    assert.equal(refundRecord.refundableAmount, totalAmount);
 
-    // Verify Payout record neutralized
     const [payoutRec] = await db
       .select()
       .from(schema.payouts)
       .where(eq(schema.payouts.bookingId, refundBookingId));
 
-    assert.equal(payoutRec.status, "CANCELLED", "Scheduled payout neutralized");
+    assert.notEqual(payoutRec.status, "CANCELLED", "Host payout is not cancelled to fund the refund");
+
+    const hostPayableAfter = await db.transaction(async (tx) => {
+      const [account] = await tx
+        .select({ id: schema.ledgerAccounts.id })
+        .from(schema.ledgerAccounts)
+        .where(eq(schema.ledgerAccounts.code, ACCOUNT_CODES.HOST_PAYABLE))
+        .limit(1);
+      if (!account) return 0;
+      const [sums] = await tx
+        .select({
+          credit: sql<number>`COALESCE(SUM(CASE WHEN ${schema.ledgerEntries.entryType} = 'CREDIT' THEN ${schema.ledgerEntries.amount} ELSE 0 END), 0)::int`,
+          debit: sql<number>`COALESCE(SUM(CASE WHEN ${schema.ledgerEntries.entryType} = 'DEBIT' THEN ${schema.ledgerEntries.amount} ELSE 0 END), 0)::int`,
+        })
+        .from(schema.ledgerEntries)
+        .where(eq(schema.ledgerEntries.accountId, account.id));
+      return (sums?.credit || 0) - (sums?.debit || 0);
+    });
+    assert.equal(hostPayableAfter, hostPayableBefore, "Host payable is not debited for the refund");
   });
 
   test("7. Trial Balance Integrity: Entire platform ledger balances with 0 imbalance", async () => {

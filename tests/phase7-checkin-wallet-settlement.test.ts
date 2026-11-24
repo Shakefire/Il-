@@ -8,7 +8,8 @@ import { bookingsService } from "../backend/src/modules/bookings/bookings.servic
 import { FinanceService } from "../backend/src/modules/finance/finance.service"
 import { LedgerService } from "../backend/src/modules/finance/ledger.service"
 process.env.PAYSTACK_MOCK_TRANSFERS = "true"
-process.env.NODE_ENV = process.env.NODE_ENV || "test"
+const testEnv = process.env as Record<string, string | undefined>
+if (!testEnv.NODE_ENV) testEnv.NODE_ENV = "test"
 
 describe("Phase 7: Check-in, settlement, wallet, withdrawals", async () => {
   const db = getDb()

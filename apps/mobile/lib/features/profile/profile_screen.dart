@@ -10,9 +10,9 @@ import '../../core/api/ile_api.dart';
 import '../../core/constants/app_routes.dart';
 import '../../core/guest_flow_errors.dart';
 import '../../core/push/push_messaging_service.dart';
+import '../../core/state/session_store.dart';
 import '../../core/utils/user_role.dart';
 import '../../shared/widgets/editorial_chrome.dart';
-import '../../shared/widgets/ile_button.dart';
 import '../../shared/widgets/ile_error_state.dart';
 import '../../shared/widgets/skeleton/guest_home_skeleton.dart';
 
@@ -59,23 +59,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _handleSignOut() async {
     final PushMessagingService push = context.read<PushMessagingService>();
-    final IleApi api = context.read<IleApi>();
+    final SessionStore session = context.read<SessionStore>();
     try {
       await push.clearOnLogout();
     } catch (_) {
       // Push revoke is best-effort; session clear still proceeds.
     }
-    await api.logout();
+    await session.logout();
     if (!mounted) return;
     setState(() => _user = null);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Signed out on this device')),
-    );
-  }
-
-  void _openLogin() {
-    context.push(
-      '${AppRoutes.login}?returnTo=${Uri.encodeComponent(AppRoutes.profile)}',
     );
   }
 
@@ -119,116 +113,109 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: EditorialColors.background,
       body: SafeArea(
         bottom: false,
-        child: ListView(
-          padding: EdgeInsets.fromLTRB(
-            AppSpacing.screenHorizontal,
-            12,
-            AppSpacing.screenHorizontal,
-            bottom,
-          ),
+        child: Column(
           children: [
-            Text('Profile', style: AppTypography.screenTitle),
-            const SizedBox(height: AppSpacing.lg),
-            if (!signedIn)
-              EditorialCard(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const _Avatar(letter: 'G'),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Welcome to Ilé',
-                      style: AppTypography.sectionHeading.copyWith(fontSize: 28),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Sign in to manage reservations and messages. You can still browse stays and save them on this phone.',
-                      style: AppTypography.body.copyWith(
-                        color: EditorialColors.inkMuted,
+            EditorialToolbar(
+              title: 'Profile',
+              explorePill: true,
+              trailing: EditorialSettingsButton(
+                onPressed: signedIn
+                    ? () => context.push(AppRoutes.editProfile)
+                    : () => context.push(AppRoutes.help),
+              ),
+            ),
+            Expanded(
+              child: !signedIn
+                  ? const GuestSignInGate(
+                      returnPath: AppRoutes.profile,
+                      title: 'Welcome to Ilé',
+                      message:
+                          'Sign in to manage reservations and messages. You can still browse stays and save them on this phone.',
+                      icon: Icons.person_outline_rounded,
+                    )
+                  : ListView(
+                      padding: EdgeInsets.fromLTRB(
+                        AppSpacing.screenHorizontal,
+                        12,
+                        AppSpacing.screenHorizontal,
+                        bottom,
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    IleButton(
-                      label: 'Continue with phone or email',
-                      onPressed: _openLogin,
-                      isExpanded: true,
-                    ),
-                  ],
-                ),
-              )
-            else
-              EditorialCard(
-                child: Row(
-                  children: [
-                    _Avatar(letter: name.isNotEmpty ? name[0].toUpperCase() : 'U'),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            name.isEmpty ? email : name,
-                            style: AppTypography.cardTitle,
-                          ),
-                          if (email.isNotEmpty)
-                            Text(
-                              email,
-                              style: AppTypography.caption.copyWith(
-                                color: EditorialColors.inkMuted,
+                      children: [
+                        EditorialCard(
+                          child: Row(
+                            children: [
+                              _Avatar(
+                                letter: name.isNotEmpty
+                                    ? name[0].toUpperCase()
+                                    : 'U',
                               ),
-                            ),
-                        ],
-                      ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      name.isEmpty ? email : name,
+                                      style: AppTypography.cardTitle,
+                                    ),
+                                    if (email.isNotEmpty)
+                                      Text(
+                                        email,
+                                        style: AppTypography.caption.copyWith(
+                                          color: EditorialColors.inkMuted,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        _HostBanner(user: _user),
+                        const SizedBox(height: AppSpacing.xl),
+                        const _SectionLabel('Account'),
+                        _ProfileTile(
+                          icon: Icons.edit_outlined,
+                          label: 'Personal information',
+                          onTap: () => context.push(AppRoutes.editProfile),
+                        ),
+                        _ProfileTile(
+                          icon: Icons.notifications_outlined,
+                          label: 'Notifications',
+                          onTap: () => context.push(AppRoutes.notifications),
+                        ),
+                        _ProfileTile(
+                          icon: Icons.luggage_outlined,
+                          label: 'Your reservations',
+                          onTap: () => context.go(AppRoutes.bookings),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        const _SectionLabel('Support'),
+                        _ProfileTile(
+                          icon: Icons.help_outline_rounded,
+                          label: 'Help centre',
+                          onTap: () => context.push(AppRoutes.help),
+                        ),
+                        _ProfileTile(
+                          icon: Icons.description_outlined,
+                          label: 'Terms',
+                          onTap: () => context.push(AppRoutes.terms),
+                        ),
+                        _ProfileTile(
+                          icon: Icons.privacy_tip_outlined,
+                          label: 'Privacy',
+                          onTap: () => context.push(AppRoutes.privacy),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        _ProfileTile(
+                          icon: Icons.logout_rounded,
+                          label: 'Sign out',
+                          onTap: _handleSignOut,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: AppSpacing.lg),
-            _HostBanner(user: _user),
-            const SizedBox(height: AppSpacing.xl),
-            if (signedIn) ...[
-              const _SectionLabel('Account'),
-              _ProfileTile(
-                icon: Icons.edit_outlined,
-                label: 'Personal information',
-                onTap: () => context.push(AppRoutes.editProfile),
-              ),
-              _ProfileTile(
-                icon: Icons.notifications_outlined,
-                label: 'Notifications',
-                onTap: () => context.push(AppRoutes.notifications),
-              ),
-              _ProfileTile(
-                icon: Icons.luggage_outlined,
-                label: 'Your reservations',
-                onTap: () => context.go(AppRoutes.bookings),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-            ],
-            const _SectionLabel('Support'),
-            _ProfileTile(
-              icon: Icons.help_outline_rounded,
-              label: 'Help centre',
-              onTap: () => context.push(AppRoutes.help),
             ),
-            _ProfileTile(
-              icon: Icons.description_outlined,
-              label: 'Terms',
-              onTap: () => context.push(AppRoutes.terms),
-            ),
-            _ProfileTile(
-              icon: Icons.privacy_tip_outlined,
-              label: 'Privacy',
-              onTap: () => context.push(AppRoutes.privacy),
-            ),
-            if (signedIn) ...[
-              const SizedBox(height: AppSpacing.lg),
-              _ProfileTile(
-                icon: Icons.logout_rounded,
-                label: 'Sign out',
-                onTap: _handleSignOut,
-              ),
-            ],
           ],
         ),
       ),

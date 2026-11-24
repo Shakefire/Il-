@@ -82,7 +82,7 @@ const TABLE_STATEMENTS = [
   sql`
     CREATE TABLE IF NOT EXISTS properties (
       id VARCHAR(100) PRIMARY KEY,
-      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
       slug VARCHAR(255) NOT NULL UNIQUE,
       title VARCHAR(255) NOT NULL,
       tagline TEXT,
@@ -202,7 +202,7 @@ const TABLE_STATEMENTS = [
   sql`
     CREATE TABLE IF NOT EXISTS payments (
       id VARCHAR(100) PRIMARY KEY,
-      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE RESTRICT,
       reference VARCHAR(100) NOT NULL UNIQUE,
       amount INT NOT NULL,
       currency VARCHAR(10) NOT NULL DEFAULT 'NGN',
@@ -218,8 +218,8 @@ const TABLE_STATEMENTS = [
   sql`
     CREATE TABLE IF NOT EXISTS host_earnings (
       id VARCHAR(100) PRIMARY KEY,
-      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE RESTRICT,
       gross_amount INT NOT NULL,
       commission_amount INT NOT NULL,
       net_amount INT NOT NULL,
@@ -242,9 +242,9 @@ const TABLE_STATEMENTS = [
   sql`
     CREATE TABLE IF NOT EXISTS reviews (
       id VARCHAR(100) PRIMARY KEY,
-      property_id VARCHAR(100) NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
-      booking_id VARCHAR(100) NOT NULL UNIQUE REFERENCES bookings(id) ON DELETE CASCADE,
-      guest_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      property_id VARCHAR(100) NOT NULL REFERENCES properties(id) ON DELETE RESTRICT,
+      booking_id VARCHAR(100) NOT NULL UNIQUE REFERENCES bookings(id) ON DELETE RESTRICT,
+      guest_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
       overall_rating INT NOT NULL,
       cleanliness_rating INT,
       accuracy_rating INT,
@@ -314,8 +314,8 @@ const TABLE_STATEMENTS = [
   sql`
     CREATE TABLE IF NOT EXISTS payouts (
       id VARCHAR(100) PRIMARY KEY,
-      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE RESTRICT,
+      host_id VARCHAR(100) NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
       amount INT NOT NULL,
       currency VARCHAR(10) NOT NULL DEFAULT 'NGN',
       bank_code VARCHAR(20),
@@ -338,7 +338,7 @@ const TABLE_STATEMENTS = [
   sql`
     CREATE TABLE IF NOT EXISTS refunds (
       id VARCHAR(100) PRIMARY KEY,
-      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+      booking_id VARCHAR(100) NOT NULL REFERENCES bookings(id) ON DELETE RESTRICT,
       guest_id VARCHAR(100) REFERENCES users(id) ON DELETE SET NULL,
       gross_paid INT NOT NULL,
       non_refundable_processing_fee INT NOT NULL,
@@ -393,6 +393,8 @@ export async function initAndSeedDb() {
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(30) NOT NULL DEFAULT 'ACTIVE';`,
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_attempts INT NOT NULL DEFAULT 0;`,
     sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_sent_at TIMESTAMPTZ;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verification_attempts INT NOT NULL DEFAULT 0;`,
+    sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verification_sent_at TIMESTAMPTZ;`,
 
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_step INT NOT NULL DEFAULT 1;`,
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT FALSE;`,
@@ -465,12 +467,18 @@ export async function initAndSeedDb() {
     sql`UPDATE platform_settings SET default_host_payout_pct = COALESCE(default_host_payout_pct, 100) WHERE id = 'default';`,
 
     // Paystack Remediation & Automated Transfers Schema
+    sql`ALTER TABLE properties ADD COLUMN IF NOT EXISTS host_base_price INT;`,
+    sql`ALTER TABLE properties ADD COLUMN IF NOT EXISTS things_to_know JSONB;`,
+    sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS bank_account_verified_at TIMESTAMPTZ;`,
     sql`ALTER TABLE profiles ADD COLUMN IF NOT EXISTS paystack_recipient_code VARCHAR(100);`,
     sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS paystack_recipient_code VARCHAR(100);`,
     sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS transfer_status VARCHAR(50) NOT NULL DEFAULT 'UNINITIATED';`,
     sql`ALTER TABLE payouts ADD COLUMN IF NOT EXISTS transfer_failure_reason TEXT;`,
     sql`CREATE UNIQUE INDEX IF NOT EXISTS ledger_journals_reference_event_type_unique ON ledger_journals (reference, event_type);`,
-    sql`CREATE INDEX IF NOT EXISTS webhook_events_event_id_provider_idx ON webhook_events (gateway_provider, event_id);`,
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS webhook_events_provider_event_uidx ON webhook_events (gateway_provider, event_id) WHERE event_id IS NOT NULL;`,
+
+    // Phase 4/5: shared rate-limit buckets (no digital pass tables)
+    sql`CREATE TABLE IF NOT EXISTS rate_limit_buckets (bucket_key VARCHAR(200) PRIMARY KEY, hit_count INT NOT NULL DEFAULT 0, reset_at TIMESTAMPTZ NOT NULL);`,
 
     sql`UPDATE properties SET moderation_status = 'SUSPENDED' WHERE status = 'SUSPENDED' AND (moderation_status IS NULL OR moderation_status = 'NONE');`,
     sql`UPDATE properties SET moderation_status = 'REJECTED' WHERE status = 'REJECTED' AND (moderation_status IS NULL OR moderation_status = 'NONE');`,
@@ -493,7 +501,10 @@ export async function initAndSeedDb() {
     { id: "acc_2010", code: "2010", name: "Advance Guest Deposits", type: "LIABILITY", description: "Escrow liability held for guest reservations until check-in" },
     { id: "acc_2020", code: "2020", name: "Host Settlement Payable", type: "LIABILITY", description: "Net payout liability owed to hosts awaiting admin disbursement" },
     { id: "acc_2030", code: "2030", name: "Paystack Processing Fee Escrow", type: "LIABILITY", description: "Pass-through payment processing fees collected from guests" },
-    { id: "acc_4010", code: "4010", name: "Platform Commission Revenue", type: "REVENUE", description: "Earned platform commission on completed bookings" },
+    { id: "acc_1040", code: "1040", name: "Platform Commission Funds", type: "ASSET", description: "Reconcilable commission cash. The only account that may fund an admin guest refund." },
+    { id: "acc_1050", code: "1050", name: "Commission Funds Reserved", type: "ASSET", description: "Commission cash reserved for an in-flight admin refund." },
+    { id: "acc_4010", code: "4010", name: "Platform Commission Revenue", type: "REVENUE", description: "Earned platform commission on completed bookings. Not gross booking volume." },
+    { id: "acc_5030", code: "5030", name: "Guest Refunds From Commission", type: "EXPENSE", description: "Guest refunds settled from platform commission funds." },
     { id: "acc_5010", code: "5010", name: "Payment Processing Expense", type: "EXPENSE", description: "Paystack domestic gateway transaction charges" },
     { id: "acc_5020", code: "5020", name: "Payout Transfer Fee", type: "EXPENSE", description: "Bank NIP / payout disbursement transfer fees" },
   ];
@@ -587,8 +598,8 @@ export async function initAndSeedDb() {
         beds: p.bedrooms,
         maxGuests: p.maxGuests,
         pricePerNight: p.pricePerNight,
-        cleaningFee: Math.round(p.pricePerNight * 0.05),
-        serviceFeePct: 8,
+        cleaningFee: 0,
+        serviceFeePct: 0,
         currency: "NGN",
         minimumNights: 1,
         city: p.city,

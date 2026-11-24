@@ -1,7 +1,8 @@
 import { FastifyInstance } from "fastify";
 import { getDb, schema } from "../../db/client";
-import { eq, and, desc, avg, count, sql } from "drizzle-orm";
-import { authenticateRequest } from "../../lib/security";
+import { eq, and, desc } from "drizzle-orm";
+import { authenticateRequest, requireRole } from "../../lib/security";
+import { toPlainText } from "../../lib/plain-text";
 import { parsePagination, paginatedResponse } from "../../lib/pagination";
 import { BOOKING_STATUS } from "../../config/constants";
 import { z } from "zod";
@@ -28,7 +29,7 @@ const HostResponseSchema = z.object({
 
 // ─── Service Functions ───
 
-async function createReview(
+export async function createReview(
   guestId: string,
   data: z.infer<typeof CreateReviewSchema>
 ) {
@@ -50,9 +51,13 @@ async function createReview(
     return { error: "Booking not found or does not belong to you.", status: 404 };
   }
 
-  // 2. Must be CONFIRMED or COMPLETED
   if (booking.status !== BOOKING_STATUS.CONFIRMED && booking.status !== BOOKING_STATUS.COMPLETED) {
-    return { error: "You can only review confirmed or completed bookings.", status: 400 };
+    return { error: "You can review a stay only after it is confirmed.", status: 400 };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (booking.checkOutDate >= today) {
+    return { error: "You can review this stay after checkout.", status: 400 };
   }
 
   // 3. Check for existing review
@@ -82,16 +87,19 @@ async function createReview(
       valueRating: data.valueRating ?? null,
       communicationRating: data.communicationRating ?? null,
       infrastructureRating: data.infrastructureRating ?? null,
-      title: data.title ?? null,
-      body: data.body ?? null,
+      title: data.title ? toPlainText(data.title, 200) : null,
+      body: data.body ? toPlainText(data.body, 2000) : null,
     })
     .returning();
 
   // 5. Recalculate property average rating
   await recalculatePropertyRating(booking.propertyId);
 
-  // 6. Notify host of new guest review via Resend
-  import("../notifications/notifications.service").then(async ({ sendEmail, hostNewReviewEmail }) => {
+  // 6. Notify host of new guest review across in-app, email, and push
+  Promise.all([
+    import("../notifications/notifications.service"),
+    import("../notifications/orchestrator"),
+  ]).then(async ([{ hostNewReviewEmail }, { notifyUserEvent }]) => {
     try {
       const [property] = await db
         .select({ title: schema.properties.title, hostId: schema.properties.hostId })
@@ -101,7 +109,7 @@ async function createReview(
 
       if (property) {
         const [host] = await db
-          .select({ email: schema.users.email, firstName: schema.users.firstName })
+          .select({ id: schema.users.id, email: schema.users.email, firstName: schema.users.firstName, phone: schema.users.phone })
           .from(schema.users)
           .where(eq(schema.users.id, property.hostId))
           .limit(1);
@@ -116,18 +124,35 @@ async function createReview(
           ? `${guest.firstName} ${guest.lastName}`
           : `${booking.guestFirstName} ${booking.guestLastName}`.trim() || "A guest";
 
-        if (host?.email) {
-          sendEmail(
-            hostNewReviewEmail({
-              hostName: host.firstName,
-              hostEmail: host.email,
-              propertyTitle: property.title,
-              guestName,
-              rating: data.overallRating,
-              reviewTitle: data.title,
-              reviewBody: data.body,
-            })
-          ).catch((e) => console.warn("[Reviews] Failed to send new review email to host:", e));
+        if (host) {
+          notifyUserEvent({
+            userId: host.id,
+            event: "HOST_NEW_REVIEW",
+            entityType: "review",
+            entityId: booking.propertyId,
+            category: "review",
+            channels: {
+              category: "review",
+              email: host.email
+                ? hostNewReviewEmail({
+                    hostName: host.firstName,
+                    hostEmail: host.email,
+                    propertyTitle: property.title,
+                    guestName,
+                    rating: data.overallRating,
+                    reviewTitle: data.title,
+                    reviewBody: data.body,
+                  })
+                : undefined,
+              inbox: {
+                userId: host.id,
+                title: "New guest review received",
+                body: `${guestName} left a ${data.overallRating}★ review for ${property.title}: "${data.title}"`,
+                deepLink: `/host/reviews`,
+              },
+              push: true,
+            },
+          });
         }
       }
     } catch (err) {
@@ -138,44 +163,47 @@ async function createReview(
   return { review, status: 201 };
 }
 
-async function recalculatePropertyRating(propertyId: string) {
+async function hiddenReviewIds(): Promise<Set<string>> {
   const db = getDb();
-
-  const [stats] = await db
-    .select({
-      avgRating: avg(schema.reviews.overallRating),
-      totalReviews: count(schema.reviews.id),
-    })
-    .from(schema.reviews)
-    .where(eq(schema.reviews.propertyId, propertyId));
-
-  if (stats) {
-    const newRating = stats.avgRating ? parseFloat(String(stats.avgRating)) : 5.0;
-    const reviewCount = Number(stats.totalReviews) || 0;
-
-    await db
-      .update(schema.properties)
-      .set({
-        rating: Math.round(newRating * 10) / 10,
-        reviewCount,
-        updatedAt: new Date(),
+  try {
+    const rows = await db
+      .select({
+        reviewId: schema.reviewModeration.reviewId,
+        status: schema.reviewModeration.status,
       })
-      .where(eq(schema.properties.id, propertyId));
+      .from(schema.reviewModeration);
+    return new Set(rows.filter((row) => row.status === "HIDDEN").map((row) => row.reviewId));
+  } catch {
+    return new Set();
   }
 }
 
-async function getPropertyReviews(propertyId: string, pagination: ReturnType<typeof parsePagination>) {
+async function recalculatePropertyRating(propertyId: string) {
   const db = getDb();
-
-  // Count total
-  const [countResult] = await db
-    .select({ total: count(schema.reviews.id) })
+  const hidden = await hiddenReviewIds();
+  const rows = await db
+    .select({ id: schema.reviews.id, overallRating: schema.reviews.overallRating })
     .from(schema.reviews)
     .where(eq(schema.reviews.propertyId, propertyId));
+  const visible = rows.filter((row) => !hidden.has(row.id));
+  const newRating = visible.length
+    ? visible.reduce((sum, row) => sum + row.overallRating, 0) / visible.length
+    : 5.0;
 
-  const total = Number(countResult?.total) || 0;
+  await db
+    .update(schema.properties)
+    .set({
+      rating: Math.round(newRating * 10) / 10,
+      reviewCount: visible.length,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.properties.id, propertyId));
+}
 
-  // Fetch page
+export async function getPropertyReviews(propertyId: string, pagination: ReturnType<typeof parsePagination>) {
+  const db = getDb();
+  const hidden = await hiddenReviewIds();
+
   const reviews = await db
     .select({
       id: schema.reviews.id,
@@ -198,16 +226,39 @@ async function getPropertyReviews(propertyId: string, pagination: ReturnType<typ
     .from(schema.reviews)
     .innerJoin(schema.users, eq(schema.reviews.guestId, schema.users.id))
     .where(eq(schema.reviews.propertyId, propertyId))
-    .orderBy(desc(schema.reviews.createdAt))
-    .limit(pagination.limit)
-    .offset(pagination.offset);
+    .orderBy(desc(schema.reviews.createdAt));
 
-  return paginatedResponse(reviews, total, pagination);
+  const visible = reviews.filter((review) => !hidden.has(review.id));
+  const page = visible.slice(pagination.offset, pagination.offset + pagination.limit);
+  return paginatedResponse(page, visible.length, pagination);
 }
 
 // ─── Routes ───
 
 export async function reviewsRoutes(fastify: FastifyInstance) {
+  fastify.get("/mine", async (request, reply) => {
+    const session = await authenticateRequest(request, reply);
+    if (!session) return;
+    const db = getDb();
+    const rows = await db
+      .select()
+      .from(schema.reviews)
+      .where(eq(schema.reviews.guestId, session.userId))
+      .orderBy(desc(schema.reviews.createdAt));
+    let hidden = new Set<string>();
+    try {
+      hidden = await hiddenReviewIds();
+    } catch {
+      hidden = new Set();
+    }
+    return reply.send({
+      reviews: rows.map((row) => ({
+        ...row,
+        moderationStatus: hidden.has(row.id) ? "HIDDEN" : "VISIBLE",
+      })),
+    });
+  });
+
   // POST /api/reviews — Create a review
   fastify.post("/", async (request, reply) => {
     const session = await authenticateRequest(request, reply);
@@ -287,10 +338,15 @@ export async function reviewsRoutes(fastify: FastifyInstance) {
       return reply.status(403).send({ error: "You can only respond to reviews on your own properties." });
     }
 
+    const responseText = toPlainText(parse.data.response, 1000);
+    if (!responseText) {
+      return reply.status(400).send({ error: "Response is empty." });
+    }
+
     const [updated] = await db
       .update(schema.reviews)
       .set({
-        hostResponse: parse.data.response,
+        hostResponse: responseText,
         hostRespondedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -302,5 +358,57 @@ export async function reviewsRoutes(fastify: FastifyInstance) {
       message: "Response posted successfully.",
       review: updated,
     });
+  });
+
+  fastify.post("/:id/moderate", async (request, reply) => {
+    const session = await requireRole(request, reply, ["admin"]);
+    if (!session) return;
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { status?: string; reason?: string };
+    const status = (body.status || "").toUpperCase();
+    if (status !== "VISIBLE" && status !== "HIDDEN") {
+      return reply.status(400).send({ error: "status must be VISIBLE or HIDDEN." });
+    }
+    const reason = toPlainText(body.reason || "", 1000);
+    if (status === "HIDDEN" && !reason) {
+      return reply.status(400).send({ error: "A reason is required to hide a review." });
+    }
+    const db = getDb();
+    const [review] = await db.select().from(schema.reviews).where(eq(schema.reviews.id, id)).limit(1);
+    if (!review) return reply.status(404).send({ error: "Review not found" });
+    try {
+      await db
+        .insert(schema.reviewModeration)
+        .values({
+          reviewId: id,
+          status,
+          reason,
+          moderatedBy: session.userId,
+          moderatedAt: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: schema.reviewModeration.reviewId,
+          set: { status, reason, moderatedBy: session.userId, moderatedAt: new Date() },
+        });
+    } catch (err: any) {
+      return reply.status(503).send({
+        error: "Review moderation storage is not available. Apply migration 0010_phase3_platform.sql.",
+      });
+    }
+    await recalculatePropertyRating(review.propertyId);
+    await db.insert(schema.auditLogs).values({
+      id: `audit_${crypto.randomUUID()}`,
+      userId: session.userId,
+      action: status === "HIDDEN" ? "REVIEW_HIDDEN" : "REVIEW_RESTORED",
+      entityType: "review",
+      entityId: id,
+      details: JSON.stringify({
+        reason,
+        old: { moderationStatus: status === "HIDDEN" ? "VISIBLE" : "HIDDEN" },
+        new: { moderationStatus: status },
+      }),
+      ipAddress: request.ip,
+    });
+    return reply.send({ success: true, reviewId: id, moderationStatus: status });
   });
 }

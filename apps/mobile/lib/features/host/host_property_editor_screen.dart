@@ -14,6 +14,8 @@ import '../../core/api/ile_api.dart';
 import '../../shared/widgets/ile_button.dart';
 import '../../shared/widgets/ile_circular_back_button.dart';
 import '../../shared/widgets/ile_loading_indicator.dart';
+import '../../shared/widgets/location_autocomplete_sheet.dart';
+import '../../core/models/location_result.dart';
 import 'host_chrome.dart';
 
 /// Multi-step create / edit listing with media upload, cover, and publish actions.
@@ -48,6 +50,8 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
   final TextEditingController _maxGuestsCtrl = TextEditingController(text: '2');
   final TextEditingController _bedroomsCtrl = TextEditingController(text: '1');
   final TextEditingController _bathroomsCtrl = TextEditingController(text: '1');
+  double? _latitude;
+  double? _longitude;
 
   String _propertyType = 'Apartment';
   String _status = 'DRAFT';
@@ -112,6 +116,8 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
       _bedroomsCtrl.text = ((prop['bedrooms'] as num?) ?? 1).toInt().toString();
       _bathroomsCtrl.text =
           ((prop['bathrooms'] as num?) ?? 1).toInt().toString();
+      _latitude = (prop['latitude'] as num?)?.toDouble();
+      _longitude = (prop['longitude'] as num?)?.toDouble();
       _propertyType = prop['propertyType']?.toString() ?? 'Apartment';
       _status = prop['status']?.toString() ?? 'DRAFT';
       _coverUrl = prop['coverImage']?.toString();
@@ -154,6 +160,8 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
       'maxGuests': int.tryParse(_maxGuestsCtrl.text.trim()) ?? 2,
       'bedrooms': int.tryParse(_bedroomsCtrl.text.trim()) ?? 1,
       'bathrooms': int.tryParse(_bathroomsCtrl.text.trim()) ?? 1,
+      if (_latitude != null) 'latitude': _latitude,
+      if (_longitude != null) 'longitude': _longitude,
       if (_coverUrl != null && _coverUrl!.isNotEmpty) 'coverImage': _coverUrl,
       if (_imageUrls.isNotEmpty) 'images': _imageUrls,
     };
@@ -207,11 +215,33 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
       setState(() => _error = 'Save basics first so media can attach to the listing.');
       return;
     }
+
+    final ImageSource? selectedSource = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (BuildContext ctx) => SafeArea(
+        child: Wrap(
+          children: <Widget>[
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Choose from photo gallery'),
+              onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (selectedSource == null) return;
+
     setState(() => _saving = true);
     try {
       final ImagePicker picker = ImagePicker();
       final XFile? file = await picker.pickImage(
-        source: ImageSource.gallery,
+        source: selectedSource,
         imageQuality: 85,
         maxWidth: 2400,
       );
@@ -369,6 +399,42 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
     }
   }
 
+  Future<void> _lookupAddress({String? initialQuery}) async {
+    final String query = initialQuery ??
+        (_addressCtrl.text.isNotEmpty
+            ? _addressCtrl.text
+            : (_neighborhoodCtrl.text.isNotEmpty
+                ? '${_neighborhoodCtrl.text}, ${_cityCtrl.text}'
+                : _cityCtrl.text));
+
+    final LocationResult? loc = await LocationAutocompleteSheet.show(
+      context,
+      initialQuery: query,
+      title: 'Find Property Address / GPS',
+    );
+    if (loc == null || !mounted) return;
+
+    setState(() {
+      if (loc.displayName.isNotEmpty) {
+        _addressCtrl.text = loc.displayName;
+      } else if (loc.shortLabel.isNotEmpty) {
+        _addressCtrl.text = loc.shortLabel;
+      }
+      if (loc.city.isNotEmpty) {
+        _cityCtrl.text = loc.city;
+      }
+      if (loc.neighborhood.isNotEmpty) {
+        _neighborhoodCtrl.text = loc.neighborhood;
+      }
+      if (loc.state.isNotEmpty) {
+        _stateCtrl.text = loc.state;
+      }
+      _latitude = loc.latitude;
+      _longitude = loc.longitude;
+      _notice = 'Location set: ${loc.shortLabel}';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -474,6 +540,18 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
   List<Widget> _basicsStep() {
     return <Widget>[
       Text('Basics', style: AppTypography.sectionHeading),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        onPressed: () => _lookupAddress(),
+        icon: const Icon(Icons.location_searching, size: 18),
+        label: const Text('Search Address / Auto-fill Location'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.brandPrimary,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
+      const SizedBox(height: 8),
       TextField(
         controller: _titleCtrl,
         decoration: const InputDecoration(labelText: 'Title'),
@@ -493,11 +571,29 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
       ),
       TextField(
         controller: _cityCtrl,
-        decoration: const InputDecoration(labelText: 'City'),
+        decoration: InputDecoration(
+          labelText: 'City',
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.location_searching, size: 20),
+            tooltip: 'Search City or Location',
+            onPressed: () => _lookupAddress(initialQuery: _cityCtrl.text),
+          ),
+        ),
       ),
       TextField(
         controller: _neighborhoodCtrl,
-        decoration: const InputDecoration(labelText: 'Neighborhood'),
+        decoration: InputDecoration(
+          labelText: 'Neighborhood',
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.location_searching, size: 20),
+            tooltip: 'Search Neighborhood or Location',
+            onPressed: () => _lookupAddress(
+              initialQuery: _neighborhoodCtrl.text.isNotEmpty
+                  ? '${_neighborhoodCtrl.text}, ${_cityCtrl.text}'
+                  : _cityCtrl.text,
+            ),
+          ),
+        ),
       ),
       TextField(
         controller: _stateCtrl,
@@ -525,8 +621,14 @@ class _HostPropertyEditorScreenState extends State<HostPropertyEditorScreen> {
       ),
       TextField(
         controller: _addressCtrl,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           labelText: 'Exact address (private until confirmed)',
+          hintText: 'e.g. 14 Danube Street, Maitama, Abuja',
+          suffixIcon: IconButton(
+            icon: const Icon(Icons.location_searching, size: 20),
+            tooltip: 'Search Address or Detect GPS',
+            onPressed: () => _lookupAddress(initialQuery: _addressCtrl.text),
+          ),
         ),
       ),
       TextField(

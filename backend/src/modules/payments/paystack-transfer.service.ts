@@ -7,6 +7,10 @@
  */
 
 import { env } from "../../config/env";
+import {
+  canUsePaystackDevMocks,
+  paystackNotConfiguredError,
+} from "../../lib/payment-mocks";
 import crypto from "crypto";
 
 export interface CreateRecipientParams {
@@ -51,6 +55,7 @@ export interface VerifyTransferResult {
   amountNaira: number;
   paidAt?: Date;
   failureReason?: string;
+  error?: string;
   rawResponse?: any;
 }
 
@@ -77,8 +82,8 @@ export class PaystackTransferService {
       return { success: false, error: "Account holder name is required." };
     }
 
-    if (process.env.NODE_ENV === "test" || process.env.PAYSTACK_MOCK_TRANSFERS === "true" || !env.PAYSTACK_SECRET_KEY) {
-      // Mock recipient in dev/test without key or in automated tests
+    if (canUsePaystackDevMocks()) {
+      // Mock recipient in dev/test only — never in production
       const mockCode = `RCP_${crypto.randomBytes(8).toString("hex")}`;
       return {
         success: true,
@@ -86,6 +91,9 @@ export class PaystackTransferService {
         accountName: name.toUpperCase().trim(),
         accountNumber: cleanedAcc,
       };
+    }
+    if (!env.PAYSTACK_SECRET_KEY) {
+      return { success: false, error: paystackNotConfiguredError() };
     }
 
     try {
@@ -163,15 +171,43 @@ export class PaystackTransferService {
 
     const amountKobo = Math.round(amountNaira * 100);
 
-    if (process.env.NODE_ENV === "test" || process.env.PAYSTACK_MOCK_TRANSFERS === "true" || !env.PAYSTACK_SECRET_KEY) {
-      // Mock successful initiation in dev/test without key or during test runs
+    if (canUsePaystackDevMocks()) {
+      const forced = (process.env.PAYSTACK_TRANSFER_MOCK_RESULT || "pending").toLowerCase();
       const mockTransferCode = `TRF_${crypto.randomBytes(8).toString("hex")}`;
+      if (forced === "failed") {
+        return {
+          success: false,
+          transferCode: mockTransferCode,
+          reference,
+          status: "failed",
+          amountNaira,
+          error: "Mock transfer failed",
+        };
+      }
+      if (forced === "success") {
+        return {
+          success: true,
+          transferCode: mockTransferCode,
+          reference,
+          status: "success",
+          amountNaira,
+        };
+      }
       return {
         success: true,
         transferCode: mockTransferCode,
         reference,
         status: "pending",
         amountNaira,
+      };
+    }
+    if (!env.PAYSTACK_SECRET_KEY) {
+      return {
+        success: false,
+        reference,
+        status: "failed",
+        amountNaira,
+        error: paystackNotConfiguredError(),
       };
     }
 
@@ -256,6 +292,16 @@ export class PaystackTransferService {
     reference: string
   ): Promise<VerifyTransferResult> {
     if (!env.PAYSTACK_SECRET_KEY) {
+      if (!canUsePaystackDevMocks()) {
+        return {
+          success: false,
+          reference,
+          transferCode: "",
+          status: "failed",
+          amountNaira: 0,
+          error: paystackNotConfiguredError(),
+        };
+      }
       return {
         success: true,
         reference,

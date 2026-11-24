@@ -8,9 +8,10 @@ import '../../app/app_colors.dart';
 import '../../app/app_spacing.dart';
 import '../../app/app_typography.dart';
 import '../../core/api/api_client.dart';
-import '../../core/api/ile_api.dart';
 import '../../core/constants/app_routes.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/models/user.dart';
+import '../../core/state/session_store.dart';
 import '../../shared/widgets/widgets.dart';
 
 /// Six-digit email OTP verification against `/api/auth/verify-email`.
@@ -69,22 +70,32 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       _errorMessage = null;
     });
     try {
-      await context.read<IleApi>().verifyEmail(
-            email: widget.email,
-            code: code,
-          );
+      final SessionStore session = context.read<SessionStore>();
+      final User user = await session.verifyEmail(
+        email: widget.email,
+        code: code,
+      );
       if (!mounted) return;
       setState(() => _isVerifying = false);
-      await IleAlert.show(
+
+      // Determine authoritative post-verification destination based on role and onboarding status
+      final String destination;
+      if (user.isHost) {
+        destination = user.profile?.onboardingCompleted == true
+            ? AppRoutes.hostDashboard
+            : AppRoutes.hostOnboarding;
+      } else {
+        destination = AppRoutes.explore;
+      }
+
+      IleAlert.showSnackBar(
         context: context,
-        title: AppStrings.registerSuccessTitle,
-        message: AppStrings.registerSuccessBody,
-        confirmLabel: AppStrings.continueLabel,
-        onConfirm: () {
-          if (!mounted) return;
-          context.go(AppRoutes.home);
-        },
+        message: user.isHost
+            ? 'Email verified. Welcome to the Ilé Host Partner network.'
+            : 'Email verified. Welcome to Ilé.',
+        tone: IleAlertTone.info,
       );
+      context.go(destination);
     } on ApiException catch (err) {
       if (!mounted) return;
       _otpKey.currentState?.clear();
@@ -93,13 +104,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         _hasError = true;
         _errorMessage = err.message.isNotEmpty ? err.message : AppStrings.otpInvalid;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       _otpKey.currentState?.clear();
       setState(() {
         _isVerifying = false;
         _hasError = true;
-        _errorMessage = AppStrings.otpInvalid;
+        _errorMessage = e is ApiException ? e.message : AppStrings.otpInvalid;
       });
     }
   }
@@ -111,13 +122,14 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       _errorMessage = null;
     });
     try {
-      await context.read<IleApi>().resendEmailOtp(email: widget.email);
+      final SessionStore session = context.read<SessionStore>();
+      await session.resendOtp(email: widget.email);
       if (!mounted) return;
       _otpKey.currentState?.clear();
       _startCountdown();
       IleAlert.showSnackBar(
         context: context,
-        message: 'A new code was sent to your email.',
+        message: 'A new 6-digit verification code has been dispatched to ${widget.email}.',
         tone: IleAlertTone.info,
       );
     } on ApiException catch (err) {
@@ -125,6 +137,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       IleAlert.showSnackBar(
         context: context,
         message: err.message,
+        tone: IleAlertTone.critical,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      IleAlert.showSnackBar(
+        context: context,
+        message: 'Failed to resend verification code. Please try again.',
         tone: IleAlertTone.critical,
       );
     }
@@ -136,21 +155,45 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     final String destination = widget.email.isNotEmpty
         ? widget.email
         : widget.maskedPhone;
-    return Scaffold(
-      backgroundColor: AppColors.surface,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(height: AppSpacing.sm),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: IleCircularBackButton(
-                  onPressed: () => context.pop(),
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        IleAlert.showSnackBar(
+          context: context,
+          message: 'Email verification is required to activate your Ilé account.',
+          tone: IleAlertTone.critical,
+        );
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.surface,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => context.go(AppRoutes.login),
+                      icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                      label: const Text('Back to Login'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.charcoal,
+                        textStyle: AppTypography.caption.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded),
+                      onPressed: () => context.go(AppRoutes.welcome),
+                      tooltip: 'Cancel registration',
+                    ),
+                  ],
                 ),
-              ),
               const SizedBox(height: AppSpacing.xxl),
               Text(
                 AppStrings.otpTitle,
@@ -244,6 +287,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 }

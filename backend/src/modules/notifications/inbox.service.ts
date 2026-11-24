@@ -1,6 +1,7 @@
 import crypto from "crypto"
 import { and, desc, eq, isNull, sql } from "drizzle-orm"
 import { getDb, schema } from "../../db/client"
+import { validateUserId } from "./recipient-validator"
 
 export type InboxCreateInput = {
   userId: string
@@ -14,8 +15,14 @@ export type InboxCreateInput = {
 }
 
 export const inboxService = {
-  async upsertInboxItem(input: InboxCreateInput) {
-    const db = getDb()
+  async upsertInboxItem(input: InboxCreateInput, tx?: any) {
+    const userValidation = validateUserId(input.userId)
+    if (!userValidation.valid) {
+      throw new Error(`[Inbox] ${userValidation.error}`)
+    }
+    const cleanUserId = userValidation.value
+
+    const db = tx || getDb()
     try {
       const [existing] = await db
         .select()
@@ -28,8 +35,8 @@ export const inboxService = {
         .insert(schema.notificationInbox)
         .values({
           id: `ninbox_${crypto.randomUUID()}`,
-          userId: input.userId,
-          eventType: input.eventType,
+          userId: cleanUserId,
+          eventType: input.eventType || "NOTIFICATION",
           title: input.title,
           body: input.body,
           entityType: input.entityType || "booking",

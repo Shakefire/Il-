@@ -134,7 +134,7 @@ interface HostProperty {
   city: string;
   neighborhood: string;
   pricePerNight: number;
-  status: "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "REJECTED" | "SUSPENDED";
+  status: "DRAFT" | "PENDING_REVIEW" | "PUBLISHED" | "REJECTED" | "SUSPENDED" | "ARCHIVED";
   rejectionReason?: string;
   coverImage: string;
   createdAt: string;
@@ -186,10 +186,11 @@ interface HostPayout {
   accountNumber: string;
   accountName: string;
   status: "SCHEDULED" | "READY_FOR_PAYOUT" | "PROCESSING" | "DISBURSED" | "PAID" | "HELD" | "FAILED" | "CANCELLED" | "REVERSED" | string;
+  transferStatus?: string | null;
+  transferFailureReason?: string | null;
   scheduledFor: string;
   disbursedAt?: string;
   paystackTransferRef?: string;
-  transferFailureReason?: string;
   notes?: string;
   createdAt: string;
   bookingRef: string;
@@ -213,10 +214,19 @@ export default function HostDashboardPage() {
   const [payouts, setPayouts] = useState<HostPayout[]>([]);
   const [loadingPayouts, setLoadingPayouts] = useState(false);
   const [wallet, setWallet] = useState<{
-    balances: { pending: number; available: number; processing: number; paid: number };
+    balances: {
+      pending: number;
+      available: number;
+      processing: number;
+      paid: number;
+      totalEarnings?: number;
+      failedWithdrawalCount?: number;
+      failedWithdrawals?: number;
+    };
     bank?: { verified?: boolean; accountNumberMasked?: string; bankName?: string | null };
     feePolicy?: { note?: string };
   } | null>(null);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
   const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [withdrawNotice, setWithdrawNotice] = useState<string | null>(null);
   const [calendarSelectedPropId, setCalendarSelectedPropId] = useState<string>("");
@@ -694,9 +704,11 @@ export default function HostDashboardPage() {
   };
 
   const handleWithdrawAvailable = async () => {
+    const availableNow = wallet?.balances?.available || 0;
+    const typedAmount = withdrawAmount.trim() ? Math.floor(Number(withdrawAmount)) : availableNow;
     const gate = validateHostWithdrawRequest({
-      availableNaira: wallet?.balances?.available || 0,
-      requestedNaira: wallet?.balances?.available || 0,
+      availableNaira: availableNow,
+      requestedNaira: typedAmount,
       bankVerified: !!wallet?.bank?.verified,
       pendingNaira: wallet?.balances?.pending || 0,
     });
@@ -1361,7 +1373,30 @@ export default function HostDashboardPage() {
         {activeTab === "overview" && (
           <OverviewPanel
             stats={stats}
-            pendingRequests={bookings.filter((b) => (b.bookingStatus || b.status) === "PENDING_HOST")}
+            pendingRequests={bookings
+              .filter((b) => (b.bookingStatus || b.status) === "PENDING_HOST")
+              .map((b) => ({
+                id: b.id,
+                referenceCode: b.referenceCode,
+                propertyId: b.propertyId,
+                propertyTitle: b.propertyTitle,
+                guestFirstName: b.guestFirstName,
+                guestLastName: b.guestLastName,
+                guestEmail: b.guestEmail,
+                guestPhone: b.guestPhone,
+                guestCount: b.guestCount || b.totalGuests || 1,
+                checkInDate: b.checkInDate || b.startDate || "",
+                checkOutDate: b.checkOutDate || b.endDate || "",
+                numberOfNights: b.numberOfNights || b.totalNights || 0,
+                status: b.status || b.bookingStatus || "PENDING_HOST",
+                bookingStatus: b.bookingStatus,
+                hostNetAmount: b.hostNetAmount,
+                accommodationSubtotal: b.accommodationSubtotal,
+                totalAmount: b.totalAmount ?? b.totalPrice,
+                hostResponseDeadlineAt: b.hostResponseDeadlineAt,
+                paymentDeadlineAt: b.paymentDeadlineAt,
+                createdAt: b.createdAt,
+              }))}
             walletAvailable={wallet?.balances?.available || stats?.earnings?.wallet?.available || 0}
             onOpenReservations={() => setActiveTab("bookings")}
             onOpenListings={() => setActiveTab("properties")}
@@ -1643,6 +1678,12 @@ export default function HostDashboardPage() {
               </div>
             ) : (
               <div className="space-y-4">
+                <p className="text-sm text-[#4A4A45]">
+                  <Link href="/support" className="font-semibold text-[#0B5D45] underline">
+                    Open a support case
+                  </Link>{" "}
+                  about a reservation. Refund requests are reviewed by admin and do not move money.
+                </p>
                 {bookingActionError && (
                   <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm" role="alert">
                     {bookingActionError}
@@ -1663,17 +1704,14 @@ export default function HostDashboardPage() {
                           <th className="py-3.5 px-4 font-semibold">Ref / Property</th>
                           <th className="py-3.5 px-4 font-semibold">Guest</th>
                           <th className="py-3.5 px-4 font-semibold">Dates &amp; Stay</th>
-                          <th className="py-3.5 px-4 font-semibold">Accommodation Value</th>
-                          <th className="py-3.5 px-4 font-semibold">Your Net Payout</th>
+                          <th className="py-3.5 px-4 font-semibold">Your earnings</th>
                           <th className="py-3.5 px-4 font-semibold">Status</th>
                           <th className="py-3.5 px-4 font-semibold">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#E7E5E0]">
                         {bookings.map((b) => {
-                          const subtotal = b.accommodationSubtotal || (b.nightlyPrice ? b.nightlyPrice * (b.numberOfNights || b.totalNights || 1) : b.totalPrice || b.totalAmount || 0);
-                          const commission = b.hostCommissionAmount && b.hostCommissionAmount > 0 ? b.hostCommissionAmount : Math.round(subtotal * 0.1);
-                          const netPayout = b.hostNetAmount && b.hostNetAmount > 0 ? b.hostNetAmount : subtotal - commission;
+                          const netPayout = b.hostNetAmount && b.hostNetAmount > 0 ? b.hostNetAmount : 0;
                           const startDate = b.startDate || b.checkInDate || "";
                           const endDate = b.endDate || b.checkOutDate || "";
                           const nights = b.totalNights || b.numberOfNights || 1;
@@ -1702,9 +1740,6 @@ export default function HostDashboardPage() {
                                 <div className="text-xs text-[#6B6B67]">
                                   {nights} {nights === 1 ? "night" : "nights"} · {guests} {guests === 1 ? "guest" : "guests"}
                                 </div>
-                              </td>
-                              <td className="py-4 px-4 whitespace-nowrap text-xs text-[#6B6B67]">
-                                {formatNaira(subtotal)}
                               </td>
                               <td className="py-4 px-4 whitespace-nowrap">
                                 <div className="font-bold text-emerald-800 text-sm">
@@ -2069,10 +2104,26 @@ export default function HostDashboardPage() {
                     <AnimatedCurrency value={wallet?.balances?.available || 0} />
                   </div>
                   <div className="text-xs text-[#8B8B86] mt-1">
-                    Held for settlement: {formatNaira(wallet?.balances?.pending || 0)} · Transferring:{" "}
-                    {formatNaira(wallet?.balances?.processing || 0)}
+                    Total {formatNaira(wallet?.balances?.totalEarnings || ((wallet?.balances?.pending || 0) + (wallet?.balances?.available || 0) + (wallet?.balances?.processing || 0) + (wallet?.balances?.paid || 0)))}
+                    {" · "}Held {formatNaira(wallet?.balances?.pending || 0)}
+                    {" · "}In progress {formatNaira(wallet?.balances?.processing || 0)}
+                    {" · "}Successful {formatNaira(wallet?.balances?.paid || 0)}
+                    {" · "}Failed attempts {wallet?.balances?.failedWithdrawalCount ?? wallet?.balances?.failedWithdrawals ?? 0}
                   </div>
                 </div>
+                <label className="block text-[11px] font-semibold text-[#6B6B67]" htmlFor="host-withdraw-amount">
+                  Amount to withdraw
+                  <input
+                    id="host-withdraw-amount"
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                    placeholder="Leave blank for the full available balance"
+                    className="mt-1 w-full min-h-[44px] rounded-xl border border-[#E7E5E0] px-3 text-sm text-[#171717]"
+                  />
+                </label>
                 <button
                   type="button"
                   disabled={withdrawBusy || !(wallet?.balances?.available)}
@@ -2081,7 +2132,7 @@ export default function HostDashboardPage() {
                   aria-label="Withdraw available earnings"
                 >
                   {withdrawBusy ? <Loader2 size={14} className="animate-spin" /> : <ArrowUpRight size={14} />}
-                  Withdraw available
+                  Withdraw
                 </button>
                 {withdrawNotice && (
                   <p className="text-[11px] text-[#6B6B67]">{withdrawNotice}</p>
@@ -2187,8 +2238,8 @@ export default function HostDashboardPage() {
                             {p.scheduledFor ? new Date(p.scheduledFor).toLocaleDateString() : "Immediate"}
                           </td>
                           <td className="py-4 px-4 whitespace-nowrap">
-                            {getPayoutStatusBadge(p.status)}
-                            {p.status === "FAILED" && p.transferFailureReason && (
+                            {getPayoutStatusBadge(p.transferStatus === "FAILED" && p.status === "READY_FOR_PAYOUT" ? "FAILED" : p.status)}
+                            {(p.status === "FAILED" || p.transferStatus === "FAILED") && p.transferFailureReason && (
                               <div className="text-[11px] text-rose-600 mt-1 max-w-xs truncate" title={p.transferFailureReason}>
                                 {p.transferFailureReason}
                               </div>

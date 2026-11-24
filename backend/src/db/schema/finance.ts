@@ -50,10 +50,10 @@ export const payouts = pgTable("payouts", {
   id: varchar("id", { length: 100 }).primaryKey(),
   bookingId: varchar("booking_id", { length: 100 })
     .notNull()
-    .references(() => bookings.id, { onDelete: "cascade" }),
+    .references(() => bookings.id, { onDelete: "restrict" }),
   hostId: varchar("host_id", { length: 100 })
     .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+    .references(() => users.id, { onDelete: "restrict" }),
   amount: integer("amount").notNull(),
   currency: varchar("currency", { length: 10 }).notNull().default("NGN"),
   bankCode: varchar("bank_code", { length: 20 }),
@@ -85,7 +85,7 @@ export const refunds = pgTable("refunds", {
   id: varchar("id", { length: 100 }).primaryKey(),
   bookingId: varchar("booking_id", { length: 100 })
     .notNull()
-    .references(() => bookings.id, { onDelete: "cascade" }),
+    .references(() => bookings.id, { onDelete: "restrict" }),
   guestId: varchar("guest_id", { length: 100 })
     .references(() => users.id, { onDelete: "set null" }),
   grossPaid: integer("gross_paid").notNull(),

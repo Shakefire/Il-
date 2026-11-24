@@ -1,3 +1,60 @@
+export interface ThingsToKnow {
+  checkInAfter: string;
+  checkOutBefore: string;
+  checkInMethod: string;
+  maxOvernightGuests: number;
+  petsAllowed: boolean;
+  smokingAllowed: boolean;
+  partiesAllowed: boolean;
+  quietHours: string;
+  customRules: string[];
+  safetyAndPower: {
+    hasSolarInverter: boolean;
+    hasBackupGenerator: boolean;
+    hasExteriorCCTV: boolean;
+    hasSmokeAlarm: boolean;
+    hasArmedEstateSecurity: boolean;
+    powerScheduleNote: string;
+  };
+  cautionFeeNgn: number;
+  cancellationPolicy: "FLEXIBLE_48H" | "MODERATE_5D" | "STRICT";
+}
+
+/**
+ * Empty / honest defaults only. Do not invent check-in times, smart locks,
+ * Solar+Inverter flags, CCTV, or caution fees when the listing has no stored data.
+ */
+export function defaultThingsToKnow(prop?: any): ThingsToKnow {
+  const maxGuests = prop?.maxGuests ?? 2;
+  const powerType = String(prop?.powerType || "").toLowerCase();
+  const hasSolar =
+    powerType.includes("solar") || powerType.includes("inverter")
+      ? true
+      : false;
+  const hasGenerator = powerType.includes("gen") ? true : false;
+  return {
+    checkInAfter: "",
+    checkOutBefore: "",
+    checkInMethod: "",
+    maxOvernightGuests: maxGuests,
+    petsAllowed: false,
+    smokingAllowed: false,
+    partiesAllowed: false,
+    quietHours: "",
+    customRules: [],
+    safetyAndPower: {
+      hasSolarInverter: hasSolar,
+      hasBackupGenerator: hasGenerator,
+      hasExteriorCCTV: false,
+      hasSmokeAlarm: false,
+      hasArmedEstateSecurity: false,
+      powerScheduleNote: prop?.powerDescription || "",
+    },
+    cautionFeeNgn: 0,
+    cancellationPolicy: "FLEXIBLE_48H",
+  };
+}
+
 import { eq, inArray, count, and, asc, desc, or, gte, lte, lt, gt, sql, isNull } from "drizzle-orm";
 import { getDb, schema } from "../../db/client";
 import { offsetCoordinates } from "../../lib/geocoding";
@@ -11,7 +68,8 @@ export function enrichProperty(
   prop: any,
   images: any[],
   amenities: any[],
-  host: any
+  host: any,
+  isSummary: boolean = false
 ) {
   const coords = offsetCoordinates(prop.latitude, prop.longitude);
 
@@ -20,7 +78,9 @@ export function enrichProperty(
     slug: prop.slug,
     title: prop.title,
     tagline: prop.tagline,
-    description: prop.description,
+    description: isSummary
+      ? (prop.tagline || (prop.description ? prop.description.slice(0, 180) : ""))
+      : prop.description,
     status: prop.status,
     propertyType: prop.propertyType,
     spaceType: prop.spaceType,
@@ -40,8 +100,10 @@ export function enrichProperty(
     verified: prop.verified,
     featured: prop.featured,
     powerType: prop.powerType,
-    images: images.length > 0 ? images.map((img: any) => img.url || img) : [prop.coverImage],
-    amenities,
+    images: images.length > 0
+      ? (isSummary ? images.slice(0, 5) : images).map((img: any) => img.url || img)
+      : [prop.coverImage],
+    amenities: isSummary ? amenities.slice(0, 8) : amenities,
     coordinates: {
       lat: coords.lat,
       lng: coords.lng,
@@ -60,6 +122,19 @@ export function enrichProperty(
           avatar: host.avatarUrl || "/images/default-avatar.png",
         }
       : { name: "Host", avatar: "/images/default-avatar.png" },
+    ...(isSummary
+      ? {}
+      : {
+          thingsToKnow: {
+            ...defaultThingsToKnow(prop),
+            ...(prop.thingsToKnow || prop.things_to_know || {}),
+            safetyAndPower: {
+              ...defaultThingsToKnow(prop).safetyAndPower,
+              ...((prop.thingsToKnow?.safetyAndPower || prop.things_to_know?.safetyAndPower) || {}),
+            },
+            cautionFeeNgn: 0,
+          },
+        }),
   };
 }
 
@@ -185,7 +260,7 @@ export async function getPublishedProperties(pagination: { limit: number; offset
     const isReserved = reservedIds.has(prop.id);
 
     return {
-      ...enrichProperty(prop, propImages, propAmenities, host),
+      ...enrichProperty(prop, propImages, propAmenities, host, true),
       isReserved,
     };
   });

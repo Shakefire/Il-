@@ -58,6 +58,16 @@ void main() {
       'Garden duplex',
     );
     expect(StayDisplay.title(_stay()), 'Maitama suite');
+    expect(
+      StayDisplay.title(
+        _stay(title: 'Phase 3 Signature Stay p3a_1794230613548'),
+      ),
+      'Phase 3 Signature Stay',
+    );
+    expect(
+      StayDisplay.sanitizeTitle('Lagoon Penthouse prop_99'),
+      'Lagoon Penthouse',
+    );
   });
 
   test('amenity pill uses the host label only', () {
@@ -94,19 +104,31 @@ void main() {
     );
     expect(find.text('Not now'), findsNothing);
     expect(find.text('Continue with phone or email'), findsOneWidget);
+    expect(find.text('Create account'), findsOneWidget);
     expect(find.text('Instant Book'), findsNothing);
   });
 
-  testWidgets('sample pass is labeled and has no gate code', (tester) async {
+  testWidgets('guest sign-in gate has empty state, not demo catalog', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: const Scaffold(body: SampleStayPass()),
+        home: const Scaffold(
+          body: GuestSignInGate(
+            returnPath: '/bookings',
+            title: 'No bookings yet',
+            message: 'Sign in to see requests and confirmed stays.',
+          ),
+        ),
       ),
     );
-    expect(find.text('SAMPLE'), findsOneWidget);
-    expect(find.text('Not your reservation'), findsOneWidget);
+    expect(find.text('No bookings yet'), findsOneWidget);
+    expect(find.text('SAMPLE'), findsNothing);
     expect(find.textContaining('Armed Security'), findsNothing);
     expect(find.textContaining('24/7 Power'), findsNothing);
+    expect(find.text('Sign in'), findsOneWidget);
+    expect(find.text('Create account'), findsOneWidget);
+    expect(find.text('Not now'), findsNothing);
   });
 }

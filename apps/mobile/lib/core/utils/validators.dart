@@ -1,6 +1,6 @@
 import '../constants/app_strings.dart';
 
-/// Local form validators for mock auth screens (no backend).
+/// Local form validators for auth screens.
 abstract final class Validators {
   static final RegExp _emailPattern = RegExp(
     r'^[^\s@]+@[^\s@]+\.[^\s@]+$',

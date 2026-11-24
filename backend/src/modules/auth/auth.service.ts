@@ -12,6 +12,10 @@ import {
   passwordResetEmail,
   passwordResetSuccessEmail,
 } from "../notifications/notifications.service";
+import {
+  validateAndNormalizePhone,
+  validateEmail,
+} from "../notifications/recipient-validator";
 
 export const RegisterSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
@@ -406,7 +410,11 @@ export const authService = {
 
   async sendPhoneOtp(userId: string, phone: string) {
     const db = getDb();
-    const cleanPhone = phone.trim();
+    const phoneCheck = validateAndNormalizePhone(phone, "NG");
+    if (!phoneCheck.valid) {
+      throw new Error(phoneCheck.error);
+    }
+    const cleanPhone = phoneCheck.value;
 
     const [user] = await db
       .select()
@@ -661,7 +669,16 @@ export const authService = {
       patch.lastName = data.lastName.trim();
     }
     if (typeof data.phone === "string") {
-      patch.phone = data.phone.trim() || null;
+      const trimmed = data.phone.trim();
+      if (trimmed) {
+        const phoneCheck = validateAndNormalizePhone(trimmed, "NG");
+        if (!phoneCheck.valid) {
+          throw new Error(phoneCheck.error);
+        }
+        patch.phone = phoneCheck.value;
+      } else {
+        patch.phone = null;
+      }
       patch.phoneVerified = false;
     }
     if (Object.keys(patch).length <= 1) {

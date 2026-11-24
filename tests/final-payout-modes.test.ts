@@ -12,7 +12,8 @@ import {
 } from "../backend/src/modules/payments/payments.service"
 
 process.env.PAYSTACK_MOCK_TRANSFERS = "true"
-process.env.NODE_ENV = process.env.NODE_ENV || "test"
+const testEnv = process.env as Record<string, string | undefined>
+if (!testEnv.NODE_ENV) testEnv.NODE_ENV = "test"
 
 const futureDates = (startOffsetDays: number, nights: number) => {
   const checkIn = new Date(Date.now() + startOffsetDays * 86400000)

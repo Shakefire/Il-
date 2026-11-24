@@ -3,10 +3,35 @@ import { z } from "zod";
 import { authService, RegisterSchema, RegisterOwnerSchema, LoginSchema } from "./auth.service";
 import { createSessionToken, authenticateRequest, extractSession } from "../../lib/security";
 import { env } from "../../config/env";
+import { clientIp, consumeRateLimitAsync } from "../../lib/rate-limit";
+
+const limitAuth = async (request: any, reply: any, bucket: string, limit = 10) => {
+  const result = await consumeRateLimitAsync(
+    `${bucket}:${clientIp(request)}`,
+    limit,
+    15 * 60 * 1000,
+    "strict"
+  );
+  if (!result.ok) {
+    const status = result.backend === "reject" ? 503 : 429;
+    reply.header("Retry-After", String(result.retryAfterSec || 30));
+    reply.status(status).send({
+      error:
+        status === 503
+          ? "Security checks temporarily unavailable. Try again shortly."
+          : "Too many attempts. Try again shortly.",
+      retryAfterSec: result.retryAfterSec,
+      retryable: true,
+    });
+    return false;
+  }
+  return true;
+};
 
 export async function authRoutes(fastify: FastifyInstance) {
   // POST /api/auth/register-owner — Primary public signup for Property Owners
   fastify.post("/register-owner", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "register-owner"))) return;
     const parse = RegisterOwnerSchema.safeParse(request.body);
     if (!parse.success) {
       return reply.status(400).send({ error: parse.error.issues[0]?.message || "Validation failed" });
@@ -47,6 +72,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/verify-email
   fastify.post("/verify-email", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "verify-email", 20))) return;
     const session = extractSession(request);
     const { code, email } = (request.body || {}) as { code?: string; email?: string };
 
@@ -93,6 +119,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/resend-email-otp
   fastify.post("/resend-email-otp", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "resend-email-otp", 5))) return;
     const session = extractSession(request);
     const { email } = (request.body || {}) as { email?: string };
     const targetEmail = typeof email === "string" && email.trim() ? email.trim().toLowerCase() : undefined;
@@ -114,6 +141,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/send-phone-otp
   fastify.post("/send-phone-otp", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "send-phone-otp", 5))) return;
     const session = await authenticateRequest(request, reply);
     if (!session) return;
 
@@ -132,6 +160,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/verify-phone
   fastify.post("/verify-phone", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "verify-phone", 10))) return;
     const session = await authenticateRequest(request, reply);
     if (!session) return;
 
@@ -154,6 +183,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/register (legacy / guest registration support)
   fastify.post("/register", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "register"))) return;
     const parse = RegisterSchema.safeParse(request.body);
     if (!parse.success) {
       return reply.status(400).send({ error: parse.error.issues[0]?.message || "Validation failed" });
@@ -189,6 +219,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/login
   fastify.post("/login", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "login", 15))) return;
     const parse = LoginSchema.safeParse(request.body);
     if (!parse.success) {
       return reply.status(400).send({ error: parse.error.issues[0]?.message || "Validation failed" });
@@ -261,6 +292,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/forgot-password
   fastify.post("/forgot-password", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "forgot-password", 5))) return;
     const { email } = request.body as any;
     if (!email || typeof email !== "string" || !email.includes("@")) {
       return reply.status(400).send({ error: "Please enter a valid email address." });
@@ -277,6 +309,7 @@ export async function authRoutes(fastify: FastifyInstance) {
 
   // POST /api/auth/reset-password
   fastify.post("/reset-password", async (request, reply) => {
+    if (!(await limitAuth(request, reply, "reset-password", 8))) return;
     const { token, password } = (request.body || {}) as any;
     if (!token || typeof token !== "string") {
       return reply.status(400).send({ error: "A valid password reset token is required." });

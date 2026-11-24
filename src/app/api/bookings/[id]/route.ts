@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateNextRequest } from "@/lib/serverAuth";
-import { bookingsService } from "@/../backend/src/modules/bookings/bookings.service";
+import { authorizeBookingView, bookingsService } from "@/../backend/src/modules/bookings/bookings.service";
 
 export const dynamic = "force-dynamic";
 
@@ -20,27 +20,13 @@ export async function GET(
 
   try {
     const result = await bookingsService.getBooking(id);
-    const booking = result.booking;
-
-    // Check authorization: Must be the guest, the property host, an admin, match accessToken, or match guest email
-    const isGuest = session && booking.guestId && session.userId === booking.guestId;
-    const isHost = session && result.property && session.userId === result.property.hostId;
-    const isAdmin = session && session.role === "admin";
-    const isTokenValid = Boolean(token && booking.accessToken && token === booking.accessToken);
-    const isEmailValid = Boolean(
-      guestEmailParam &&
-      booking.guestEmail &&
-      guestEmailParam.toLowerCase().trim() === booking.guestEmail.toLowerCase().trim()
-    );
-
-    if (!isGuest && !isHost && !isAdmin && !isTokenValid && !isEmailValid) {
-      return NextResponse.json(
-        { error: "Unauthorized access to booking details. Please log in or provide a valid access token." },
-        { status: 403 }
-      );
-    }
-
-    return NextResponse.json(result);
+    const safe = authorizeBookingView(result, {
+      userId: session?.userId || null,
+      role: session?.role || null,
+      accessToken: token,
+      email: guestEmailParam,
+    });
+    return NextResponse.json(safe);
   } catch (err: any) {
     return NextResponse.json(
       { error: err.message || "Booking not found" },

@@ -5,6 +5,7 @@ import {
   handlePaystackWebhook,
 } from "./payments.service";
 import { BankResolutionService } from "./bank-resolution.service";
+import { clientIp, consumeRateLimitAsync } from "../../lib/rate-limit";
 
 export async function paymentsRoutes(fastify: FastifyInstance) {
   // ─── GET /api/payments/banks — Nigerian bank list (Paystack + fallback) ───
@@ -20,6 +21,24 @@ export async function paymentsRoutes(fastify: FastifyInstance) {
 
   // ─── POST /api/payments/initialize ───
   fastify.post("/initialize", async (request, reply) => {
+    const limit = await consumeRateLimitAsync(
+      `pay-init:${clientIp(request)}`,
+      15,
+      10 * 60 * 1000,
+      "strict"
+    );
+    if (!limit.ok) {
+      const status = limit.backend === "reject" ? 503 : 429;
+      reply.header("Retry-After", String(limit.retryAfterSec || 30));
+      return reply.status(status).send({
+        error:
+          status === 503
+            ? "Security checks temporarily unavailable. Try again shortly."
+            : "Too many payment attempts. Try again shortly.",
+        retryAfterSec: limit.retryAfterSec,
+        retryable: true,
+      });
+    }
     const body = request.body as {
       bookingId?: string;
       referenceCode?: string;

@@ -129,18 +129,99 @@ export const api = {
     return body;
   },
 
-  async getBookingContact(bookingId: string, accessToken?: string) {
-    const headers: Record<string, string> = { ...getAuthHeader() };
-    if (accessToken) headers["X-Access-Token"] = accessToken;
-    const query = accessToken ? `?token=${encodeURIComponent(accessToken)}` : "";
-
-    const res = await fetch(`/api/bookings/${bookingId}/contact${query}`, {
-      headers,
+  async getBookingContact(bookingId: string, _accessToken?: string) {
+    const res = await fetch(`/api/bookings/${bookingId}/contact`, {
+      headers: getAuthHeader(),
       credentials: "include",
     });
 
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error || "Access denied to quarantine details");
+    if (!res.ok) throw new Error(body.error || "Sign in to view stay details.");
+    return body;
+  },
+
+  async createReview(payload: { bookingId: string; overallRating: number; title?: string; body?: string }) {
+    const res = await fetch("/api/reviews", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeader() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not submit review");
+    return body;
+  },
+
+  async getPropertyReviews(propertyId: string) {
+    const res = await fetch(`/api/reviews/property/${encodeURIComponent(propertyId)}`, {
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not load reviews");
+    return body;
+  },
+
+  async createSupportCase(payload: { bookingId?: string; category: string; subject: string; message: string }) {
+    const res = await fetch("/api/support/cases", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeader() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not open support case");
+    return body;
+  },
+
+  async getSupportCases() {
+    const res = await fetch("/api/support/cases", {
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not load support cases");
+    return body;
+  },
+
+  async respondSupportCase(id: string, payload: { response: string; status?: string }) {
+    const res = await fetch(`/api/support/cases/${id}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeader() },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not reply");
+    return body;
+  },
+
+  async getFavourites() {
+    const res = await fetch("/api/favourites", { headers: getAuthHeader(), credentials: "include" });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not load saved stays");
+    return body;
+  },
+
+  async addFavourite(propertyId: string) {
+    const res = await fetch("/api/favourites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeader() },
+      credentials: "include",
+      body: JSON.stringify({ propertyId }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not save stay");
+    return body;
+  },
+
+  async removeFavourite(propertyId: string) {
+    const res = await fetch(`/api/favourites/${encodeURIComponent(propertyId)}`, {
+      method: "DELETE",
+      headers: getAuthHeader(),
+      credentials: "include",
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Could not remove saved stay");
     return body;
   },
 
@@ -982,6 +1063,16 @@ export const api = {
     return body;
   },
 
+  async getAdminRefundPreview(bookingId: string) {
+    const res = await fetch(
+      `/api/admin/finance/refunds/preview?bookingId=${encodeURIComponent(bookingId)}`,
+      { headers: getAuthHeader(), credentials: "include" }
+    );
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || "Failed to load refund preview");
+    return body.preview;
+  },
+
   async getAdminRefundQueue(status?: string) {
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
     const res = await fetch(`/api/admin/finance/refunds${query}`, {
@@ -992,7 +1083,13 @@ export const api = {
     return res.json();
   },
 
-  async processAdminRefund(data: { bookingId: string; reason?: string; adminNotes?: string; paystackRefundId?: string }) {
+  async processAdminRefund(data: {
+    bookingId: string;
+    reason?: string;
+    adminNotes?: string;
+    paystackRefundId?: string;
+    amountNaira?: number;
+  }) {
     const res = await fetch("/api/admin/finance/refunds", {
       method: "POST",
       headers: {
@@ -1003,7 +1100,13 @@ export const api = {
       body: JSON.stringify(data),
     });
     const body = await res.json();
-    if (!res.ok) throw new Error(body.error || "Failed to process refund");
+    if (!res.ok) {
+      const shortfall =
+        typeof body.shortfall === "number"
+          ? ` Shortfall ₦${Number(body.shortfall).toLocaleString()}. Commission available ₦${Number(body.commissionAvailable || 0).toLocaleString()}.`
+          : "";
+      throw new Error((body.error || "Failed to process refund") + shortfall);
+    }
     return body;
   },
 

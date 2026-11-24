@@ -24,7 +24,8 @@ import {
 } from "../src/lib/phase8-consistency"
 
 process.env.PAYSTACK_MOCK_TRANSFERS = "true"
-process.env.NODE_ENV = process.env.NODE_ENV || "test"
+const testEnv = process.env as Record<string, string | undefined>
+if (!testEnv.NODE_ENV) testEnv.NODE_ENV = "test"
 
 describe("Phase 8: E2E reliability, financial integrity, security", async () => {
   const db = getDb()
@@ -197,7 +198,7 @@ describe("Phase 8: E2E reliability, financial integrity, security", async () => 
       gatewayReference: `gw_p8_${ts}`,
       paidAmountNaira: created.booking.totalAmount,
       currency: "NGN",
-      channel: "card",
+      method: "CARD",
     })
     assert.ok(paid)
 
@@ -276,7 +277,7 @@ describe("Phase 8: E2E reliability, financial integrity, security", async () => 
     const withdraw = await FinanceService.requestHostWithdrawal(hostId, {
       amountNaira: ready.amount,
     })
-    assert.ok(withdraw.success || withdraw.reservedCount >= 1 || withdraw.message)
+    assert.ok(withdraw.success || withdraw.reservedAmount >= 1 || withdraw.message)
 
     const [afterWithdraw] = await db
       .select()

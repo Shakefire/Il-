@@ -134,3 +134,50 @@ export function calculateFromGuestPrice(
     serviceFee: paystackFee,
   };
 }
+
+export type PriceSource = "HOST_BASE" | "GUEST_PRICE_INVERSE";
+
+/**
+ * One pricing pass for a new booking.
+ * When hostBasePrice is set it wins: guest subtotal = round(hostBase × nights × (1 + rate)).
+ * Commission is guest subtotal − host base, once. Host entitlement is the host base (100%).
+ * When host base is absent, pricePerNight is the published guest nightly and host base is derived once.
+ */
+export function resolveStayPricing(input: {
+  pricePerNight: number;
+  hostBasePrice?: number | null;
+  nights: number;
+  commissionRate: number;
+}): PricingBreakdown & { priceSource: PriceSource } {
+  const nights = Math.max(1, Math.round(input.nights || 1));
+  const rate = Number.isFinite(input.commissionRate) ? input.commissionRate : DEFAULT_COMMISSION_RATE;
+  const hostNightly =
+    input.hostBasePrice !== undefined && input.hostBasePrice !== null && input.hostBasePrice > 0
+      ? Math.round(input.hostBasePrice)
+      : 0;
+
+  if (hostNightly > 0) {
+    const hostBaseTotal = hostNightly * nights;
+    const accommodationSubtotal = Math.round(hostBaseTotal * (1 + rate));
+    const platformCommission = accommodationSubtotal - hostBaseTotal;
+    const paystackFee = calculatePaystackFee(accommodationSubtotal);
+    const guestNightly = Math.round(accommodationSubtotal / nights);
+    return {
+      hostBaseNightlyPrice: hostNightly,
+      guestNightlyAccommodationPrice: guestNightly,
+      numberOfNights: nights,
+      accommodationSubtotal,
+      hostEarnings: hostBaseTotal,
+      platformCommission,
+      commissionRate: rate,
+      paystackFee,
+      totalGuestPayment: accommodationSubtotal + paystackFee,
+      cleaningFee: 0,
+      serviceFee: paystackFee,
+      priceSource: "HOST_BASE",
+    };
+  }
+
+  const derived = calculateFromGuestPrice(input.pricePerNight, nights, rate);
+  return { ...derived, priceSource: "GUEST_PRICE_INVERSE" };
+}
